@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <ssd_dma.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -13,9 +14,6 @@
 #include <signal.h>
 #include <sisci_types.h>
 #include <sisci_api.h>
-
-#define _STR(s) #s
-#define PROC_FILE _STR(SSD_DMA_FILE_NAME)
 
 
 /* Local segment handle */
@@ -43,6 +41,8 @@ void terminate_program()
     pthread_cond_signal(&cv_terminate);
     pthread_mutex_unlock(&mtx_terminate);
 }
+
+
 
 
 /* Local segment event */
@@ -203,7 +203,62 @@ static int server(segment_t* segment, unsigned adapter)
 
 static int client(int module, int file, unsigned remote_node, unsigned adapter, unsigned seg_id, size_t size)
 {
-    return 0;
+    sci_error_t err;
+    sci_desc_t sd;
+    sci_remote_segment_t segment;
+    size_t remote_size;
+    volatile void* ptr;
+    sci_map_t map;
+    int ret = 0;
+
+    SCIOpen(&sd, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to open descriptor\n");
+        return 1;
+    }
+
+    SCIConnectSegment(sd, &segment, remote_node, seg_id, adapter, NULL, NULL, SCI_INFINITE_TIMEOUT, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        ret = 1;
+        fprintf(stderr, "Failed to connect to remote segment %u on node %u\n", seg_id, remote_node);
+        goto close_sisci;
+    }
+
+    remote_size = SCIGetRemoteSegmentSize(segment);
+    if (remote_size < size)
+    {
+        size = remote_size;
+    }
+
+    ptr = SCIMapRemoteSegment(segment, &map, 0, size, NULL, 0, &err);
+    if (ptr == NULL || err != SCI_ERR_OK)
+    {
+        ret = 2;
+        fprintf(stderr, "Failed to map remote segment\n");
+        goto disconnect;
+    }
+
+    // TODO
+    
+    do
+    {
+        SCIUnmapSegment(map, 0, &err);
+    }
+    while (err == SCI_ERR_BUSY);
+
+disconnect:
+    do
+    {
+        SCIDisconnectSegment(segment, 0, &err);
+    }
+    while (err == SCI_ERR_BUSY);
+
+close_sisci:
+    SCIClose(sd, 0, &err);
+
+    return ret;
 }
 
 
@@ -296,7 +351,7 @@ int main(int argc, char** argv)
             exit(2);
         }
 
-        if ((module_fd = open(PROC_FILE, O_SYNC | O_RDONLY)) < 0)
+        if ((module_fd = open(SSD_DMA_FILE_NAME, O_SYNC | O_RDONLY)) < 0)
         {
             close(file_fd);
             fprintf(stderr, "Failed to open fd to module: %s\n", strerror(errno));
