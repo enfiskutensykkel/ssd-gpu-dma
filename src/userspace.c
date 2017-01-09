@@ -14,6 +14,9 @@
 #include <sisci_types.h>
 #include <sisci_api.h>
 
+#define _STR(s) #s
+#define PROC_FILE _STR(SSD_DMA_FILE_NAME)
+
 
 /* Local segment handle */
 typedef struct {
@@ -293,7 +296,7 @@ int main(int argc, char** argv)
             exit(2);
         }
 
-        if ((module_fd = open("/proc/ssd-gpu-dma", O_SYNC)) < 0)
+        if ((module_fd = open(PROC_FILE, O_SYNC | O_RDONLY)) < 0)
         {
             close(file_fd);
             fprintf(stderr, "Failed to open fd to module: %s\n", strerror(errno));

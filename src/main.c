@@ -3,7 +3,7 @@
 MODULE_AUTHOR("Jonas Markussen");
 MODULE_DESCRIPTION("Use SSD DMA to transfer across PCIe NTB");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1"); // FIXME: Create this with define in Makefile
+MODULE_VERSION(SSD_DMA_VERSION);
 
 
 static int __init ssd_dma_entry(void)
