@@ -1,25 +1,40 @@
-CC	:= gcc
-CFLAGS	:= -Wall -Wextra -pedantic -D_REENTRANT -Wno-unused-parameter
-
+TARGET	:= ssd_dma
+OBJECTS := src/main.o
 DISHOME := /opt/DIS
+RELEASE	:= $(shell uname -r)
 
-INCLUDE := -I$(DISHOME)/include -I$(DISHOME)/include/dis -Iinclude
-LDLIBS	:= -lsisci -lpthread
-LDFLAGS	:= -L$(DISHOME)/lib64
+obj-m := $(TARGET).o
+$(TARGET)-objs := $(OBJECTS)
+KDIR ?= /lib/modules/$(RELEASE)/build
 
-.PHONY: all clean module
+ifeq ($(KERNELRELEASE),)
+	CC 	:= gcc
+	CFLAGS	:= -Wall -Wextra -pedantic -D_REENTRANT -Wno-unused-parameter
+	INCLUDE	:= -I$(DISHOME)/include -I$(DISHOME)/include/dis -Iinclude
+	LDLIBS	:= -lsisci -lpthread
+	LDFLAGS	:= -L$(DISHOME)/lib64
+endif
 
-all: user 
+.PHONY: default reload unload load
+
+default: modules userspace
+
+userspace: src/userspace.c
+	$(CC) -std=gnu99 -o $@ $(CFLAGS) $(INCLUDE) $(LDFLAGS) $^ $(LDLIBS)
+
+
+reload: unload load
+
+unload:
+	-rmmod $(TARGET).ko
+
+load:
+	insmod $(TARGET).ko
 
 clean:
-	-$(RM) client server build/*.o
-	$(MAKE) -C module/ clean
+	-$(RM) userspace
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
+	
+%:
+	$(MAKE) -C $(KDIR) M=$(PWD) $@
 
-module: 
-	$(MAKE) -C module/
-
-user: userspace/user.o
-	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
-
-%.o: %.c
-	$(CC) -std=gnu99 $(CFLAGS) $(INCLUDE) -o $@ $< -c

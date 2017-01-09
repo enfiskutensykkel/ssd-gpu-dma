@@ -1,3 +1,18 @@
-user
+# vim backup files
 .*.swp
+
+# Object files
 *.o
+*.ko
+
+# Intermediate files
+*.mod.c
+.*.cmd
+
+# Kernel symbols
+Module.symvers
+modules.order
+.tmp_versions/*
+
+# Userspace binary
+userspace
