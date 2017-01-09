@@ -2,6 +2,7 @@
 #include <linux/proc_fs.h>
 #include <linux/fs.h>
 #include <asm/uaccess.h>
+#include <ssd_dma.h>
 
 MODULE_AUTHOR("Jonas Markussen");
 MODULE_DESCRIPTION("Use SSD DMA to transfer across PCIe NTB");
@@ -10,26 +11,34 @@ MODULE_VERSION(SSD_DMA_VERSION);
 
 
 /* Kernel module entry point declaration */
-static long ioctl(struct file*, unsigned int, unsigned long);
+static long ssd_dma_ioctl(struct file*, unsigned int, unsigned long);
+
 
 /* Define file operations for doing ioctl */
 static const struct file_operations ioctl_fops = {
     .owner = THIS_MODULE,
-    .unlocked_ioctl = ioctl,
+    .unlocked_ioctl = ssd_dma_ioctl,
 };
 
 
 /* Entry point for the kernel module */
-static long ioctl(struct file* file, unsigned int cmd, unsigned long arg)
+static long ssd_dma_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 {
+    long retval;
+
     switch (cmd)
     {
+        case SSD_DMA_START_TRANSFER:
+            retval = 0;
+            printk(KERN_DEBUG "we're in!\n");
+            break;
+
         default:
-            printk(KERN_WARNING "Unknown ioctl: %u\n", cmd);
-            return -EINVAL;
+            retval = -EINVAL;
+            break;
     }
 
-    return 0;
+    return retval;
 }
 
 

@@ -1,4 +1,4 @@
-#define _GNU_SOURCE
+//#define _GNU_SOURCE
 #include <ssd_dma.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <linux/ioctl.h>
+#include <linux/fs.h>
 #include <signal.h>
 #include <sisci_types.h>
 #include <sisci_api.h>
@@ -43,6 +44,26 @@ void terminate_program()
 }
 
 
+static int read_remote(int mdesc, int fdesc, size_t blk_sz, volatile void* ptr, size_t len)
+{
+    int rv;
+    struct start_job job;
+
+    job.file_desc = fdesc;
+    job.block_size = blk_sz;
+    job.num_blocks = len / blk_sz;
+    job.file_pos = 0;
+    job.mem_ptr = ptr;
+    job.offset = 0;
+
+    rv = ioctl(mdesc, SSD_DMA_START_TRANSFER, &job);
+    if (rv < 0)
+    {
+        fprintf(stderr, "ioctl failed: %s\n", strerror(-rv));
+    }
+
+    return rv;
+}
 
 
 /* Local segment event */
@@ -201,7 +222,7 @@ static int server(segment_t* segment, unsigned adapter)
 }
 
 
-static int client(int module, int file, unsigned remote_node, unsigned adapter, unsigned seg_id, size_t size)
+static int client(int module, int file, size_t block_size, unsigned remote_node, unsigned adapter, unsigned seg_id, size_t size)
 {
     sci_error_t err;
     sci_desc_t sd;
@@ -240,7 +261,10 @@ static int client(int module, int file, unsigned remote_node, unsigned adapter, 
         goto disconnect;
     }
 
-    // TODO
+    if (read_remote(module, file, block_size, ptr, size) < 0)
+    {
+        fprintf(stderr, "Read remote failed\n");
+    }
     
     do
     {
@@ -272,6 +296,7 @@ int main(int argc, char** argv)
         { .name = "id", .has_arg = 1, .flag = NULL, .val = 'i' },
         { .name = "size", .has_arg = 1, .flag = NULL, .val = 's' },
         { .name = "file", .has_arg = 1, .flag = NULL, .val = 'f' },
+        { .name = "block", .has_arg = 1, .flag = NULL, .val = 'b' },
         { .name = "help", .has_arg = 0, .flag = NULL, .val = 'h' }
     };
 
@@ -283,11 +308,12 @@ int main(int argc, char** argv)
     unsigned segment_id = 4;
     unsigned remote_node = 0;
     unsigned size = 0x1000;
+    unsigned block_size = 512;
     const char* filename = NULL;
 
     int opt, idx;
 
-    while ((opt = getopt_long(argc, argv, "-:a:r:i:s:f:h", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, "-:a:r:i:s:f:b:h", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -335,6 +361,13 @@ int main(int argc, char** argv)
                 }
                 break;
 
+            case 'b':
+                if (convert_string(optarg, &block_size) != 0)
+                {
+                    fprintf(stderr, "Illegal block size: %s\n", optarg);
+                    exit('b');
+                }
+
             case 'f':
                 filename = optarg;
                 break;
@@ -345,7 +378,8 @@ int main(int argc, char** argv)
 
     if (remote_node || filename)
     {
-        if ((file_fd = open(filename, O_DIRECT)) < 0)
+        //if ((file_fd = open(filename, O_DIRECT)) < 0)
+        if ((file_fd = open(filename, O_RDONLY)) < 0)
         {
             fprintf(stderr, "Failed to open file: %s\n", strerror(errno));
             exit(2);
@@ -358,7 +392,7 @@ int main(int argc, char** argv)
             exit(3);
         }
 
-        client(module_fd, file_fd, remote_node, adapter, segment_id, size);
+        client(module_fd, file_fd, block_size, remote_node, adapter, segment_id, size);
         
         close(module_fd);
         close(file_fd);
