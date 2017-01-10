@@ -47,16 +47,16 @@ void terminate_program()
 static int read_remote(int mdesc, int fdesc, size_t blk_sz, volatile void* ptr, size_t len)
 {
     int rv;
-    struct start_job job;
+    struct start_transfer request;
 
-    job.file_desc = fdesc;
-    job.block_size = blk_sz;
-    job.num_blocks = len / blk_sz;
-    job.file_pos = 0;
-    job.mem_ptr = ptr;
-    job.offset = 0;
+    request.file_desc = fdesc;
+    request.block_size = blk_sz;
+    request.num_blocks = len / blk_sz;
+    request.file_pos = 0;
+    request.remote_mem_ptr = (__u64) ptr;
+    request.offset = 0;
 
-    rv = ioctl(mdesc, SSD_DMA_START_TRANSFER, &job);
+    rv = ioctl(mdesc, SSD_DMA_START_TRANSFER, &request);
     if (rv < 0)
     {
         fprintf(stderr, "ioctl failed: %s\n", strerror(-rv));

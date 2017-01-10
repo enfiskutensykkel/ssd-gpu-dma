@@ -1,5 +1,5 @@
 TARGET	:= ssd_dma
-OBJECTS := src/main.o
+OBJECTS := src/main.o src/file.o
 DISHOME := /opt/DIS
 RELEASE	:= $(shell uname -r)
 
@@ -18,11 +18,10 @@ endif
 
 .PHONY: default reload unload load
 
-default: modules userspace
+default: modules example
 
-userspace: src/userspace.c
+example: test/example.c
 	$(CC) -std=gnu99 -o $@ $(CFLAGS) $(INCLUDE) $(LDFLAGS) $^ $(LDLIBS)
-
 
 reload: unload load
 
@@ -33,7 +32,7 @@ load:
 	insmod $(TARGET).ko
 
 clean:
-	-$(RM) userspace
+	-$(RM) example
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 	
 %:
