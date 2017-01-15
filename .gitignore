@@ -15,4 +15,4 @@ modules.order
 .tmp_versions/*
 
 # Userspace binary
-userspace
+example

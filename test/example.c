@@ -1,4 +1,5 @@
 //#define _GNU_SOURCE
+#include <stdint.h>
 #include <ssd_dma.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,119 @@
 #include <sisci_types.h>
 #include <sisci_api.h>
 
+static unsigned error_codes[] = {
+    SCI_ERR_OK,
+    SCI_ERR_BUSY,
+    SCI_ERR_FLAG_NOT_IMPLEMENTED,
+    SCI_ERR_ILLEGAL_FLAG,
+    SCI_ERR_NOSPC,
+    SCI_ERR_API_NOSPC,
+    SCI_ERR_HW_NOSPC,
+    SCI_ERR_NOT_IMPLEMENTED,
+    SCI_ERR_ILLEGAL_ADAPTERNO,
+    SCI_ERR_NO_SUCH_ADAPTERNO,
+    SCI_ERR_TIMEOUT,
+    SCI_ERR_OUT_OF_RANGE,
+    SCI_ERR_NO_SUCH_SEGMENT,
+    SCI_ERR_ILLEGAL_NODEID,
+    SCI_ERR_CONNECTION_REFUSED,
+    SCI_ERR_SEGMENT_NOT_CONNECTED,
+    SCI_ERR_SIZE_ALIGNMENT,
+    SCI_ERR_OFFSET_ALIGNMENT,
+    SCI_ERR_ILLEGAL_PARAMETER,
+    SCI_ERR_MAX_ENTRIES,
+    SCI_ERR_SEGMENT_NOT_PREPARED,
+    SCI_ERR_ILLEGAL_ADDRESS,
+    SCI_ERR_ILLEGAL_OPERATION,
+    SCI_ERR_ILLEGAL_QUERY,
+    SCI_ERR_SEGMENTID_USED,
+    SCI_ERR_SYSTEM,
+    SCI_ERR_CANCELLED,
+    SCI_ERR_NOT_CONNECTED,
+    SCI_ERR_NOT_AVAILABLE,
+    SCI_ERR_INCONSISTENT_VERSIONS,
+    SCI_ERR_COND_INT_RACE_PROBLEM,
+    SCI_ERR_OVERFLOW,
+    SCI_ERR_NOT_INITIALIZED,
+    SCI_ERR_ACCESS,
+    SCI_ERR_NOT_SUPPORTED,
+    SCI_ERR_DEPRECATED,
+    SCI_ERR_NO_SUCH_NODEID,
+    SCI_ERR_NODE_NOT_RESPONDING,
+    SCI_ERR_NO_REMOTE_LINK_ACCESS,
+    SCI_ERR_NO_LINK_ACCESS,
+    SCI_ERR_TRANSFER_FAILED,
+    SCI_ERR_EWOULD_BLOCK,
+    SCI_ERR_SEMAPHORE_COUNT_EXCEEDED,
+    SCI_ERR_IRQL_ILLEGAL,
+    SCI_ERR_REMOTE_BUSY,
+    SCI_ERR_LOCAL_BUSY,
+    SCI_ERR_ALL_BUSY
+};
+
+
+/* Corresponding error strings */
+static const char* error_strings[] = {
+    "OK",
+    "Resource busy",
+    "Flag option is not implemented",
+    "Illegal flag option",
+    "Out of local resources",
+    "Out of local API resources",
+    "Out of hardware resources",
+    "Not implemented",
+    "Illegal adapter number",
+    "Adapter not found",
+    "Operation timed out",
+    "Out of range",
+    "Segment ID not found",
+    "Illegal node ID",
+    "Connection to remote node is refused",
+    "No connection to segment",
+    "Size is not aligned",
+    "Offset is not aligned",
+    "Illegal function parameter",
+    "Maximum possible physical mapping is exceeded",
+    "Segment is not prepared",
+    "Illegal address",
+    "Illegal operation",
+    "Illegal query operation",
+    "Segment ID already used",
+    "Could not get requested resource from the system",
+    "Operation cancelled",
+    "Host is not connected to remote host",
+    "Operation not available",
+    "Inconsistent driver version",
+    "Out of local resources",
+    "Host not initialized",
+    "No local or remote access for requested operation",
+    "Request not supported",
+    "Function deprecated",
+    "Node ID not found",
+    "Node does not respond",
+    "Remote link is not operational",
+    "Local link is not operational",
+    "Transfer failed",
+    "Illegal interrupt line",
+    "Remote host is busy",
+    "Local host is busy",
+    "System is busy"
+};
+/* Lookup error string from SISCI error code */
+const char* SCIGetErrorString(sci_error_t code)
+{
+    const size_t len = sizeof(error_codes) / sizeof(error_codes[0]);
+
+    for (size_t idx = 0; idx < len; ++idx)
+    {
+        if (error_codes[idx] == code)
+        {
+            return error_strings[idx];
+        }
+    }
+
+    return "Unknown error";
+}
 
 /* Local segment handle */
 typedef struct {
@@ -44,7 +158,30 @@ void terminate_program()
 }
 
 
-static int read_remote(int mdesc, int fdesc, size_t blk_sz, volatile void* ptr, size_t len)
+static uint64_t query_remote_ioaddr(sci_remote_segment_t segment)
+{
+    sci_error_t err;
+
+    sci_query_remote_segment_t query;
+
+    query.subcommand = SCI_Q_REMOTE_SEGMENT_IOADDR;
+    //query.subcommand = SCI_Q_LOCAL_SEGMENT_IOADDR;
+    query.segment = segment;
+
+    SCIQuery(SCI_Q_REMOTE_SEGMENT, &query, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "%x %x\n", err, SCI_ERR_ILLEGAL_PARAMETER);
+        fprintf(stderr, "Error in querying IO ADDR: %s\n", SCIGetErrorString(err));
+        return 0;
+    }
+    
+    return query.data.ioaddr;
+}
+
+
+//static int read_remote(int mdesc, int fdesc, size_t blk_sz, volatile void* ptr, size_t len)
+static int read_remote(int mdesc, int fdesc, size_t blk_sz, uint64_t ioaddr, size_t len)
 {
     int rv;
     struct start_transfer request;
@@ -53,7 +190,8 @@ static int read_remote(int mdesc, int fdesc, size_t blk_sz, volatile void* ptr, 
     request.block_size = blk_sz;
     request.num_blocks = len / blk_sz;
     request.file_pos = 0;
-    request.remote_mem_ptr = (__u64) ptr;
+    //request.remote_mem_ptr = ptr;
+    request.io_addr = ioaddr;
     request.offset = 0;
 
     rv = ioctl(mdesc, SSD_DMA_START_TRANSFER, &request);
@@ -231,6 +369,7 @@ static int client(int module, int file, size_t block_size, unsigned remote_node,
     volatile void* ptr;
     sci_map_t map;
     int ret = 0;
+    uint64_t ioaddr;
 
     SCIOpen(&sd, 0, &err);
     if (err != SCI_ERR_OK)
@@ -247,6 +386,7 @@ static int client(int module, int file, size_t block_size, unsigned remote_node,
         goto close_sisci;
     }
 
+
     remote_size = SCIGetRemoteSegmentSize(segment);
     if (remote_size < size)
     {
@@ -261,7 +401,9 @@ static int client(int module, int file, size_t block_size, unsigned remote_node,
         goto disconnect;
     }
 
-    if (read_remote(module, file, block_size, ptr, size) < 0)
+    ioaddr = query_remote_ioaddr(segment);
+    //if (read_remote(module, file, block_size, ptr, size) < 0)
+    if (read_remote(module, file, block_size, ioaddr, size) < 0)
     {
         fprintf(stderr, "Read remote failed\n");
     }

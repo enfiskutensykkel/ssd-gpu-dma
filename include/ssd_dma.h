@@ -26,7 +26,8 @@ struct start_transfer
     size_t          block_size;     // block size
     loff_t          num_blocks;     // number of blocks to transfer
     loff_t          file_pos;       // offset in file (in blocks)
-    __u64           remote_mem_ptr; // handle to remote memory
+    //volatile void*  remote_mem_ptr; // handle to remote memory
+    __u64           io_addr;        // IO address of the remote segment
     size_t          offset;         // offset into remote memory
 };
 

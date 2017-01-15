@@ -7,6 +7,12 @@
 #include <ssd_dma.h>
 #include "file.h"
 
+#include <linux/sched.h>
+#include <linux/mm.h>
+#include <linux/mm_types.h>
+#include <asm/pgtable.h>
+#include <asm/page.h>
+
 MODULE_AUTHOR("Jonas Markussen");
 MODULE_DESCRIPTION("SSD DMA across PCIe NTB");
 MODULE_LICENSE("GPL");
@@ -49,6 +55,8 @@ static int handle_start_transfer_request(struct start_transfer __user* request_p
         printk(KERN_ERR "Failed to get file info for fd=%d\n", request.file_desc);
         return PTR_ERR(file_info);
     }
+
+    printk(KERN_DEBUG "%llx\n", request.io_addr);
 
     put_file_info(file_info);
     return 0;
