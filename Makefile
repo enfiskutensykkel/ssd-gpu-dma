@@ -1,5 +1,5 @@
 TARGET	:= ssd_dma
-OBJECTS := src/main.o src/file.o src/nvme.o
+OBJECTS := src/main.o src/nvme.o
 DISHOME := /opt/DIS
 RELEASE	:= $(shell uname -r)
 

@@ -1,22 +1,23 @@
 #ifndef __SSD_DMA_NVME_H__
 #define __SSD_DMA_NVME_H__
 
+#include <linux/nvme.h>
 #include <linux/types.h>
+#include <linux/fs.h>
 #include <linux/scatterlist.h>
-
-struct nvme_iod {
-    unsigned long private;
-    int npages;
-    int offset;
-    int nents;
-    int length;
-    dma_addr_t first_dma;
-    struct scatterlist meta_sg[1];
-    struct scatterlist sg[0];
-};
+#include <linux/kthread.h>
+#include <linux/blk-mq.h>
 
 
-struct nvme_iod* create_iod(const struct start_transfer*);
+/* Forward declaration of NVMe device handle */
+typedef struct nvme_ns* dev_handle_t;
 
+
+/* Get a NVMe device handle from a file pointer */
+dev_handle_t get_nvme_device_handle(struct file* file);
+
+
+/* Release a NVMe device handle */
+void put_nvme_device_handle(dev_handle_t handle);
 
 #endif

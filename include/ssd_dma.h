@@ -20,6 +20,7 @@ enum {
 
 
 /* Start a DMA transfer (SSD_DMA_START_TRANSFER) */
+// TODO: Just use sizes instead of blocks+sectors
 struct start_transfer
 {
     int             file_desc;      // file descriptor to file on local SSD

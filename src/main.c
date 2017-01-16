@@ -5,13 +5,7 @@
 #include <linux/fs.h>
 #include <asm/uaccess.h>
 #include <ssd_dma.h>
-#include "file.h"
-
-#include <linux/sched.h>
-#include <linux/mm.h>
-#include <linux/mm_types.h>
-#include <asm/pgtable.h>
-#include <asm/page.h>
+#include "nvme.h"
 
 MODULE_AUTHOR("Jonas Markussen");
 MODULE_DESCRIPTION("SSD DMA across PCIe NTB");
@@ -41,7 +35,8 @@ static const struct file_operations ioctl_fops = {
 static int handle_start_transfer_request(struct start_transfer __user* request_ptr)
 {
     struct start_transfer request;
-    struct file_info* file_info;
+    struct file* file;
+    dev_handle_t dev;
 
     if (copy_from_user(&request, request_ptr, sizeof(struct start_transfer)) != 0)
     {
@@ -49,16 +44,23 @@ static int handle_start_transfer_request(struct start_transfer __user* request_p
         return -EFAULT;
     }
 
-    file_info = get_file_info(request.file_desc);
-    if (IS_ERR(file_info))
+    file = fget(request.file_desc);
+    if (file == NULL)
     {
-        printk(KERN_ERR "Failed to get file info for fd=%d\n", request.file_desc);
-        return PTR_ERR(file_info);
+        printk(KERN_ERR "Failed to get file pointer for fd=%d\n", request.file_desc);
+        return -EBADF;
     }
 
-    printk(KERN_DEBUG "%llx\n", request.io_addr);
+    dev = get_nvme_device_handle(file);
+    if (dev == NULL)
+    {
+        printk(KERN_ERR "Failed to look up NVME device handle for fd=%d\n", request.file_desc);
+        fput(file);
+        return -EBADF;
+    }
 
-    put_file_info(file_info);
+    put_nvme_device_handle(dev);
+    fput(file);
     return 0;
 }
 
