@@ -19,17 +19,20 @@ enum {
 };
 
 
-/* Start a DMA transfer (SSD_DMA_START_TRANSFER) */
-// TODO: Just use sizes instead of blocks+sectors
-struct start_transfer
-{
-    int             file_desc;      // file descriptor to file on local SSD
-    size_t          block_size;     // block size
-    loff_t          num_blocks;     // number of blocks to transfer
-    loff_t          file_pos;       // offset in file (in blocks)
-    //volatile void*  remote_mem_ptr; // handle to remote memory
-    __u64           io_addr;        // IO address of the remote segment
-    size_t          offset;         // offset into remote memory
-};
+/* DMA vector element */
+typedef struct {
+    loff_t          file_offset;        /* offset in file */
+    size_t          memory_offset;      /* offset in remote segment */
+    size_t          length;             /* length of chunk */
+} dma_vector_t;
+
+
+/* Start DMA transfer request */
+typedef struct {
+    int             file_desc;          /* file descriptor of source file */
+    __u64           io_address;         /* bus address of mapped memory */
+    size_t          vector_length;      /* number of DMA vector elements */
+    dma_vector_t    vector_elems[1];    /* DMA vector */
+} dma_start_request_t;
 
 #endif

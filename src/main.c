@@ -32,15 +32,30 @@ static const struct file_operations ioctl_fops = {
 };
 
 
-static int handle_start_transfer_request(struct start_transfer __user* request_ptr)
+static int handle_start_transfer_request(dma_start_request_t __user* request_ptr)
 {
-    struct start_transfer request;
+    dma_start_request_t request;
+    dma_vector_t* vector;
     struct file* file;
     dev_handle_t dev;
 
-    if (copy_from_user(&request, request_ptr, sizeof(struct start_transfer)) != 0)
+    if (copy_from_user(&request, request_ptr, sizeof(dma_start_request_t)) != 0)
     {
-        printk(KERN_ERR "Failed to copy ioctl argument to kernel memory\n");
+        printk(KERN_ERR "Failed to copy DMA request to kernel memory\n");
+        return -EFAULT;
+    }
+
+    vector = kmalloc(sizeof(dma_vector_t) * request.vector_length, GFP_KERNEL);
+    if (vector == NULL)
+    {
+        printk(KERN_ERR "Failed to allocate DMA vector\n");
+        return -ENOMEM;
+    }
+
+    if (copy_from_user(vector, request_ptr->vector_elems, sizeof(dma_vector_t) * request.vector_length) != 0)
+    {
+        printk(KERN_ERR "Failed to copy DMA vector from user space\n");
+        kfree(vector);
         return -EFAULT;
     }
 
@@ -59,8 +74,11 @@ static int handle_start_transfer_request(struct start_transfer __user* request_p
         return -EBADF;
     }
 
+    printk(KERN_DEBUG "file size=%lli\n", i_size_read(file->f_inode));
+
     put_nvme_device_handle(dev);
     fput(file);
+    kfree(vector);
     return 0;
 }
 
@@ -73,7 +91,7 @@ static long proc_file_ioctl(struct file* ioctl_file, unsigned int cmd, unsigned 
     switch (cmd)
     {
         case SSD_DMA_START_TRANSFER:
-            retval = handle_start_transfer_request((struct start_transfer __user*) arg);
+            retval = handle_start_transfer_request((dma_start_request_t __user*) arg);
             break;
 
         default:

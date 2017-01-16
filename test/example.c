@@ -181,26 +181,26 @@ static uint64_t query_remote_ioaddr(sci_remote_segment_t segment)
 
 
 //static int read_remote(int mdesc, int fdesc, size_t blk_sz, volatile void* ptr, size_t len)
-static int read_remote(int mdesc, int fdesc, size_t blk_sz, uint64_t ioaddr, size_t len)
+static int read_remote(int mdesc, int fdesc, uint64_t ioaddr, size_t len)
 {
-    int rv;
-    struct start_transfer request;
+    int retval;
+    dma_start_request_t request;
 
     request.file_desc = fdesc;
-    request.block_size = blk_sz;
-    request.num_blocks = len / blk_sz;
-    request.file_pos = 0;
-    //request.remote_mem_ptr = ptr;
-    request.io_addr = ioaddr;
-    request.offset = 0;
+    request.io_address = ioaddr;
+    request.vector_length = 1;
 
-    rv = ioctl(mdesc, SSD_DMA_START_TRANSFER, &request);
-    if (rv < 0)
+    request.vector_elems[0].file_offset = 0;
+    request.vector_elems[0].memory_offset = 0;
+    request.vector_elems[0].length = len;
+
+    retval = ioctl(mdesc, SSD_DMA_START_TRANSFER, &request);
+    if (retval < 0)
     {
-        fprintf(stderr, "ioctl failed: %s\n", strerror(-rv));
+        fprintf(stderr, "ioctl failed: %s\n", strerror(-retval));
     }
 
-    return rv;
+    return retval;
 }
 
 
@@ -360,7 +360,7 @@ static int server(segment_t* segment, unsigned adapter)
 }
 
 
-static int client(int module, int file, size_t block_size, unsigned remote_node, unsigned adapter, unsigned seg_id, size_t size)
+static int client(int module, int file, unsigned remote_node, unsigned adapter, unsigned seg_id, size_t size)
 {
     sci_error_t err;
     sci_desc_t sd;
@@ -403,7 +403,7 @@ static int client(int module, int file, size_t block_size, unsigned remote_node,
 
     ioaddr = query_remote_ioaddr(segment);
     //if (read_remote(module, file, block_size, ptr, size) < 0)
-    if (read_remote(module, file, block_size, ioaddr, size) < 0)
+    if (read_remote(module, file, ioaddr, size) < 0)
     {
         fprintf(stderr, "Read remote failed\n");
     }
@@ -450,7 +450,7 @@ int main(int argc, char** argv)
     unsigned segment_id = 4;
     unsigned remote_node = 0;
     unsigned size = 0x1000;
-    unsigned block_size = 512;
+    //unsigned block_size = 512;
     const char* filename = NULL;
 
     int opt, idx;
@@ -504,11 +504,12 @@ int main(int argc, char** argv)
                 break;
 
             case 'b':
-                if (convert_string(optarg, &block_size) != 0)
+                /*if (convert_string(optarg, &block_size) != 0)
                 {
                     fprintf(stderr, "Illegal block size: %s\n", optarg);
                     exit('b');
-                }
+                }*/
+                break;
 
             case 'f':
                 filename = optarg;
@@ -534,7 +535,7 @@ int main(int argc, char** argv)
             exit(3);
         }
 
-        client(module_fd, file_fd, block_size, remote_node, adapter, segment_id, size);
+        client(module_fd, file_fd, remote_node, adapter, segment_id, size);
         
         close(module_fd);
         close(file_fd);
