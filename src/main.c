@@ -11,12 +11,6 @@
 #include "nvme.h"
 
 
-MODULE_AUTHOR("Jonas Markussen");
-MODULE_DESCRIPTION("SSD DMA across PCIe NTB");
-MODULE_LICENSE("GPL");
-MODULE_VERSION(SSD_DMA_VERSION);
-
-
 /* Handler to NVMe driver and driver functions */
 static struct module* mod_nvme = NULL;
 func_t nvme_funcs[NVME_NUM_FUNCS];
@@ -122,6 +116,12 @@ static int proc_file_release(struct inode* inode, struct file* file)
 
 static int __init ssd_dma_entry(void)
 {
+    size_t i;
+    for (i = 0; i < NVME_NUM_FUNCS; ++i)
+    {
+        memset(&nvme_funcs[i], 0, sizeof(func_t));
+    }
+
     mutex_lock(&module_mutex);
     mod_nvme = find_module("nvme");
     if (!try_module_get(mod_nvme))
@@ -131,7 +131,21 @@ static int __init ssd_dma_entry(void)
         return -ENOENT;
     }
 
-    if (IS_ERR(bind_func(NVME_FREE_IOD, "nvme_free_iod")))
+    if (bind_func(NVME_FREE_IOD, "nvme_free_iod") == NULL)
+    {
+        unbind_all(NVME_NUM_FUNCS);
+        mutex_unlock(&module_mutex);
+        return -ENOENT;
+    }
+
+    if (bind_func(NVME_SETUP_PRPS, "nvme_setup_prps") == NULL)
+    {
+        unbind_all(NVME_NUM_FUNCS);
+        mutex_unlock(&module_mutex);
+        return -ENOENT;
+    }
+
+    if (bind_func(NVME_SUBMIT_IO_CMD, "nvme_submit_io_cmd") == NULL)
     {
         unbind_all(NVME_NUM_FUNCS);
         mutex_unlock(&module_mutex);
@@ -150,7 +164,6 @@ static int __init ssd_dma_entry(void)
     printk(KERN_INFO KBUILD_MODNAME " loaded\n");
     return 0;
 }
-module_init(ssd_dma_entry);
 
 
 static void __exit ssd_dma_exit(void)
@@ -161,4 +174,11 @@ static void __exit ssd_dma_exit(void)
 
     printk(KERN_INFO KBUILD_MODNAME " unloaded\n");
 }
+
+
+module_init(ssd_dma_entry);
 module_exit(ssd_dma_exit);
+MODULE_AUTHOR("Jonas Markussen <jonassm@simula.no>");
+MODULE_DESCRIPTION("SSD DMA across PCIe NTB");
+MODULE_LICENSE("GPL");
+MODULE_VERSION(SSD_DMA_VERSION);

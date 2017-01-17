@@ -19,7 +19,7 @@ func_t* bind_func(size_t idx, const char* name)
     if (addr == 0)
     {
         printk(KERN_ERR "Could not resolve symbol: %s\n", name);
-        return ERR_PTR(-ENOMEM);
+        return NULL;
     }
 
     func = &nvme_funcs[idx];
@@ -35,15 +35,18 @@ func_t* bind_func(size_t idx, const char* name)
 void unbind_all(size_t num)
 {
     size_t i;
+    func_t* func;
 
     for (i = 0; i < num; ++i)
     {
-        if (nvme_funcs[i].owner)
+        func = &nvme_funcs[i];
+
+        if (func->owner != NULL)
         {
-            module_put(nvme_funcs[i].owner);
+            module_put(func->owner);
+            func->owner = NULL;
         }
 
-        nvme_funcs[i].addr = 0;
-        nvme_funcs[i].owner = NULL;
+        func->addr = 0;
     }
 }
