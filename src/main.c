@@ -1,11 +1,15 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/slab.h>
 #include <linux/proc_fs.h>
 #include <linux/file.h>
 #include <linux/fs.h>
 #include <asm/uaccess.h>
+#include <asm/errno.h>
 #include <ssd_dma.h>
+#include "bind.h"
 #include "nvme.h"
+
 
 MODULE_AUTHOR("Jonas Markussen");
 MODULE_DESCRIPTION("SSD DMA across PCIe NTB");
@@ -13,8 +17,14 @@ MODULE_LICENSE("GPL");
 MODULE_VERSION(SSD_DMA_VERSION);
 
 
+/* Handler to NVMe driver and driver functions */
+static struct module* mod_nvme = NULL;
+func_t nvme_funcs[NVME_NUM_FUNCS];
+
+
 /* IOCTL handler prototype */
 static long proc_file_ioctl(struct file*, unsigned int, unsigned long);
+
 
 /* Release prototype */
 static int proc_file_release(struct inode*, struct file*);
@@ -32,12 +42,19 @@ static const struct file_operations ioctl_fops = {
 };
 
 
+static int execute_dma_transfer(struct file* fp, dma_addr_t addr, size_t len, dma_vector_t* vec)
+{
+    
+    return 0;
+}
+
+
 static int handle_start_transfer_request(dma_start_request_t __user* request_ptr)
 {
     dma_start_request_t request;
     dma_vector_t* vector;
     struct file* file;
-    dev_handle_t dev;
+    int retval;
 
     if (copy_from_user(&request, request_ptr, sizeof(dma_start_request_t)) != 0)
     {
@@ -66,20 +83,13 @@ static int handle_start_transfer_request(dma_start_request_t __user* request_ptr
         return -EBADF;
     }
 
-    dev = get_nvme_device_handle(file);
-    if (dev == NULL)
-    {
-        printk(KERN_ERR "Failed to look up NVME device handle for fd=%d\n", request.file_desc);
-        fput(file);
-        return -EBADF;
-    }
-
     printk(KERN_DEBUG "file size=%lli\n", i_size_read(file->f_inode));
 
-    put_nvme_device_handle(dev);
+    retval = execute_dma_transfer(file, request.io_address, request.vector_length, vector);
+
     fput(file);
     kfree(vector);
-    return 0;
+    return retval;
 }
 
 
@@ -112,6 +122,24 @@ static int proc_file_release(struct inode* inode, struct file* file)
 
 static int __init ssd_dma_entry(void)
 {
+    mutex_lock(&module_mutex);
+    mod_nvme = find_module("nvme");
+    if (!try_module_get(mod_nvme))
+    {
+        mutex_unlock(&module_mutex);
+        printk(KERN_CRIT "Failed to ref\n");
+        return -ENOENT;
+    }
+
+    if (IS_ERR(bind_func(NVME_FREE_IOD, "nvme_free_iod")))
+    {
+        unbind_all(NVME_NUM_FUNCS);
+        mutex_unlock(&module_mutex);
+        return -ENOENT;
+    }
+
+    mutex_unlock(&module_mutex);
+
     proc_file = proc_create(SSD_DMA_FILE_NAME, 0, NULL, &ioctl_fops);
     if (proc_file == NULL)
     {
@@ -128,6 +156,9 @@ module_init(ssd_dma_entry);
 static void __exit ssd_dma_exit(void)
 {
     proc_remove(proc_file);
+    unbind_all(NVME_NUM_FUNCS);
+    module_put(mod_nvme);
+
     printk(KERN_INFO KBUILD_MODNAME " unloaded\n");
 }
 module_exit(ssd_dma_exit);

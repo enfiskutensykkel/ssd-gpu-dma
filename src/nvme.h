@@ -1,13 +1,19 @@
 #ifndef __SSD_DMA_NVME_H__
 #define __SSD_DMA_NVME_H__
 
-#include <linux/nvme.h>
-#include <linux/types.h>
 #include <linux/fs.h>
 #include <linux/scatterlist.h>
-#include <linux/kthread.h>
-#include <linux/blk-mq.h>
+#include "bind.h"
 
+
+enum nvme_func {
+    NVME_FREE_IOD = 0,
+    NVME_NUM_FUNCS
+};
+
+
+/* Array containing NVMe driver functions */
+extern func_t nvme_funcs[];
 
 /* Forward declaration of NVMe device handle */
 typedef struct nvme_ns* dev_handle_t;
