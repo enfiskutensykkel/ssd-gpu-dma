@@ -5,14 +5,16 @@ import os
 import sys
 
 functions = [
+        'iod_list',
         'nvme_free_iod',
         'nvme_setup_prps'
         ]
 
 structs = [
-        'nvme_ns',
         'nvme_ctrl',
-        'nvme_dev'
+        'nvme_ns',
+        'nvme_dev',
+        'nvme_iod'
         ]
 
 
@@ -37,12 +39,11 @@ def parse_body(string):
     return body
 
 
-def parse_functions(path, functions):
+def parse_functions(path, functions, function_bodies):
     data = open(path).read()
 
     func_decl_pattern = re.compile(r'([#A-Za-z0-9_\*\s]+)\([^\)]+\)\n\{', re.MULTILINE | re.DOTALL)
     func_name_pattern = re.compile(r'([A-Za-z0-9_]+)\s*\(')
-    func_bodies = ""
 
     while True:
         hit = func_decl_pattern.search(data)
@@ -53,16 +54,13 @@ def parse_functions(path, functions):
         name = func_name_pattern.search(decl_line).group(1)
 
         if name in functions:
-            func_bodies += "\n".join([line for line in parse_body(data[hit.start():]).split('\n') if len(line) < 1 or line[0] != '#'])
+            function_bodies[name] = "\n".join([line for line in parse_body(data[hit.start():]).split('\n') if len(line) < 1 or line[0] != '#'])
 
         data = data[hit.end():]
 
-    return func_bodies
 
-
-def parse_structs(path, structs):
+def parse_structs(path, structs, struct_bodies):
     data = open(path).read()
-    struct_bodies = ""
 
     struct_decl_pattern = re.compile(r'struct ([A-Za-z0-9_]+)\s+\{', re.MULTILINE)
 
@@ -71,13 +69,13 @@ def parse_structs(path, structs):
         if hit is None:
             break
 
-        if hit.group(1) in structs:
-            struct_bodies += "\n".join([line for line in parse_body(data[hit.start():]).split('\n') if len(line) < 1 or line[0] != '#'])
-            struct_bodies += ";\n\n"
+        struct = hit.group(1)
+
+        if struct in structs:
+            struct_bodies[struct] = "\n".join([line for line in parse_body(data[hit.start():]).split('\n') if len(line) < 1 or line[0] != '#'])
+            struct_bodies[struct] += ";\n\n"
 
         data = data[hit.end():]
-
-    return struct_bodies
 
 
 def parse_includes(path):
@@ -89,27 +87,36 @@ if len(sys.argv) != 2:
     sys.exit(1)
 
 release = sys.argv[1]
-func_data = []
 includes = []
-struct_data = []
+func_data = {}
+struct_data = {}
 
 for filename in os.listdir(release):
     if filename.split(".")[1] in ['c', 'h']:
         path = os.path.join(release, filename)
 
-        func_data.append(parse_functions(path, functions))
+        parse_functions(path, functions, func_data)
 
-        struct_data.append(parse_structs(path, structs))
+        parse_structs(path, structs, struct_data)
 
         for include in parse_includes(path):
             if not include in includes:
                 includes.append(include)
 
+
 with open('include/bind.h', 'w') as f:
     f.write("#ifndef __SSD_DMA_BINDINGS_H__\n")
     f.write("#define __SSD_DMA_BINDINGS_H__\n\n")
+    f.write("/* Generated stub, might not work for some kernel versions */\n")
     f.write("\n".join(includes))
-    f.write("\n\n")
-    f.write("".join(struct_data))
-    f.write("".join(func_data))
-    f.write("\n\n\n#endif\n")
+    f.write("\n\n\n")
+
+    for struct in structs:
+        f.write(struct_data[struct])
+        f.write("\n")
+
+    for func in functions:
+        f.write(func_data[func])
+        f.write("\n")
+
+    f.write("\n\n#endif /* __SSD_DMA_BINDINGS_H__ */\n")
