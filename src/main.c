@@ -7,13 +7,11 @@
 #include <asm/uaccess.h>
 #include <asm/errno.h>
 #include <ssd_dma.h>
-#include "bind.h"
 #include "nvme.h"
 
 
 /* Handler to NVMe driver and driver functions */
 static struct module* mod_nvme = NULL;
-func_t nvme_funcs[NVME_NUM_FUNCS];
 
 
 /* IOCTL handler prototype */
@@ -116,39 +114,12 @@ static int proc_file_release(struct inode* inode, struct file* file)
 
 static int __init ssd_dma_entry(void)
 {
-    size_t i;
-    for (i = 0; i < NVME_NUM_FUNCS; ++i)
-    {
-        memset(&nvme_funcs[i], 0, sizeof(func_t));
-    }
-
     mutex_lock(&module_mutex);
     mod_nvme = find_module("nvme");
     if (!try_module_get(mod_nvme))
     {
         mutex_unlock(&module_mutex);
         printk(KERN_CRIT "Failed to ref\n");
-        return -ENOENT;
-    }
-
-    if (bind_func(NVME_FREE_IOD, "nvme_free_iod") == NULL)
-    {
-        unbind_all(NVME_NUM_FUNCS);
-        mutex_unlock(&module_mutex);
-        return -ENOENT;
-    }
-
-    if (bind_func(NVME_SETUP_PRPS, "nvme_setup_prps") == NULL)
-    {
-        unbind_all(NVME_NUM_FUNCS);
-        mutex_unlock(&module_mutex);
-        return -ENOENT;
-    }
-
-    if (bind_func(NVME_SUBMIT_IO_CMD, "nvme_submit_io_cmd") == NULL)
-    {
-        unbind_all(NVME_NUM_FUNCS);
-        mutex_unlock(&module_mutex);
         return -ENOENT;
     }
 
@@ -169,7 +140,6 @@ static int __init ssd_dma_entry(void)
 static void __exit ssd_dma_exit(void)
 {
     proc_remove(proc_file);
-    unbind_all(NVME_NUM_FUNCS);
     module_put(mod_nvme);
 
     printk(KERN_INFO KBUILD_MODNAME " unloaded\n");

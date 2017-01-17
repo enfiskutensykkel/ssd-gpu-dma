@@ -1,5 +1,5 @@
 TARGET	:= ssd_dma
-OBJECTS := src/main.o src/nvme.o src/bind.o
+OBJECTS := src/main.o src/nvme.o 
 DISHOME := /opt/DIS
 RELEASE	:= $(shell uname -r)
 
@@ -18,7 +18,7 @@ endif
 
 .PHONY: default reload unload load
 
-default: modules example
+default: include/bind.h modules example
 
 example: test/example.c
 	$(CC) -std=gnu99 -o $@ $(CFLAGS) $(INCLUDE) $(LDFLAGS) $^ $(LDLIBS)
@@ -32,9 +32,12 @@ load:
 	insmod $(TARGET).ko
 
 clean:
-	-$(RM) example
+	-$(RM) example include/bind.h
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 	
+include/bind.h:
+	./make_bindings.py $(RELEASE)
+
 %:
 	$(MAKE) -C $(KDIR) M=$(PWD) $@
 

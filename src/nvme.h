@@ -3,19 +3,6 @@
 
 #include <linux/fs.h>
 #include <linux/scatterlist.h>
-#include "bind.h"
-
-
-enum nvme_func {
-    NVME_FREE_IOD = 0,
-    NVME_SETUP_PRPS,
-    NVME_SUBMIT_IO_CMD,
-    NVME_NUM_FUNCS
-};
-
-
-/* Array containing NVMe driver functions */
-extern func_t nvme_funcs[];
 
 
 /* Forward declaration of NVMe device handle */
