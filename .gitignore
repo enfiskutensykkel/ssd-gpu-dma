@@ -3,6 +3,16 @@
 
 # Object files
 *.o
+*.ko
 
-# Executable
-usrspc-nvme
+# Intermediate files
+*.mod.c
+.*.cmd
+
+# Kernel symbols
+Module.symvers
+modules.order
+.tmp_versions/*
+
+# Userspace executable
+cuda-nvme

@@ -73,13 +73,13 @@ int main(int argc, char** argv)
     }
 
     long page_size = sysconf(_SC_PAGESIZE);
-    if (page_size != PAGE_SIZE)
+    if (page_size != 0x1000)
     {
         fprintf(stderr, "WARNING: System page size is not 4096 bytes\n");
     }
 
     // Memory map resource file
-    volatile void* bar0_ptr = mmap(NULL, 2 * PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, bar0_fd, 0);
+    volatile void* bar0_ptr = mmap(NULL, 2 * 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, bar0_fd, 0);
     if (bar0_ptr == NULL)
     {
         fprintf(stderr, "Failed to mmap: %s\n", strerror(errno));

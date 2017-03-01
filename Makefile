@@ -1,25 +1,50 @@
-PROJECT	:= usrspc-nvme
-
-FILES	:= $(wildcard src/*.c)
-OBJS	:= $(FILES:%.c=%.o)
-
-CC    	:= gcc
-CFLAGS	:= -std=gnu99 -Wall -Wextra -pedantic
-DEFINES	:= -DPAGE_SIZE=0x1000
-INCLUDE	:=
-LDLIBS	:=
-LDFLAGS	:=
+PROJECT	:= cuda-nvme
+OBJECTS := userspace/cunvme.c.o
+RELEASE := $(shell uname -r)
+CUHOME	:= /usr/local/cuda
+MODULE	:= cunvme
+DEFINES	:= -DCUNVME_FILE='"$(MODULE)"' -DCUNVME_VERSION='"0.1"'
 
 
-.PHONY: all clean
+obj-m := $(MODULE).o
+$(MODULE)-objs := module/cunvme.o
+ccflags-y += -I$(PWD)/include $(DEFINES)
+KDIR ?= /lib/modules/$(RELEASE)/build
 
-all: $(PROJECT)
+ifeq ($(KERNELRELEASE),)
+	CC    	:= $(CUHOME)/bin/nvcc
+	CCBIN	:= /usr/bin/gcc
+	CFLAGS	:= -Wall -Wextra -pedantic
+	INCLUDE	:= -I$(CUHOME)/include -Iinclude
+	LDLIBS	:= -lcuda
+	LDFLAGS	:= -L$(CUHOME)/lib64
+endif
+
+
+.PHONY: default reload unload load
+
+default: modules $(PROJECT)
 
 clean:
-	-$(RM) $(PROJECT) $(OBJS)
+	-$(RM) $(PROJECT) $(OBJECTS)
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
-$(PROJECT): $(OBJS)
-	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+$(PROJECT): $(OBJECTS)
+	$(CC) -ccbin $(CCBIN) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
-%.o: %.c
-	$(CC) $(CFLAGS) $(INCLUDE) $(DEFINES) -o $@ $< -c
+reload: unload load
+
+unload:
+	-rmmod $(MODULE).ko
+
+load:
+	insmod $(MODULE).ko
+
+userspace/%.c.o: userspace/%.c
+	$(CCBIN) -std=c99 $(CFLAGS) $(DEFINES) $(INCLUDE) -o $@ $< -c
+
+userspace/%.cu.o: userspace/%.cu
+	$(CC) -Xcompiler "$(CFLAGS) $(DEFINES)" $(INCLUDE) -o $@ $< -c
+
+%:
+	$(MAKE) -C $(KDIR) M=$(PWD) $@
