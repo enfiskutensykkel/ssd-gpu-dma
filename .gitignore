@@ -3,3 +3,6 @@
 
 # Object files
 *.o
+
+# Executable
+usrspc-nvme
