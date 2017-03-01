@@ -3,19 +3,3 @@
 
 # Object files
 *.o
-*.ko
-
-# Intermediate files
-*.mod.c
-.*.cmd
-
-# Kernel symbols
-Module.symvers
-modules.order
-.tmp_versions/*
-
-# Generated header
-include/bind.h
-
-# Userspace binary
-example
