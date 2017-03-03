@@ -7,8 +7,13 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include "nvme.h"
+#include "nvme_init.h"
 
+
+/* Offset to the COMMAND register in config space */
 #define CONFIG_COMMAND  0x04
+
 
 
 static FILE* open_config_space(char* path)
@@ -63,30 +68,51 @@ int main(int argc, char** argv)
 
     fclose(config_fd);
 
+    // Open communication channel with kernel module
+    int ioctl_fd = open(CUNVME_PATH, 0);
+    if (ioctl_fd < 0)
+    {
+        fprintf(stderr, "Couldn't open ioctl file: %s\n", strerror(errno));
+        return 3;
+    }
+
     // Open file descriptor to device's BAR0 resource file
     strncat(path, "/resource0", sizeof(path) - strlen(path) - 1);
     int bar0_fd = open(path, O_RDWR);
     if (bar0_fd < 0)
     {
         fprintf(stderr, "Couldn't open resource file: %s\n", strerror(errno));
+        close(ioctl_fd);
         return 3;
     }
 
-    long page_size = sysconf(_SC_PAGESIZE);
-    if (page_size != 0x1000)
-    {
-        fprintf(stderr, "WARNING: System page size is not 4096 bytes\n");
-    }
-
     // Memory map resource file
-    volatile void* bar0_ptr = mmap(NULL, 2 * 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, bar0_fd, 0);
-    if (bar0_ptr == NULL)
+    volatile void* register_mem = mmap(NULL, 0x1000 + MAX_DBL_MEM, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FILE, bar0_fd, 0);
+    if (register_mem == NULL)
     {
         fprintf(stderr, "Failed to mmap: %s\n", strerror(errno));
+        close(ioctl_fd);
         close(bar0_fd);
         return 3;
     }
 
+    nvm_controller_t handle;
+
+    int status = nvm_init(&handle, ioctl_fd, register_mem, MAX_DBL_MEM);
+    if (status != 0)
+    {
+        fprintf(stderr, "Failed to reset and initialize device: %s\n", strerror(status));
+        munmap((void*) register_mem, 0x1000 + MAX_DBL_MEM);
+        close(ioctl_fd);
+        close(bar0_fd);
+        return 4;
+    }
+
+    nvm_free(handle);
+
+    munmap((void*) register_mem, 0x1000 + MAX_DBL_MEM);
+    close(ioctl_fd);
     close(bar0_fd);
+
     return 0;
 }

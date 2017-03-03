@@ -5,6 +5,8 @@ NVMe
 --------------------------------------
 [http://www.nvmexpress.org/wp-content/uploads/NVM_Express_1_2_1_Gold_20160603.pdf](NVM Express)
 
+For simplicity is every queue a page large
+
 sysfs
 --------------------------------------
 [https://www.kernel.org/doc/Documentation/filesystems/sysfs-pci.txt](Using sysfs to access PCI device resources)

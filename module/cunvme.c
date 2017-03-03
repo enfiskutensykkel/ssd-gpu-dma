@@ -1,9 +1,15 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/fs.h>
 #include <linux/proc_fs.h>
-#include <linux/file.h>
 #include <asm/uaccess.h>
 #include <asm/errno.h>
+#include <asm/io.h>
+#include <linux/mm.h>
+#include <cunvme_ioctl.h>
+
+
+static unsigned int memory_desc_idx = 0;
 
 
 /* ioctl handler prototype */
@@ -26,6 +32,24 @@ static const struct file_operations ioctl_fops = {
 };
 
 
+static long pin_memory(struct cunvme_request __user* request)
+{
+    struct cunvme_request r;
+    copy_from_user(&r, request, sizeof(r));
+    
+    unsigned int idx = memory_desc_idx++;
+    printk(KERN_INFO "%u\n", idx);
+
+    //get_user_pages(current, current->mm, r.vaddr, r.size / PAGE_SIZE, 0, &(pages[i].pages), NULL);
+    
+    r.handle = idx;
+    r.paddr = 0;
+
+    copy_to_user(request, &r, sizeof(r));
+    return 0;
+}
+
+
 /* Entry point to kernel module */
 static long handle_request(struct file* ioctl_file, unsigned int cmd, unsigned long arg)
 {
@@ -33,6 +57,18 @@ static long handle_request(struct file* ioctl_file, unsigned int cmd, unsigned l
 
     switch (cmd)
     {
+        case CUNVME_PIN:
+            retval = pin_memory((struct cunvme_request __user*) arg);
+            break;
+
+        case CUNVME_UNPIN:
+            retval = 0;
+            break;
+
+        case CUNVME_QUERY:
+            retval = 0;
+            break;
+
         default:
             retval = -EINVAL;
             break;
@@ -40,7 +76,6 @@ static long handle_request(struct file* ioctl_file, unsigned int cmd, unsigned l
 
     return retval;
 }
-
 
 
 /* Release pinned GPU memory */
@@ -75,6 +110,6 @@ module_init(unvme_entry);
 module_exit(unvme_exit);
 
 MODULE_AUTHOR("Jonas Markussen <jonassm@simula.no>");
-MODULE_DESCRIPTION("Stub module to pin GPU memory and retrieve physical addresses");
+MODULE_DESCRIPTION("Stub module to page-lock memory and retrieve physical addresses");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(CUNVME_VERSION);

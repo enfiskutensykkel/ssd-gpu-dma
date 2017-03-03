@@ -14,8 +14,8 @@ case "$1" in
 		;;
 
 	unbind)
-		echo "0000:$DEVICE" > "/sys/bus/pci/devices/0000:$DEVICE/driver/unbind"
-        echo 1 > "/sys/bus/devices/0000:$DEVICE/enable"
+		echo -n "0000:$DEVICE" > "/sys/bus/pci/devices/0000:$DEVICE/driver/unbind"
+        	echo 1 > "/sys/bus/pci/devices/0000:$DEVICE/enable"
 		;;
 
 	*)

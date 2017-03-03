@@ -1,9 +1,9 @@
 PROJECT	:= cuda-nvme
-OBJECTS := userspace/cunvme.c.o
+OBJECTS := userspace/cunvme.c.o userspace/ioctl.cu.o userspace/nvme_init.c.o
 RELEASE := $(shell uname -r)
 CUHOME	:= /usr/local/cuda
 MODULE	:= cunvme
-DEFINES	:= -DCUNVME_FILE='"$(MODULE)"' -DCUNVME_VERSION='"0.1"'
+DEFINES	:= -DCUNVME_FILE='"$(MODULE)"' -DCUNVME_VERSION='"0.1"' -DMAX_DBL_MEM=0x1000
 
 
 obj-m := $(MODULE).o
@@ -14,9 +14,9 @@ KDIR ?= /lib/modules/$(RELEASE)/build
 ifeq ($(KERNELRELEASE),)
 	CC    	:= $(CUHOME)/bin/nvcc
 	CCBIN	:= /usr/bin/gcc
-	CFLAGS	:= -Wall -Wextra -pedantic
-	INCLUDE	:= -I$(CUHOME)/include -Iinclude
-	LDLIBS	:= -lcuda
+	CFLAGS	:= -Wall -Wextra -O0
+	INCLUDE	:= -I$(CUHOME)/include -Iinclude -DCUNVME_PATH='"/proc/$(MODULE)"'
+	LDLIBS	:= -lcuda -lc
 	LDFLAGS	:= -L$(CUHOME)/lib64
 endif
 
@@ -41,10 +41,10 @@ load:
 	insmod $(MODULE).ko
 
 userspace/%.c.o: userspace/%.c
-	$(CCBIN) -std=c99 $(CFLAGS) $(DEFINES) $(INCLUDE) -o $@ $< -c
+	$(CCBIN) -std=gnu11 $(CFLAGS) -pedantic $(DEFINES) $(INCLUDE) -o $@ $< -c
 
 userspace/%.cu.o: userspace/%.cu
-	$(CC) -Xcompiler "$(CFLAGS) $(DEFINES)" $(INCLUDE) -o $@ $< -c
+	$(CC) -std=c++11 -ccbin $(CCBIN) -Xcompiler "$(CFLAGS) $(DEFINES)" $(INCLUDE) -o $@ $< -c
 
 %:
 	$(MAKE) -C $(KDIR) M=$(PWD) $@
