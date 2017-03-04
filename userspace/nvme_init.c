@@ -1,14 +1,71 @@
 #include "nvme.h"
 #include "nvme_init.h"
+#include "nvme_core.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <errno.h>
-#include <unistd.h>
-#include <sys/mman.h>
 #include <time.h>
+
+
+/* Convenience function for creating a bit mask */
+static inline uint64_t bitmask(int hi, int lo)
+{
+    uint64_t mask = 0;
+
+    for (int i = lo; i <= hi; ++i)
+    {
+        mask |= 1UL << i;
+    }
+
+    return mask;
+}
+
+
+/* Extract specific bits */
+#define _RB(v, hi, lo)   \
+    ( ( (v) & bitmask((hi), (lo)) ) >> (lo) )
+
+
+/* Set specifics bits */
+#define _WB(v, hi, lo)   \
+    ( ( (v) << (lo) ) & bitmask((hi), (lo)) )
+
+
+/* Offset to a register */
+#define _REG(p, offs, bits) \
+    ((volatile uint##bits##_t *) (((volatile unsigned char*) (p)) + (offs)))
+
+
+/* Controller registers */
+#define CAP(p)          _REG(p, 0x0000, 64)     // Controller Capabilities
+#define CC(p)           _REG(p, 0x0014, 32)     // Controller Configuration
+#define CSTS(p)         _REG(p, 0x001c, 32)     // Controller Status
+#define AQA(p)          _REG(p, 0x0024, 32)     // Admin Queue Attributes
+#define ASQ(p)          _REG(p, 0x0028, 64)     // Admin Submission Queue Base Address
+#define ACQ(p)          _REG(p, 0x0030, 64)     // Admin Completion Queue Base Address
+
+
+/* Read bit fields */
+#define CAP$MPSMAX(p)   _RB(*CAP(p), 55, 52)    // Memory Page Size Maximum
+#define CAP$MPSMIN(p)   _RB(*CAP(p), 51, 48)    // Memory Page Size Minimum
+#define CAP$DSTRD(p)    _RB(*CAP(p), 35, 32)    // Doorbell Stride
+#define CAP$TO(p)       _RB(*CAP(p), 31, 24)    // Timeout
+#define CAP$CQR(p)      _RB(*CAP(p), 16, 16)    // Contiguous Queues Required
+#define CAP$MQES(p)     _RB(*CAP(p), 15,  0)    // Maximum Queue Entries Supported
+
+#define CSTS$RDY(p)     _RB(*CSTS(p), 0,  0)    // Ready
+
+
+/* Write bit fields */
+#define CC$IOCQES(v)    _WB(v, 23, 20)          // IO Completion Queue Entry Size
+#define CC$IOSQES(v)    _WB(v, 19, 16)          // IO Submission Queue Entry Size
+#define CC$MPS(v)       _WB(v, 10,  7)          // Memory Page Size
+#define CC$CSS(v)       _WB(0,  3,  1)          // IO Command Set Selected (0=NVM Command Set)
+#define CC$EN(v)        _WB(v,  0,  0)          // Enable
 
 
 /* Encode page size to a the format required by the controller */
@@ -95,7 +152,6 @@ static int enable_controller(volatile void* register_ptr, uint8_t encoded_page_s
 }
 
 
-
 int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size_t db_size)
 {
     *handle = NULL;
@@ -136,7 +192,7 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     controller->max_entries = CAP$MQES(register_ptr) + 1;   // CAP.MQES is a 0's based value
     controller->cq_entry_size = 0;
     controller->sq_entry_size = 0;
-    controller->max_queues = db_size / (4 << controller->dstrd);
+    controller->max_queues = (int16_t) (db_size / (4 << controller->dstrd));
     controller->n_queues = 0;
     controller->queue_handles = NULL;
 
@@ -145,12 +201,23 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     if (controller->queue_handles == NULL)
     {
         fprintf(stderr, "Failed to allocate queue handle table: %s\n", strerror(errno));
+        nvm_free(controller);
         return errno;
     }
 
-    for (size_t i = 0; i < controller->max_queues; ++i)
+    for (int16_t i = 2; i < controller->max_queues; ++i)
     {
         controller->queue_handles[i] = NULL;
+    }
+
+    // Create admin submission queue
+    page_t admin_sq;
+    int err = get_page(&admin_sq, fd, -1);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to allocate and pin admin SQ: %s\n", strerror(err));
+        nvm_free(controller);
+        return err;
     }
 
     // TODO: Create admin SQ and CQ and page lock them
@@ -164,6 +231,8 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     // Bring controller back up
     enable_controller(register_ptr, host_page_size, controller->timeout);
 
+    // Submit identify controller command
+
     *handle = controller;
     fprintf(stderr, "NVMe controller initiated\n");
     return 0;
@@ -172,6 +241,15 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
 
 void nvm_free(nvm_controller_t handle)
 {
-    free(handle->queue_handles);
+    if (handle->queue_handles != NULL)
+    {
+        for (int16_t i = 2; i < handle->n_queues; ++i)
+        {
+            //delete_queue(handle, i);
+        }
+
+        free(handle->queue_handles);
+    }
+
     free(handle);
 }

@@ -1,8 +1,9 @@
 PROJECT	:= cuda-nvme
-OBJECTS := userspace/cunvme.c.o userspace/ioctl.cu.o userspace/nvme_init.c.o
+OBJECTS := userspace/cunvme.c.o userspace/nvme_init.c.o userspace/page.cu.o
 RELEASE := $(shell uname -r)
 CUHOME	:= /usr/local/cuda
 MODULE	:= cunvme
+MAX_PGS	:= 128
 DEFINES	:= -DCUNVME_FILE='"$(MODULE)"' -DCUNVME_VERSION='"0.1"' -DMAX_DBL_MEM=0x1000
 
 
@@ -38,7 +39,7 @@ unload:
 	-rmmod $(MODULE).ko
 
 load:
-	insmod $(MODULE).ko
+	insmod $(MODULE).ko num_user_pages=$(MAX_PGS)
 
 userspace/%.c.o: userspace/%.c
 	$(CCBIN) -std=gnu11 $(CFLAGS) -pedantic $(DEFINES) $(INCLUDE) -o $@ $< -c

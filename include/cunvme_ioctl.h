@@ -12,26 +12,26 @@
 
 
 #define CUNVME_MAGIC            0x80
-#define CUNVME_NO_DEVICE        -1
+#define CUNVME_NO_HANDLE        -1L
+#define CUNVME_NO_CUDA_DEVICE   -1
 
 
 /* Supported operations */
 enum
 {
-    CUNVME_QUERY                = _IO(CUNVME_MAGIC | 'S', 0x00),
-    CUNVME_PIN                  = _IO(CUNVME_MAGIC | 'S', 0x01),
-    CUNVME_UNPIN                = _IO(CUNVME_MAGIC | 'S', 0x02)
+    CUNVME_PIN      = _IO(CUNVME_MAGIC | 'S', 0x01),
 };
 
 
-/* Multi-purpose request */
-struct cunvme_request
+/* Pin request
+ *
+ * Find memory page, pin it in memory and get the physical address.
+ */
+struct cunvme_pin_page
 {
-    int         handle;         /* pinned memory handle */
-    int         device;         /* indicates if memory is located on a CUDA device */
-    uint64_t    paddr;          /* physical address */
-    uint64_t    vaddr;          /* virtual address or device memory address */
-    size_t      size;           /* size of memory chunck */
+    long            handle;         /* out: reference handle */
+    uint64_t        paddr;          /* out: physical address */
+    uint64_t        vaddr;          /* in:  virtual address */
 };
 
 #endif
