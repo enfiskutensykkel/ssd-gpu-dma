@@ -19,10 +19,13 @@ Nvidia CUDA
 
 Loadable Kernel Module
 --------------------------------------
+Linux 4.4.0 family due to changing signature of `get_user_pages`
 
 Limitations
 --------------------------------------
 IOMMU stuff
+pages allocated in userspace are not contiguous (why everything is operating on pages)
+
 
 Future optimisations
 --------------------------------------
