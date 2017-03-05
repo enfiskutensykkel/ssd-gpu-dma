@@ -29,7 +29,7 @@ int nvm_init(nvm_controller_t* controller, int ioctl_fd, volatile void* register
 /*
  * Free allocated resources.
  */
-void nvm_free(nvm_controller_t controller);
+void nvm_free(nvm_controller_t controller, int ioctl_fd);
 
 
 #ifdef __cplusplus

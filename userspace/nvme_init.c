@@ -67,6 +67,9 @@ static inline uint64_t bitmask(int hi, int lo)
 #define CC$CSS(v)       _WB(0,  3,  1)          // IO Command Set Selected (0=NVM Command Set)
 #define CC$EN(v)        _WB(v,  0,  0)          // Enable
 
+#define AQA$AQS(v)      _WB(v, 27, 16)          // Admin Completion Queue Size
+#define AQA$AQC(v)      _WB(v, 11,  0)          // Admin Submission Queue Size
+
 
 /* Encode page size to a the format required by the controller */
 static uint8_t encode_page_size(size_t page_size)
@@ -85,20 +88,25 @@ static uint8_t encode_page_size(size_t page_size)
 
 
 /* Delay execution by 1 millisecond */
-static uint64_t delay(uint64_t remaining, uint64_t timeout)
+static uint64_t delay(uint64_t timeout, uint64_t remaining, uint64_t reset)
 {
     struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = 1000000UL;
+    ts.tv_sec = timeout / 1000;
+    ts.tv_nsec = 1000000UL * (timeout % 1000);
 
     nanosleep(&ts, NULL);
 
-    if (remaining <= 0)
+    if (remaining == 0)
     {
-        return timeout; 
+        return reset; 
     }
     
-    return remaining - 1;
+    if (remaining < timeout)
+    {
+        return 0;
+    }
+
+    return remaining - timeout;
 }
 
 
@@ -110,7 +118,7 @@ static int reset_controller(volatile void* register_ptr, uint64_t timeout)
     *cc = *cc & ~1;
 
     // Wait for CSTS.RDY to transition from 1 to 0
-    uint64_t remaining = delay(0, timeout);
+    uint64_t remaining = delay(1, 0, timeout);
 
     while (CSTS$RDY(register_ptr) != 0)
     {
@@ -120,7 +128,7 @@ static int reset_controller(volatile void* register_ptr, uint64_t timeout)
             return ETIME;
         }
 
-        remaining = delay(remaining, timeout);
+        remaining = delay(1, remaining, timeout);
     }
 
     return 0;
@@ -135,7 +143,7 @@ static int enable_controller(volatile void* register_ptr, uint8_t encoded_page_s
     *cc = CC$IOCQES(0) | CC$IOSQES(0) | CC$MPS(encoded_page_size) | CC$CSS(0) | CC$EN(1);
 
     // Wait for CSTS.RDY to transition from 0 to 1
-    uint64_t remaining = delay(0, timeout);
+    uint64_t remaining = delay(1, 0, timeout);
 
     while (CSTS$RDY(register_ptr) != 1)
     {
@@ -145,10 +153,117 @@ static int enable_controller(volatile void* register_ptr, uint8_t encoded_page_s
             return ETIME;
         }
 
-        remaining = delay(remaining, timeout);
+        remaining = delay(1, remaining, timeout);
     }
 
     return 0;
+}
+
+
+static nvm_queue_t alloc_admin_queue(int ioctl_fd, unsigned int no, size_t entry_size)
+{
+    // Allocate queue handle
+    nvm_queue_t queue = malloc(sizeof(struct nvm_queue));
+    if (queue == NULL)
+    {
+        fprintf(stderr, "Failed to allocate queue handle: %s\n", strerror(errno));
+        return NULL;
+    }
+
+    // Create page of memory
+    int err = get_page(&queue->page, ioctl_fd, -1);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to allocate and pin queue memory: %s\n", strerror(err));
+        free(queue);
+        return NULL;
+    }
+
+    queue->no = no;
+    queue->max_entries = queue->page.page_size / entry_size;
+    queue->entry_size = entry_size;
+    queue->head = 0;
+    queue->tail = 0;
+    queue->phase = 0;
+    queue->db = NULL;
+
+    memset(queue->page.virt_addr, 0, queue->page.page_size);
+
+    return queue;
+}
+
+
+/* Set admin queue registers */
+static void configure_admin_queues(volatile void* register_ptr, nvm_controller_t c)
+{
+    volatile uint32_t* aqa = AQA(register_ptr);
+    *aqa = AQA$AQS(c->queue_handles[0]->max_entries) | AQA$AQC(c->queue_handles[1]->max_entries);
+
+    volatile uint64_t* asq = ASQ(register_ptr);
+    *asq = c->queue_handles[0]->page.phys_addr;
+
+    volatile uint64_t* acq = ACQ(register_ptr);
+    *acq = c->queue_handles[1]->page.phys_addr;
+
+    printf("%lx %lx\n", c->queue_handles[1]->page.virt_addr, c->queue_handles[1]->page.phys_addr);
+}
+
+
+/* Send an identify controller NVM command */
+static void identify_controller(nvm_controller_t controller, int ioctl_fd)
+{
+    page_t identify_data;
+    int err = get_page(&identify_data, ioctl_fd, -1);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to allocate buffer for identify command\n");
+        return;
+    }
+
+    struct {
+        uint32_t dword[16];
+    } command;
+
+    volatile struct {
+        uint32_t dword[4];
+    } *completion;
+    memset(&command, 0, sizeof(command));
+
+    uint32_t opcode = (0 << 7) | (0x1 << 2) | (0x2);
+    command.dword[0] = (0xbeef << 16) | (0 << 14) | (0 << 8) | opcode;
+    command.dword[1] = 0xffffffff;
+
+    command.dword[4] = 0x0;
+    command.dword[5] = 0x0;
+
+    uint64_t buf_addr = identify_data.phys_addr;
+    command.dword[7] = (uint32_t) (buf_addr >> 32);
+    command.dword[6] = (uint32_t) buf_addr;
+    command.dword[8] = 0;
+    command.dword[9] = 0;
+
+    uint8_t cns = 1;
+    command.dword[10] = (0 << 16) | cns;
+
+    nvm_queue_t sq = controller->queue_handles[0];
+    memcpy(sq->page.virt_addr, &command, sizeof(command));
+    sq->tail += 1;
+    *(sq->db) = sq->tail;
+
+    printf("%p\n", (void*) sq->db);
+    
+    nvm_queue_t cq = controller->queue_handles[1];
+    completion = cq->page.virt_addr;
+
+    while (1)
+    {
+        delay(1500, 0, 0);
+        printf("0: %x\n", completion->dword[0]);
+        printf("1: %x\n", completion->dword[1]);
+        printf("2: %x\n", completion->dword[2]);
+        printf("3: %x\n", completion->dword[3]);
+        printf("\n");
+    }
 }
 
 
@@ -201,37 +316,43 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     if (controller->queue_handles == NULL)
     {
         fprintf(stderr, "Failed to allocate queue handle table: %s\n", strerror(errno));
-        nvm_free(controller);
+        nvm_free(controller, fd);
         return errno;
     }
 
-    for (int16_t i = 2; i < controller->max_queues; ++i)
+    // Reset queues
+    for (int16_t i = 0; i < controller->max_queues; ++i)
     {
         controller->queue_handles[i] = NULL;
     }
 
-    // Create admin submission queue
-    page_t admin_sq;
-    int err = get_page(&admin_sq, fd, -1);
-    if (err != 0)
+    // Create admin submission/completion queue pair
+    controller->n_queues = 2;
+    controller->queue_handles[0] = alloc_admin_queue(fd, 0, 64);
+    controller->queue_handles[1] = alloc_admin_queue(fd, 0, 16);
+
+    if (controller->queue_handles[0] == NULL || controller->queue_handles[1] == NULL)
     {
-        fprintf(stderr, "Failed to allocate and pin admin SQ: %s\n", strerror(err));
-        nvm_free(controller);
-        return err;
+        fprintf(stderr, "Failed to allocate admin queues\n");
+        nvm_free(controller, fd);
+        return errno;
     }
 
-    // TODO: Create admin SQ and CQ and page lock them
+    controller->queue_handles[0]->db = SQ_DBL(register_ptr, 0, controller->dstrd);
+    controller->queue_handles[1]->db = CQ_DBL(register_ptr, 1, controller->dstrd);
 
     // Reset controller
     reset_controller(register_ptr, controller->timeout);
 
     // Set admin CQ and SQ
-    //configure_admin_queues();
+    configure_admin_queues(register_ptr, controller);
 
     // Bring controller back up
     enable_controller(register_ptr, host_page_size, controller->timeout);
 
     // Submit identify controller command
+    printf("%p\n", (void*) register_ptr);
+    identify_controller(controller, fd);
 
     *handle = controller;
     fprintf(stderr, "NVMe controller initiated\n");
@@ -239,11 +360,24 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
 }
 
 
-void nvm_free(nvm_controller_t handle)
+void nvm_free(nvm_controller_t handle, int ioctl_fd)
 {
+    // TODO: submit stop processing command
+
     if (handle->queue_handles != NULL)
     {
-        for (int16_t i = 2; i < handle->n_queues; ++i)
+        int16_t i;
+        for (i = 0; i < 2; ++i)
+        {
+            if (handle->queue_handles[i])
+            {
+                put_page(&handle->queue_handles[i]->page, ioctl_fd);
+            }
+
+            free(handle->queue_handles[i]);
+        }
+
+        for (; i < handle->n_queues; ++i)
         {
             //delete_queue(handle, i);
         }

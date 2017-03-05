@@ -59,6 +59,8 @@ static long lookup_user_page(struct cunvme_virt_to_phys __user* request_ptr)
     page = virt_to_page(request.vaddr);
     ph_addr = page_to_phys(page);
 
+    printk(KERN_DEBUG "vaddr=%lx paddr=%lx\n", request.vaddr, ph_addr);
+
     request.paddr = ph_addr;
 
     if (copy_to_user(request_ptr, &request, sizeof(request)) != 0)
@@ -95,7 +97,6 @@ static long handle_request(struct file* ioctl_file, unsigned int cmd, unsigned l
 /* Release pinned memory pages */
 static int release_file(struct inode* inode, struct file* file)
 {
-    printk(KERN_DEBUG "Cleaning up after process\n");
     return 0;
 }
 

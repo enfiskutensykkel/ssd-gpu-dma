@@ -11,17 +11,32 @@ extern "C" {
 
 /* Doorbell register */
 #define SQ_DBL(p, y, dstrd)    \
-    ((volatile void*) ((volatile unsigned char*) (p)) + 0x1000 + ((2*(y)) * (4 << (dstrd))) )
+    ((volatile void*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y)) * (4 << (dstrd)))) )
 
 
 #define CQ_DBL(p, y, dstrd)    \
-    ((volatile void*) ((volatile unsigned char*) (p)) + 0x1000 + ((2*(y) + 1) * (4 << (dstrd))) )
+    ((volatile void*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y) + 1) * (4 << (dstrd)))) )
 
 
-/* Forward declaration of queue handle */
-struct nvm_queue;
+/* IO queue handle
+ *
+ * This structure represents an IO queue and holds information
+ * about entries and size as well as doorbell handles.
+ */
+struct nvm_queue
+{
+    unsigned int        no;             // Queue number
+    page_t              page;           // Page handle to where the queue is hosted
+    size_t              max_entries;    // Maximum number of queue entries supported
+    size_t              entry_size;     // Entry size
+    uint32_t            head;           // Head pointer
+    uint32_t            tail;           // Tail pointer
+    int                 phase;          // Current phase bit
+    volatile uint32_t*  db;             // Pointer to doorbell register
+};
+
+/* Convenience type for queue handle */
 typedef struct nvm_queue* nvm_queue_t;
-
 
 
 /* NVM controller handle
@@ -46,25 +61,6 @@ struct nvm_controller
 
 /* Convenience type for controller handle */
 typedef struct nvm_controller* nvm_controller_t;
-
-
-
-/* IO queue handle
- *
- * This structure represents an IO queue and holds information
- * about entries and size as well as doorbell handles.
- */
-struct nvm_queue
-{
-    unsigned int    no;             // Queue number
-    page_t          page;           // Page handle to where the queue is hosted
-    size_t          max_entries;    // Maximum number of queue entries supported
-    size_t          entry_size;     // Entry size
-    size_t          head;           // Head pointer
-    size_t          tail;           // Tail pointer
-    int             phase;          // Current phase bit
-    volatile void*  db;             // Pointer to doorbell register
-};
 
 
 #ifdef __cplusplus

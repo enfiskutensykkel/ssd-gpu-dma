@@ -108,7 +108,7 @@ int main(int argc, char** argv)
         return 4;
     }
 
-    nvm_free(handle);
+    nvm_free(handle, ioctl_fd);
 
     munmap((void*) register_mem, 0x1000 + MAX_DBL_MEM);
     close(ioctl_fd);
