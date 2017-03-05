@@ -6,7 +6,6 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <sys/mman.h>
 #include <unistd.h>
 #include <errno.h>
 #include <cunvme_ioctl.h>
@@ -16,21 +15,59 @@ extern "C" {
 #include <string.h>
 
 
-static int lookup_phys_addr(page_t* page, int fd)
+static int unpin_memory(page_t* page, int fd)
 {
-    page->kernel_handle = CUNVME_NO_HANDLE;
+    if (fd < 0)
+    {
+        fprintf(stderr, "Invalid ioctl fd: %d\n", fd);
+        return EBADF;
+    }
+    else if (page->kernel_handle == CUNVME_NO_HANDLE)
+    {
+        fprintf(stderr, "Invalid kernel handle\n");
+        return EBADF;
+    }
 
-    struct cunvme_virt_to_phys request;
-    request.paddr = (uint64_t) NULL;
-    request.vaddr = (uint64_t) page->virt_addr;
+    struct cunvme_unpin request;
+    request.handle = page->kernel_handle;
 
-    int err = ioctl(fd, CUNVME_VIRT_TO_PHYS, &request);
+    int err = ioctl(fd, CUNVME_UNPIN, &request);
     if (err < 0)
     {
-        fprintf(stderr, "ioctl to kernel failed: %s\n", strerror(errno));
+        fprintf(stderr, "ioctl to kernel failed: %s\n", strerror(-err));
         return errno;
     }
 
+    page->phys_addr = (unsigned long long) NULL;
+    page->kernel_handle = -1;
+    return 0;
+}
+
+
+static int pin_memory(page_t* page, int fd)
+{
+    if (fd < 0)
+    {
+        fprintf(stderr, "Invalid ioctl fd: %d\n", fd);
+        return EBADF;
+    }
+
+    page->kernel_handle = CUNVME_NO_HANDLE;
+
+    struct cunvme_pin request;
+    request.handle = CUNVME_NO_HANDLE;
+    request.paddr = (unsigned long long) NULL;
+    request.vaddr = (unsigned long long) page->virt_addr;
+
+    int err = ioctl(fd, CUNVME_PIN, &request);
+    if (err < 0)
+    {
+        fprintf(stderr, "ioctl to kernel failed: %s\n", strerror(-err));
+        return errno;
+    }
+
+    page->kernel_handle = request.handle;
+    fprintf(stdout, "kernel handle: %ld\n", page->kernel_handle);
     page->phys_addr = request.paddr;
     return 0;
 }
@@ -59,32 +96,24 @@ int get_page(page_t* page, int fd, int dev)
         return get_gpu_page(page, page_size, fd, dev);
     }
 
-    // TODO posix_memalign may be sufficient if we use get_user_pages in kernel module to page lock
-        
-    void* addr = mmap(NULL, page_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    if (addr == NULL)
+    void* virt_addr;
+    
+    err = posix_memalign(&virt_addr, page_size, page_size);
+    if (err != 0)
     {
-        fprintf(stderr, "Failed to mmap page: %s\n", strerror(errno));
-        return errno;
-    }
-
-    if (mlock(addr, page_size) != 0)
-    {
-        fprintf(stderr, "Failed to mlock page: %s\n", strerror(errno));
-        err = errno;
-        munmap(addr, page_size);
+        fprintf(stderr, "Failed to allocate page: %s\n", strerror(err));
         return err;
     }
 
     page->device = -1;
     page->kernel_handle = CUNVME_NO_HANDLE;
-    page->virt_addr = addr;
+    page->virt_addr = virt_addr;
     page->phys_addr = (uint64_t) NULL;
     page->page_size = page_size;
 
-    if (lookup_phys_addr(page, fd) != 0)
+    if (pin_memory(page, fd) != 0)
     {
-        put_page(page, fd);
+        put_page(page, -1);
         return EIO;
     }
 
@@ -104,9 +133,11 @@ void put_page(page_t* page, int fd)
         put_gpu_page(page, fd);
         return;
     }
-
-    munlock(page->virt_addr, page->page_size);
-    munmap(page->virt_addr, page->page_size);
+    else
+    {
+        unpin_memory(page, fd);
+        free(page->virt_addr);
+    }
 }
 
 

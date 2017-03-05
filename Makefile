@@ -38,7 +38,7 @@ unload:
 	-rmmod $(MODULE).ko
 
 load:
-	insmod $(MODULE).ko 
+	insmod $(MODULE).ko num_user_pages=128
 
 userspace/%.c.o: userspace/%.c
 	$(CCBIN) -std=gnu11 $(CFLAGS) -pedantic $(DEFINES) $(INCLUDE) -o $@ $< -c

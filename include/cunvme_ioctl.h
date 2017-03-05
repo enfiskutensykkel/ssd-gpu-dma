@@ -1,11 +1,8 @@
 #ifndef __CUNVME_REQUEST_H__
 #define __CUNVME_REQUEST_H__
 
-
 #ifndef __KERNEL__
 #define __user
-#include <stddef.h>
-#include <stdint.h>
 #endif
 
 #include <asm/ioctl.h>
@@ -19,18 +16,30 @@
 /* Supported operations */
 enum
 {
-    CUNVME_VIRT_TO_PHYS     = _IO('S', CUNVME_MAGIC | 0x01),
+    CUNVME_PIN          = _IO('S', CUNVME_MAGIC | 0x01),
+    CUNVME_UNPIN        = _IO('S', CUNVME_MAGIC | 0x02)
 };
 
 
 /* Pin request
  *
- * Find memory page and get the physical address.
+ * Find memory page, pin it in RAM and get the physical address.
  */
-struct cunvme_virt_to_phys
+struct cunvme_pin
 {
-    uint64_t        paddr;          /* out: physical address */
-    uint64_t        vaddr;          /* in:  virtual address */
+    long                handle;     /* out: kernel handle */
+    unsigned long long  paddr;      /* out: physical address */
+    unsigned long long  vaddr;      /* in:  virtual address */
+};
+
+
+/* Unpin request
+ *
+ * Release a previously pinned page.
+ */
+struct cunvme_unpin
+{
+    long                handle;     /* in: kernel handle */
 };
 
 #endif
