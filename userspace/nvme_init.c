@@ -11,6 +11,8 @@
 #include <time.h>
 
 
+#define _MIN(a, b) ( (a) <= (b) ? (a) : (b) )
+
 /* Convenience function for creating a bit mask */
 static inline uint64_t bitmask(int hi, int lo)
 {
@@ -180,7 +182,7 @@ static nvm_queue_t alloc_admin_queue(int ioctl_fd, unsigned int no, size_t entry
     }
 
     queue->no = no;
-    queue->max_entries = queue->page.page_size / entry_size;
+    queue->max_entries = _MIN(16, queue->page.page_size / entry_size);
     queue->entry_size = entry_size;
     queue->head = 0;
     queue->tail = 0;
@@ -194,18 +196,19 @@ static nvm_queue_t alloc_admin_queue(int ioctl_fd, unsigned int no, size_t entry
 
 
 /* Set admin queue registers */
-static void configure_admin_queues(volatile void* register_ptr, nvm_controller_t c)
+static void configure_admin_queues(volatile void* register_ptr, nvm_controller_t controller)
 {
+    nvm_queue_t sq = controller->queue_handles[0];
+    nvm_queue_t cq = controller->queue_handles[1];
+
     volatile uint32_t* aqa = AQA(register_ptr);
-    *aqa = AQA$AQS(c->queue_handles[0]->max_entries) | AQA$AQC(c->queue_handles[1]->max_entries);
+    *aqa = AQA$AQS(sq->max_entries - 1) | AQA$AQC(cq->max_entries - 1);
 
     volatile uint64_t* asq = ASQ(register_ptr);
-    *asq = c->queue_handles[0]->page.phys_addr;
+    *asq = sq->page.phys_addr;
 
     volatile uint64_t* acq = ACQ(register_ptr);
-    *acq = c->queue_handles[1]->page.phys_addr;
-
-    printf("%lx %lx\n", c->queue_handles[1]->page.virt_addr, c->queue_handles[1]->page.phys_addr);
+    *acq = cq->page.phys_addr;
 }
 
 
@@ -249,13 +252,12 @@ static void identify_controller(nvm_controller_t controller, int ioctl_fd)
     memcpy(sq->page.virt_addr, &command, sizeof(command));
     sq->tail += 1;
     *(sq->db) = sq->tail;
+    __sync_synchronize();
 
-    printf("%p\n", (void*) sq->db);
-    
     nvm_queue_t cq = controller->queue_handles[1];
     completion = cq->page.virt_addr;
 
-    while (1)
+    for (size_t i = 0; i < 3; ++i)
     {
         delay(1500, 0, 0);
         printf("0: %x\n", completion->dword[0]);
@@ -351,7 +353,6 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     enable_controller(register_ptr, host_page_size, controller->timeout);
 
     // Submit identify controller command
-    printf("%p\n", (void*) register_ptr);
     identify_controller(controller, fd);
 
     *handle = controller;

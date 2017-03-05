@@ -59,7 +59,7 @@ static long lookup_user_page(struct cunvme_virt_to_phys __user* request_ptr)
     page = virt_to_page(request.vaddr);
     ph_addr = page_to_phys(page);
 
-    printk(KERN_DEBUG "vaddr=%lx paddr=%lx\n", request.vaddr, ph_addr);
+    printk(KERN_DEBUG "vaddr=%llx paddr=%llx\n", request.vaddr, ph_addr);
 
     request.paddr = ph_addr;
 
