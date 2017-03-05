@@ -69,7 +69,7 @@ int main(int argc, char** argv)
     fclose(config_fd);
 
     // Open communication channel with kernel module
-    int ioctl_fd = open(CUNVME_PATH, 0);
+    int ioctl_fd = open(CUNVME_PATH, O_SYNC | O_RDONLY);
     if (ioctl_fd < 0)
     {
         fprintf(stderr, "Couldn't open ioctl file: %s\n", strerror(errno));

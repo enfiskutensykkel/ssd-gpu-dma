@@ -19,17 +19,16 @@
 /* Supported operations */
 enum
 {
-    CUNVME_PIN      = _IO(CUNVME_MAGIC | 'S', 0x01),
+    CUNVME_VIRT_TO_PHYS     = _IO('S', CUNVME_MAGIC | 0x01),
 };
 
 
 /* Pin request
  *
- * Find memory page, pin it in memory and get the physical address.
+ * Find memory page and get the physical address.
  */
-struct cunvme_pin_page
+struct cunvme_virt_to_phys
 {
-    long            handle;         /* out: reference handle */
     uint64_t        paddr;          /* out: physical address */
     uint64_t        vaddr;          /* in:  virtual address */
 };

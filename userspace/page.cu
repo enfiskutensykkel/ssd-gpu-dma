@@ -16,21 +16,21 @@ extern "C" {
 #include <string.h>
 
 
-
-static int pin_ram_page(page_t* page, int fd)
+static int lookup_phys_addr(page_t* page, int fd)
 {
-    struct cunvme_pin_page request;
-    request.handle = CUNVME_NO_HANDLE;
+    page->kernel_handle = CUNVME_NO_HANDLE;
+
+    struct cunvme_virt_to_phys request;
     request.paddr = (uint64_t) NULL;
     request.vaddr = (uint64_t) page->virt_addr;
 
-    if (ioctl(fd, CUNVME_PIN, &request) < 0)
+    int err = ioctl(fd, CUNVME_VIRT_TO_PHYS, &request);
+    if (err < 0)
     {
         fprintf(stderr, "ioctl to kernel failed: %s\n", strerror(errno));
         return errno;
     }
 
-    page->kernel_handle = request.handle;
     page->phys_addr = request.paddr;
     return 0;
 }
@@ -59,6 +59,8 @@ int get_page(page_t* page, int fd, int dev)
         return get_gpu_page(page, page_size, fd, dev);
     }
 
+    // TODO posix_memalign may be sufficient if we use get_user_pages in kernel module to page lock
+        
     void* addr = mmap(NULL, page_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     if (addr == NULL)
     {
@@ -80,9 +82,9 @@ int get_page(page_t* page, int fd, int dev)
     page->phys_addr = (uint64_t) NULL;
     page->page_size = page_size;
 
-    if (pin_ram_page(page, dev) != 0)
+    if (lookup_phys_addr(page, fd) != 0)
     {
-        put_page(page, -1);
+        put_page(page, fd);
         return EIO;
     }
 
@@ -101,10 +103,6 @@ void put_page(page_t* page, int fd)
     {
         put_gpu_page(page, fd);
         return;
-    }
-
-    if (fd > 0)
-    {
     }
 
     munlock(page->virt_addr, page->page_size);

@@ -20,6 +20,10 @@ Nvidia CUDA
 Loadable Kernel Module
 --------------------------------------
 
+Limitations
+--------------------------------------
+IOMMU stuff
+
 Future optimisations
 --------------------------------------
   - Use controller onboard memory (optional in NVMe) to host queues and push data using GPUDirect Async

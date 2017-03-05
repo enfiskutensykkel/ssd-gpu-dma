@@ -1,40 +1,23 @@
 #include <linux/module.h>
-#include <linux/moduleparam.h>
+//#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
-#include <linux/slab.h>
+//#include <linux/slab.h>
 #include <asm/uaccess.h>
 #include <asm/errno.h>
 #include <asm/io.h>
-#include <linux/mm.h>
-#include <linux/spinlock.h>
+//#include <linux/spinlock.h>
+//#include <linux/sched.h>
 #include <cunvme_ioctl.h>
+#include <linux/mm.h>
 
 
-/* Hold pinned pages in a data structure */
-struct page_descriptor
-{
-    
-};
+//static long num_user_pages = 0;
+//module_param(num_user_pages, long, 0);
+//MODULE_PARM_DESC(num_user_pages, "Maximum number of pinned pages");
 
-
-/* Maximum number of pinned pages allowed */
-static long num_user_pages = 0;
-module_param(num_user_pages, long, 64);
-MODULE_PARM_DESC(num_user_pages, "Maximum number of pinned pages");
-
-
-/* Pinned pages */
-static struct page_descriptor* user_pages = NULL;
-
-
-/* Pointer to the current page entry */
-static long current_page = 0;
-
-
-/* Ensure atomic access to page descriptor table */
-static spinlock_t lock = __SPIN_LOCK_UNLOCKED(lock);
+//static spinlock_t lock = __SPIN_LOCK_UNLOCKED(lock);
 
 
 /* ioctl handler prototype */
@@ -57,11 +40,12 @@ static const struct file_operations ioctl_fops = {
 };
 
 
-static long pin_user_page(struct cunvme_pin_page __user* request_ptr)
+static long lookup_user_page(struct cunvme_virt_to_phys __user* request_ptr)
 {
-    struct cunvme_pin_page request;
+    struct cunvme_virt_to_phys request;
     int retval = 0;
-    long handle = CUNVME_NO_HANDLE;
+    struct page* page;
+    dma_addr_t ph_addr;
 
     if (copy_from_user(&request, request_ptr, sizeof(request)) != 0)
     {
@@ -69,21 +53,14 @@ static long pin_user_page(struct cunvme_pin_page __user* request_ptr)
         return -EIO;
     }
     
-    spin_lock(&lock);
-    retval = -ENOMEM;
-    if (current_page < num_user_pages)
-    {
-        retval = 0;
-        handle = current_page++;
-    }
-    spin_unlock(&lock);
+    // TODO call get_user_pages instead and use that for page-locking?
+    //retval = get_user_pages(current, current->mm, request.vaddr, 1, 1, 0, &pd->page, &pd->vm_area);
+    
+    page = virt_to_page(request.vaddr);
+    ph_addr = page_to_phys(page);
 
-    if (retval == 0)
-    {
-        //current, current->mm
-    }
+    request.paddr = ph_addr;
 
-    request.handle = handle;
     if (copy_to_user(request_ptr, &request, sizeof(request)) != 0)
     {
         printk(KERN_ERR "Failed to write back result to userspace\n");
@@ -101,11 +78,12 @@ static long handle_request(struct file* ioctl_file, unsigned int cmd, unsigned l
 
     switch (cmd)
     {
-        case CUNVME_PIN:
-            retval = pin_user_page((struct cunvme_pin_page __user*) arg);
+        case CUNVME_VIRT_TO_PHYS:
+            retval = lookup_user_page((struct cunvme_virt_to_phys __user*) arg);
             break;
 
         default:
+            printk(KERN_WARNING KBUILD_MODNAME ": got unknown request\n");
             retval = -EINVAL;
             break;
     }
@@ -117,23 +95,18 @@ static long handle_request(struct file* ioctl_file, unsigned int cmd, unsigned l
 /* Release pinned memory pages */
 static int release_file(struct inode* inode, struct file* file)
 {
+    printk(KERN_DEBUG "Cleaning up after process\n");
     return 0;
 }
 
 
-static int __init unvme_entry(void)
+static int __init cunvme_entry(void)
 {
-    user_pages = kcalloc(num_user_pages, sizeof(struct page_descriptor), GFP_KERNEL);
-    if (user_pages == NULL)
-    {
-        printk(KERN_ERR "Failed to allocate user page descriptor table\n");
-        return -ENOMEM;
-    }
-
+    //user_pages = kcalloc(num_user_pages, sizeof(struct page_descriptor), GFP_KERNEL);
+    
     ioctl_file = proc_create(CUNVME_FILE, 0, NULL, &ioctl_fops);
     if (ioctl_file == NULL)
     {
-        kfree(user_pages);
         printk(KERN_ERR "Failed to create proc file: %s\n", CUNVME_FILE);
         return -ENOMEM;
     }
@@ -143,16 +116,15 @@ static int __init unvme_entry(void)
 }
 
 
-static void __exit unvme_exit(void)
+static void __exit cunvme_exit(void)
 {
     proc_remove(ioctl_file);
-    kfree(user_pages);
     printk(KERN_DEBUG KBUILD_MODNAME " unloaded\n");
 }
 
 
-module_init(unvme_entry);
-module_exit(unvme_exit);
+module_init(cunvme_entry);
+module_exit(cunvme_exit);
 
 MODULE_AUTHOR("Jonas Markussen <jonassm@simula.no>");
 MODULE_DESCRIPTION("Stub module to page-lock memory and retrieve physical addresses");
