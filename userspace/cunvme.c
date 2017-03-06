@@ -98,6 +98,7 @@ int main(int argc, char** argv)
 
     nvm_controller_t handle;
 
+    // Initialize controller
     int status = nvm_init(&handle, ioctl_fd, register_mem, MAX_DBL_MEM);
     if (status != 0)
     {
@@ -108,8 +109,10 @@ int main(int argc, char** argv)
         return 4;
     }
 
-    nvm_free(handle, ioctl_fd);
+    // TODO: stuff
 
+    // Clean up resources
+    nvm_free(handle, ioctl_fd);
     munmap((void*) register_mem, 0x1000 + MAX_DBL_MEM);
     close(ioctl_fd);
     close(bar0_fd);

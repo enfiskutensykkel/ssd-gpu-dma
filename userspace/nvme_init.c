@@ -29,7 +29,7 @@
 #define CAP$CQR(p)      _RB(*CAP(p), 16, 16)    // Contiguous Queues Required
 #define CAP$MQES(p)     _RB(*CAP(p), 15,  0)    // Maximum Queue Entries Supported
 
-#define CSTS$RDY(p)     _RB(*CSTS(p), 0,  0)    // Ready
+#define CSTS$RDY(p)     _RB(*CSTS(p), 0,  0)    // Ready indicator
 
 
 /* Write bit fields */
@@ -199,6 +199,22 @@ static void print_controller_serial(unsigned char* data)
 }
 
 
+static void extract_controller_properties(nvm_controller_t controller, unsigned char* data)
+{
+    // TODO: Read the following fields
+    // - Maximum Data Transfer Size
+    // - Submission Queue Entry Size
+    // - Completion Queue Entry Size
+    // - Maximum Outstanding Commands (MAXCMD)
+    // - Number of Namespaces (NN)
+
+    controller->max_data_size = data[77] * controller->page_size; // FIXME: use CAP.MPSMIN
+    //controller->sq_entry_size = ;
+
+    controller->n_ns = *((uint32_t*) (data + 516));
+}
+
+
 int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size_t db_size)
 {
     *handle = NULL;
@@ -246,12 +262,14 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     controller->dstrd = CAP$DSTRD(register_ptr);
     controller->enabled = 0;
     controller->timeout = CAP$TO(register_ptr) * 500UL;
+    controller->max_data_size = 0;
     controller->max_entries = CAP$MQES(register_ptr) + 1;   // CAP.MQES is a 0's based value
     controller->cq_entry_size = 0;
     controller->sq_entry_size = 0;
     controller->max_queues = (int16_t) (db_size / (4 << controller->dstrd));
     controller->n_queues = 0;
     controller->queue_handles = NULL;
+    controller->n_ns = 0;
 
     // Allocate queue handle table
     controller->queue_handles = malloc(sizeof(struct nvm_queue) * controller->max_queues);
@@ -308,6 +326,9 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     }
     fprintf(stderr, " OK\n");
 
+    // Parse controller identification and extract properties
+    extract_controller_properties(controller, controller_data.virt_addr);
+
     // Print some info about the controller
     print_controller_serial(controller_data.virt_addr);
 
@@ -315,7 +336,7 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     put_page(&controller_data, fd);
 
     *handle = controller;
-    fprintf(stderr, "NVMe controller initiated\n");
+    fprintf(stderr, "NVMe controller initialized\n");
     return 0;
 }
 
