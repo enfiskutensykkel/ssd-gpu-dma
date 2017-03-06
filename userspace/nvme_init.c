@@ -132,6 +132,13 @@ static int enable_controller(volatile void* register_ptr, uint8_t encoded_page_s
 }
 
 
+static void configure_entry_sizes(volatile void* register_ptr, nvm_controller_t controller)
+{
+    volatile uint32_t* cc = CC(register_ptr);
+    *cc |= CC$IOCQES(controller->cq_entry_size) | CC$IOSQES(controller->sq_entry_size);
+}
+
+
 static nvm_queue_t alloc_admin_queue(int ioctl_fd, unsigned int no, size_t entry_size)
 {
     // Allocate queue handle
@@ -156,7 +163,7 @@ static nvm_queue_t alloc_admin_queue(int ioctl_fd, unsigned int no, size_t entry
     queue->entry_size = entry_size;
     queue->head = 0;
     queue->tail = 0;
-    queue->phase = 0;
+    queue->phase = 1;
     queue->db = NULL;
 
     memset(queue->page.virt_addr, 0, queue->page.page_size);
@@ -182,36 +189,14 @@ static void configure_admin_queues(volatile void* register_ptr, nvm_controller_t
 }
 
 
-static void print_controller_serial(unsigned char* data)
+static void extract_controller_properties(nvm_controller_t controller, volatile void* register_ptr)
 {
-    char serial[21];
-    memset(serial, 0, 21);
-    memcpy(serial, data + 4, 20);
-
-    char model[41];
-    memset(model, 0, 41);
-    memcpy(model, data + 24, 40);
-
-    fprintf(stdout, "PCI Vendor ID           : %x %x\n", data[0], data[1]);
-    fprintf(stdout, "PCI Subsystem Vendor ID : %x %x\n", data[2], data[3]);
-    fprintf(stdout, "Serial Number           : %s\n", serial);
-    fprintf(stdout, "Model Number            : %s\n", model);
-}
-
-
-static void extract_controller_properties(nvm_controller_t controller, unsigned char* data)
-{
-    // TODO: Read the following fields
-    // - Maximum Data Transfer Size
-    // - Submission Queue Entry Size
-    // - Completion Queue Entry Size
-    // - Maximum Outstanding Commands (MAXCMD)
-    // - Number of Namespaces (NN)
-
-    controller->max_data_size = data[77] * controller->page_size; // FIXME: use CAP.MPSMIN
-    //controller->sq_entry_size = ;
-
-    controller->n_ns = *((uint32_t*) (data + 516));
+    unsigned char* bytes = controller->data.virt_addr;
+    controller->max_data_size = bytes[77] * (1 << (12 + CAP$MPSMIN(register_ptr)));
+    controller->sq_entry_size = _RB(bytes[512], 3, 0);
+    controller->cq_entry_size = _RB(bytes[513], 3, 0);
+    controller->max_out_cmds = *((uint16_t*) (bytes + 514));
+    controller->n_ns = *((uint32_t*) (bytes + 516));
 }
 
 
@@ -239,22 +224,21 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
         return ENOSPC;
     }
 
-    // Allocate buffer for controller data
-    page_t controller_data;
-    int err = get_page(&controller_data, fd, -1);
-    if (err != 0)
-    {
-        fprintf(stderr, "Failed to allocate controller data page: %s\n", strerror(err));
-        return err;
-    }
-
     // Allocate controller handle
     controller = malloc(sizeof(struct nvm_controller));
     if (controller == NULL)
     {
         fprintf(stderr, "Failed to allocate controller structure: %s\n", strerror(errno));
-        put_page(&controller_data, fd);
         return errno;
+    }
+
+    // Allocate buffer for controller data
+    int err = get_page(&controller->data, fd, -1);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to allocate controller data page: %s\n", strerror(err));
+        nvm_free(controller, fd);
+        return err;
     }
 
     // Set controller properties
@@ -276,7 +260,6 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     if (controller->queue_handles == NULL)
     {
         fprintf(stderr, "Failed to allocate queue handle table: %s\n", strerror(errno));
-        put_page(&controller_data, fd);
         nvm_free(controller, fd);
         return errno;
     }
@@ -295,7 +278,6 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     if (controller->queue_handles[0] == NULL || controller->queue_handles[1] == NULL)
     {
         fprintf(stderr, "Failed to allocate admin queues\n");
-        put_page(&controller_data, fd);
         nvm_free(controller, fd);
         return errno;
     }
@@ -304,7 +286,6 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     controller->queue_handles[1]->db = CQ_DBL(register_ptr, 1, controller->dstrd);
 
     // Reset controller
-    fprintf(stderr, "Resetting device...");
     reset_controller(register_ptr, controller->timeout);
 
     // Set admin CQ and SQ
@@ -312,37 +293,31 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
 
     // Bring controller back up
     enable_controller(register_ptr, host_page_size, controller->timeout);
-    fprintf(stderr, " OK\n");
 
     // Submit identify controller command
-    fprintf(stderr, "Identifying device...");
-    err = identify_controller(controller, &controller_data);
+    err = identify_controller(controller, &controller->data);
     if (err != 0)
     {
         fprintf(stderr, "Failed to execute identify controller command: %s\n", strerror(err));
-        put_page(&controller_data, fd);
         nvm_free(controller, fd);
         return err;
     }
-    fprintf(stderr, " OK\n");
 
     // Parse controller identification and extract properties
-    extract_controller_properties(controller, controller_data.virt_addr);
+    extract_controller_properties(controller, register_ptr);
 
-    // Print some info about the controller
-    print_controller_serial(controller_data.virt_addr);
-
-    // Clean up controller identification buffer
-    put_page(&controller_data, fd);
+    // Set CQES and SQES in CC
+    configure_entry_sizes(register_ptr, controller);
 
     *handle = controller;
-    fprintf(stderr, "NVMe controller initialized\n");
     return 0;
 }
 
 
 void nvm_free(nvm_controller_t handle, int ioctl_fd)
 {
+    put_page(&handle->data, ioctl_fd);
+
     if (handle->queue_handles != NULL)
     {
         // TODO: submit stop processing command

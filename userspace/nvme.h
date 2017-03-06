@@ -31,7 +31,7 @@ struct nvm_queue
     size_t              entry_size;     // Entry size
     uint32_t            head;           // Head pointer
     uint32_t            tail;           // Tail pointer
-    int                 phase;          // Current phase bit
+    uint64_t            phase;          // Current phase bit
     volatile uint32_t*  db;             // Pointer to doorbell register
 };
 
@@ -47,14 +47,16 @@ typedef struct nvm_queue* nvm_queue_t;
  */
 struct nvm_controller
 {
+    page_t          data;           // Controller Identify structure
     size_t          page_size;      // Memory page size (MPS)
     uint8_t         dstrd;          // Doorbell stride (in encoded form)
     int             enabled;        // Controller enabled
     uint64_t        timeout;        // Controller timeout in milliseconds
+    size_t          max_out_cmds;   // Maximum outstanding commands (MAXCMD)
     size_t          max_data_size;  // Maximum data transfer size (MDTS)
     size_t          max_entries;    // Maximum queue entries supported
-    size_t          cq_entry_size;  // CQ entry size
-    size_t          sq_entry_size;  // SQ entry size
+    size_t          cq_entry_size;  // CQ entry size (CQES)
+    size_t          sq_entry_size;  // SQ entry size (SQES)
     int             max_queues;     // Maximum number of IO queues
     int             n_queues;       // Number queues
     nvm_queue_t*    queue_handles;  // Pointer to queues (even numbered queues=SQ, odd numbered=CQ)

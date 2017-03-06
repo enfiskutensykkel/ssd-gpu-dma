@@ -40,6 +40,26 @@ static void write_register(FILE* fptr, size_t offset, size_t size, void* ptr)
 }
 
 
+static void print_controller_info(nvm_controller_t controller)
+{
+    unsigned char* data = controller->data.virt_addr;
+
+    char serial[21];
+    memset(serial, 0, 21);
+    memcpy(serial, data + 4, 20);
+
+    char model[41];
+    memset(model, 0, 41);
+    memcpy(model, data + 24, 40);
+
+    fprintf(stdout, "PCI Vendor ID           : %x %x\n", data[0], data[1]);
+    fprintf(stdout, "PCI Subsystem Vendor ID : %x %x\n", data[2], data[3]);
+    fprintf(stdout, "Serial Number           : %s\n", serial);
+    fprintf(stdout, "Model Number            : %s\n", model);
+    fprintf(stdout, "Number of namespaces    : %u\n", controller->n_ns);
+}
+
+
 int main(int argc, char** argv)
 {
     if (argc != 2)
@@ -99,6 +119,7 @@ int main(int argc, char** argv)
     nvm_controller_t handle;
 
     // Initialize controller
+    fprintf(stderr, "Resetting device...\n");
     int status = nvm_init(&handle, ioctl_fd, register_mem, MAX_DBL_MEM);
     if (status != 0)
     {
@@ -108,6 +129,9 @@ int main(int argc, char** argv)
         close(bar0_fd);
         return 4;
     }
+
+    // Print some info about the controller
+    print_controller_info(handle);
 
     // TODO: stuff
 

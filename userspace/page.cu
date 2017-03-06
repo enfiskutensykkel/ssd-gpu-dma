@@ -83,6 +83,12 @@ int get_page(page_t* page, int fd, int dev)
 {
     int err;
 
+    page->device = -1;
+    page->kernel_handle = CUNVME_NO_HANDLE;
+    page->virt_addr = NULL;
+    page->phys_addr = (uint64_t) NULL;
+    page->page_size = 0;
+
     long page_size = sysconf(_SC_PAGESIZE);
     if (page_size == -1)
     {
@@ -104,10 +110,7 @@ int get_page(page_t* page, int fd, int dev)
         return err;
     }
 
-    page->device = -1;
-    page->kernel_handle = CUNVME_NO_HANDLE;
     page->virt_addr = virt_addr;
-    page->phys_addr = (uint64_t) NULL;
     page->page_size = page_size;
 
     if (pin_memory(page, fd) != 0)

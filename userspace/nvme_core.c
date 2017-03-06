@@ -58,32 +58,28 @@ int produce_command(nvm_queue_t sq, struct command* cmd)
 }
 
 
-int consume_completion(nvm_queue_t sq, nvm_queue_t cq, struct completion* cpl)
+int consume_completion(nvm_controller_t controller, nvm_queue_t cq, struct completion* cpl)
 {
     struct completion* ptr = (struct completion*) (((unsigned char*) cq->page.virt_addr) + cq->entry_size * cq->head);
 
-    if ((*CQ_CMDID(ptr) - cq->head) % cq->max_entries > cq->tail)
+    if (PHASE(ptr) != cq->phase)
     {
-        memcpy(cpl, ptr, sizeof(struct completion));
-
-        sq->head = *CQ_CMDID(ptr);
-        
-        if (++cq->tail == cq->max_entries)
-        {
-            cq->tail = 0;
-        }
-
-        if (++cq->head == cq->max_entries)
-        {
-            cq->head = 0;
-        }
-
-        // Update head pointer to indicate that completion is read
-        *cq->db = cq->head;
-        return 1;
+        return 0;
     }
 
-    return 0;
+    memcpy(cpl, ptr, sizeof(struct completion));
+
+    if (++cq->head == cq->max_entries)
+    {
+        cq->head = 0;
+        cq->phase = !cq->phase;
+    }
+
+    controller->queue_handles[*CQ_SQID(ptr)]->head++;
+
+    // Update head pointer to indicate that completion is read
+    *cq->db = cq->head;
+    return 1;
 }
 
 
@@ -119,8 +115,8 @@ int identify_controller(nvm_controller_t controller, page_t* data)
     }
 
     // Poll for completion
-    while (consume_completion(controller->queue_handles[0], controller->queue_handles[1], &cpl) == 0);
-
+    while (consume_completion(controller, controller->queue_handles[1], &cpl) == 0);
+    
     return 0;
 }
 
