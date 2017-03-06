@@ -3,17 +3,17 @@ Controlling an NVMe from a CUDA kernel
 
 NVMe
 --------------------------------------
-[http://www.nvmexpress.org/wp-content/uploads/NVM_Express_1_2_1_Gold_20160603.pdf](NVM Express)
+[NVM Express](http://www.nvmexpress.org/wp-content/uploads/NVM_Express_1_2_1_Gold_20160603.pdf)
 
 For simplicity is every queue a page large
 
 sysfs
 --------------------------------------
-[https://www.kernel.org/doc/Documentation/filesystems/sysfs-pci.txt](Using sysfs to access PCI device resources)
+[Using sysfs to access PCI device resources](https://www.kernel.org/doc/Documentation/filesystems/sysfs-pci.txt)
 
 Nvidia CUDA
 --------------------------------------
-  - [http://docs.nvidia.com/cuda/gpudirect-rdma/#axzz4a6tqNDAe](GPUDirect RDMA)
+  - [GPUDirect RDMA](http://docs.nvidia.com/cuda/gpudirect-rdma/#axzz4a6tqNDAe)
 
   - GPUDirect Async
 
