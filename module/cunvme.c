@@ -13,14 +13,14 @@
 #include <linux/mm.h>
 
 
+/* Describes a page of user memory */
 struct user_page
 {
-    int                     used;
-    struct task_struct*     owner;
-    struct page*            page;
-    struct vm_area_struct*  vma;
-    unsigned long long      virt_addr;
-    dma_addr_t              phys_addr;
+    struct task_struct*     owner;      /* user process that owns the page */
+    struct page*            page;       /* page in question */
+    struct vm_area_struct*  vma;        /* virtual memory mapping stuff */
+    unsigned long long      virt_addr;  /* virtual address of the page */
+    dma_addr_t              phys_addr;  /* physical address of page */
 };
 
 
@@ -76,10 +76,9 @@ static long unpin_user_page(struct cunvme_unpin __user* requestp)
     up = &user_pages[request.handle];
 
     spin_lock(&user_pages_lock);
-    if (up->used && up->owner == current)
+    if (up->owner == current)
     {
         put_page(up->page);
-        up->used = 0;
         up->owner = NULL;
     }
     else
@@ -102,10 +101,9 @@ static long pin_user_page(struct cunvme_pin __user* request_ptr)
     for (handle = 0; handle < num_user_pages; ++handle)
     {
         spin_lock(&user_pages_lock);
-        if (!user_pages[handle].used)
+        if (user_pages[handle].owner == NULL)
         {
             up = &user_pages[handle];
-            up->used = 1;
             up->owner = current;
             spin_unlock(&user_pages_lock);
             break;
@@ -126,7 +124,9 @@ static long pin_user_page(struct cunvme_pin __user* request_ptr)
         return -EIO;
     }
 
-    retval = get_user_pages(current, current->mm, request.vaddr, 1, 1, 0, &up->page, &up->vma);
+    up->virt_addr = request.vaddr; // FIXME: mask out so we ensure page-alignment
+
+    retval = get_user_pages(current, current->mm, up->virt_addr, 1, 1, 0, &up->page, &up->vma);
     if (retval != 1)
     {
         handle = CUNVME_NO_HANDLE;
@@ -134,7 +134,6 @@ static long pin_user_page(struct cunvme_pin __user* request_ptr)
         goto out;
     }
 
-    up->virt_addr = request.vaddr;
     up->phys_addr = page_to_phys(up->page);
     request.paddr = up->phys_addr;
 
@@ -190,10 +189,10 @@ static int release_file(struct inode* inode, struct file* file)
     for (i = in_use = 0; i < num_user_pages; ++i)
     {
         spin_lock(&user_pages_lock);
-        if (user_pages[i].used && user_pages[i].owner == current)
+        if (user_pages[i].owner == current)
         {
             put_page(user_pages[i].page);
-            user_pages[i].used = 0;
+            user_pages[i].owner = NULL;
             ++in_use;
         }
         spin_unlock(&user_pages_lock);
@@ -222,7 +221,7 @@ static int __init cunvme_entry(void)
 
     for (i = 0; i < num_user_pages; ++i)
     {
-        user_pages[i].used = 0;
+        user_pages[i].owner = NULL;
     }
     
     ioctl_file = proc_create(CUNVME_FILE, 0, NULL, &ioctl_fops);
@@ -246,16 +245,21 @@ static void __exit cunvme_exit(void)
 
     for (i = 0; i < num_user_pages; ++i)
     {
-        if (user_pages[i].used)
+        if (user_pages[i].owner != NULL)
         {
             ++count;
             put_page(user_pages[i].page);
-            user_pages[i].used = 0;
+            user_pages[i].owner = NULL;
         }
     }
 
     kfree(user_pages);
-    printk(KERN_INFO KBUILD_MODNAME " unloaded (%ld was still in use)\n", count);
+    printk(KERN_INFO KBUILD_MODNAME " unloaded\n");
+
+    if (count > 0)
+    {
+        printk(KERN_WARNING "%ld pages were still pinned\n", count);
+    }
 }
 
 
