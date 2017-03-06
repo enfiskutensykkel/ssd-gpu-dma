@@ -9,37 +9,7 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
-
-
-#define _MIN(a, b) ( (a) <= (b) ? (a) : (b) )
-
-/* Convenience function for creating a bit mask */
-static inline uint64_t bitmask(int hi, int lo)
-{
-    uint64_t mask = 0;
-
-    for (int i = lo; i <= hi; ++i)
-    {
-        mask |= 1UL << i;
-    }
-
-    return mask;
-}
-
-
-/* Extract specific bits */
-#define _RB(v, hi, lo)   \
-    ( ( (v) & bitmask((hi), (lo)) ) >> (lo) )
-
-
-/* Set specifics bits */
-#define _WB(v, hi, lo)   \
-    ( ( (v) << (lo) ) & bitmask((hi), (lo)) )
-
-
-/* Offset to a register */
-#define _REG(p, offs, bits) \
-    ((volatile uint##bits##_t *) (((volatile unsigned char*) (p)) + (offs)))
+#include "util.h"
 
 
 /* Controller registers */
@@ -212,60 +182,20 @@ static void configure_admin_queues(volatile void* register_ptr, nvm_controller_t
 }
 
 
-/* Send an identify controller NVM command */
-static void identify_controller(nvm_controller_t controller, int ioctl_fd)
+static void print_controller_serial(unsigned char* data)
 {
-    page_t identify_data;
-    int err = get_page(&identify_data, ioctl_fd, -1);
-    if (err != 0)
-    {
-        fprintf(stderr, "Failed to allocate buffer for identify command\n");
-        return;
-    }
+    char serial[21];
+    memset(serial, 0, 21);
+    memcpy(serial, data + 4, 20);
 
-    struct {
-        uint32_t dword[16];
-    } command;
+    char model[41];
+    memset(model, 0, 41);
+    memcpy(model, data + 24, 40);
 
-    volatile struct {
-        uint32_t dword[4];
-    } *completion;
-    memset(&command, 0, sizeof(command));
-
-    uint32_t opcode = (0 << 7) | (0x1 << 2) | (0x2);
-    command.dword[0] = (0xbeef << 16) | (0 << 14) | (0 << 8) | opcode;
-    command.dword[1] = 0xffffffff;
-
-    command.dword[4] = 0x0;
-    command.dword[5] = 0x0;
-
-    uint64_t buf_addr = identify_data.phys_addr;
-    command.dword[7] = (uint32_t) (buf_addr >> 32);
-    command.dword[6] = (uint32_t) buf_addr;
-    command.dword[8] = 0;
-    command.dword[9] = 0;
-
-    uint8_t cns = 1;
-    command.dword[10] = (0 << 16) | cns;
-
-    nvm_queue_t sq = controller->queue_handles[0];
-    memcpy(sq->page.virt_addr, &command, sizeof(command));
-    sq->tail += 1;
-    *(sq->db) = sq->tail;
-    __sync_synchronize();
-
-    nvm_queue_t cq = controller->queue_handles[1];
-    completion = cq->page.virt_addr;
-
-    for (size_t i = 0; i < 3; ++i)
-    {
-        delay(1500, 0, 0);
-        printf("0: %x\n", completion->dword[0]);
-        printf("1: %x\n", completion->dword[1]);
-        printf("2: %x\n", completion->dword[2]);
-        printf("3: %x\n", completion->dword[3]);
-        printf("\n");
-    }
+    fprintf(stdout, "PCI Vendor ID           : %x %x\n", data[0], data[1]);
+    fprintf(stdout, "PCI Subsystem Vendor ID : %x %x\n", data[2], data[3]);
+    fprintf(stdout, "Serial Number           : %s\n", serial);
+    fprintf(stdout, "Model Number            : %s\n", model);
 }
 
 
@@ -293,11 +223,21 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
         return ENOSPC;
     }
 
+    // Allocate buffer for controller data
+    page_t controller_data;
+    int err = get_page(&controller_data, fd, -1);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to allocate controller data page: %s\n", strerror(err));
+        return err;
+    }
+
     // Allocate controller handle
     controller = malloc(sizeof(struct nvm_controller));
     if (controller == NULL)
     {
         fprintf(stderr, "Failed to allocate controller structure: %s\n", strerror(errno));
+        put_page(&controller_data, fd);
         return errno;
     }
 
@@ -318,6 +258,7 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     if (controller->queue_handles == NULL)
     {
         fprintf(stderr, "Failed to allocate queue handle table: %s\n", strerror(errno));
+        put_page(&controller_data, fd);
         nvm_free(controller, fd);
         return errno;
     }
@@ -336,6 +277,7 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     if (controller->queue_handles[0] == NULL || controller->queue_handles[1] == NULL)
     {
         fprintf(stderr, "Failed to allocate admin queues\n");
+        put_page(&controller_data, fd);
         nvm_free(controller, fd);
         return errno;
     }
@@ -344,6 +286,7 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     controller->queue_handles[1]->db = CQ_DBL(register_ptr, 1, controller->dstrd);
 
     // Reset controller
+    fprintf(stderr, "Resetting device...");
     reset_controller(register_ptr, controller->timeout);
 
     // Set admin CQ and SQ
@@ -351,9 +294,25 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
 
     // Bring controller back up
     enable_controller(register_ptr, host_page_size, controller->timeout);
+    fprintf(stderr, " OK\n");
 
     // Submit identify controller command
-    identify_controller(controller, fd);
+    fprintf(stderr, "Identifying device...");
+    err = identify_controller(controller, &controller_data);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to execute identify controller command: %s\n", strerror(err));
+        put_page(&controller_data, fd);
+        nvm_free(controller, fd);
+        return err;
+    }
+    fprintf(stderr, " OK\n");
+
+    // Print some info about the controller
+    print_controller_serial(controller_data.virt_addr);
+
+    // Clean up controller identification buffer
+    put_page(&controller_data, fd);
 
     *handle = controller;
     fprintf(stderr, "NVMe controller initiated\n");
@@ -363,10 +322,10 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
 
 void nvm_free(nvm_controller_t handle, int ioctl_fd)
 {
-    // TODO: submit stop processing command
-
     if (handle->queue_handles != NULL)
     {
+        // TODO: submit stop processing command
+        
         int16_t i;
         for (i = 0; i < 2; ++i)
         {

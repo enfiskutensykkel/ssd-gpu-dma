@@ -67,7 +67,6 @@ static int pin_memory(page_t* page, int fd)
     }
 
     page->kernel_handle = request.handle;
-    fprintf(stdout, "kernel handle: %ld\n", page->kernel_handle);
     page->phys_addr = request.paddr;
     return 0;
 }
