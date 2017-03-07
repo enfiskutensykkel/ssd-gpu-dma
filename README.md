@@ -5,11 +5,9 @@ This project demonstrates how a NVM Express device can be accessed and
 controlled from a CUDA program. This program imeplements a barebones NVM driver 
 in user-space and passes the control to a GPU thread (CUDA kernel), which is 
 then able to use the disk as a generic block storage device.
-
 The motivation for doing this is to show that disk IO can be performed
 directly between a PCIe SSD and a GPU without involving the CPU or system
 memory (RAM) for transferring data.
-
 
 
 Requirements
@@ -34,9 +32,30 @@ Requirements
    GPUDirect Async.
 
 
-
-Software architecture overview
+Limitations
 ---------------------------------
+Due to convenience, there are some limitiations that must be mentioned:
+
+ * I make the assumption that the size of a page of memory is 4 KiB 
+   (4096 bytes). This goes for system memory, GPU memory and page regions
+   used by the NVM controller.
+   
+ * Although the [NVM specification](#nvm-express) specifies the possibility
+   for a controller to support queues using non-contiguous buffers (fragmented
+   over several  pages), I only use page-sized buffers throughout my code. 
+   This is also done out of convenience, as the support for non-contiguous 
+   buffers are merely _optional_ in NVM  Express.
+
+ * At the moment, this project is limited to x86\_64 and I currently do __not__
+   support using an 
+   [IOMMU](https://en.wikipedia.org/wiki/Input%E2%80%93output_memory_management_unit).
+   In other words, the project assumes that physical addresses are directly 
+   translatable into valid IO addresses.
+
+
+
+Program Overview
+==================================
 The program is divided into three main parts,
 
  1. a skeleton kernel module responsible for page-locking user-space memory
@@ -50,7 +69,7 @@ The program is divided into three main parts,
     created by the driver
 
 
-Kernel module
+Skeleton Kernel Module
 ---------------------------------
 The skeleton kernel module is deliberately minimalistic, and is only 
 respoinsible for page-locking memory pages either in RAM or on the GPU, as
@@ -68,13 +87,12 @@ Supported operations performed by the kernel module are:
  * unpin a page of previously pinned GPU memory
 
 For simplicity, the kernel module only operates on single memory pages and 
-assumes that there is no [IOMMU](https://en.wikipedia.org/wiki/Input%E2%80%93output_memory_management_unit)
-enabled. Please ensure that you have turned off _VT-d_ in your BIOS settings
-and `cat /proc/cmdline | grep iommu` shows nothing (you can also check `dmeg | grep DMAR`).
+assumes that there is no IOMMU enabled. Please ensure that you have turned 
+off _VT-d_ in your BIOS settings and `cat /proc/cmdline | grep iommu` shows 
+nothing (you can also check `dmeg | grep DMAR`).
 
 
-
-User-space program
+User-space Program
 ---------------------------------
 The user-space application is implemented partially in C and CUDA-style C++.
 The user specifies the __full__ PCI BDF (`xxxx:yy:zz.0`) for the SSD disk and,
@@ -87,35 +105,58 @@ allow them to perform persistent reads and writes to specific disk blocks on
 the specified NVM namespace.
 
 
-
 NVM Express
---------------------------------------
-
-
+---------------------------------
 [NVM Express](http://www.nvmexpress.org/wp-content/uploads/NVM_Express_1_2_1_Gold_20160603.pdf)
+is a standard specifying how disk controllers should behave and interact with
+a host system. The main benefit of NVM Express disks comes from the fact that
+NVM commands are hosted on system memory rather than on controller memory.
 
-For simplicity is every queue a page large
+In NVM Express, a disk controller reads commands from an IO submission queue,
+performs the operation, and posts a completion to an IO completion queue (and
+triggering an optional MSI-X interrupt, if required). A controller must 
+support a bunch of these queue pairs, meaning that different CPUs can have 
+their own queue pair and operate on them without needing any form of 
+synchronization.
+
+These two features of NVM Express is quite powerful, and allows people like me
+to host IO queues in other places than system memory, i.e. on GPU memory. 
+Since the NVM controller can now be controlled from multiple processing units
+without any form of synchronization, a GPU can now control the disk without
+involving the CPU or needing to go through system memory for data transfers.
+
 
 sysfs
---------------------------------------
-[Using sysfs to access PCI device resources](https://www.kernel.org/doc/Documentation/filesystems/sysfs-pci.txt)
+---------------------------------
+Linux offers a file system structured interface for accessing PCI devices, 
+called [sysfs](https://www.kernel.org/doc/Documentation/filesystems/sysfs-pci.txt). 
+PCI devices have designated memory regions, such as _config space_ and 
+different _Base Address Registers_, that drivers use to access the device.
+
+
 
 Nvidia CUDA
---------------------------------------
-  - [GPUDirect RDMA](http://docs.nvidia.com/cuda/gpudirect-rdma/#axzz4a6tqNDAe)
+---------------------------------
+Nvidia CUDA is Nvidia's framework and development kit for creating general
+purpose software that runs on their GPUs. Nvidias workstation GPUs, namely the
+Quadro and Tesla models, support something Nvidia calls _GPUDirect_ which 
+offers additional DMA capabilities.
 
-  - [GPUDirect Async](http://on-demand.gputechconf.com/gtc/2016/presentation/s6264-davide-rossetti-GPUDirect.pdf)
+ * [GPUDirect RDMA](http://docs.nvidia.com/cuda/gpudirect-rdma/#axzz4a6tqNDAe)
 
-Loadable Kernel Module
---------------------------------------
-Linux 4.4.0 family due to changing signature of `get_user_pages`
-
-Limitations
---------------------------------------
-IOMMU stuff
-pages allocated in userspace are not contiguous (why everything is operating on pages)
+ * [GPUDirect Async](http://on-demand.gputechconf.com/gtc/2016/presentation/s6264-davide-rossetti-GPUDirect.pdf)
 
 
-Future optimisations
---------------------------------------
-  - Use controller onboard memory (optional in NVMe) to host queues and push data using GPUDirect Async
+
+Possible Optimizations
+---------------------------------
+NVM Express specifies that a controller may optionally have on-board general
+purpose memory, where it can host (among other things) IO submission queues.
+Since the controller needs to first do DMA to fetch the IO command (because
+reads are _posted transactions_ in PCI Express), it could be a performance
+optimization to host the queue on the controller itself.
+
+In our case, we could use GPUDirect Async to set up IO commands on the
+controller rather than in GPU memory, and only host the completion queue
+on the GPU, ensuring that we push data rather than pulling it.
+
