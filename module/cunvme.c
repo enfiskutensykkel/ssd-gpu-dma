@@ -1,6 +1,7 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
+#include <linux/version.h>
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
@@ -11,6 +12,8 @@
 #include <linux/sched.h>
 #include <cunvme_ioctl.h>
 #include <linux/mm.h>
+
+//#define PAGE_MASK ~((1 << PAGE_SHIFT) - 1)
 
 
 /* Describes a page of user memory */
@@ -124,9 +127,11 @@ static long pin_user_page(struct cunvme_pin __user* request_ptr)
         return -EIO;
     }
 
-    up->virt_addr = request.vaddr; // FIXME: mask out so we ensure page-alignment
+    up->virt_addr = request.vaddr & PAGE_MASK;
 
+//#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 4, 57))
     retval = get_user_pages(current, current->mm, up->virt_addr, 1, 1, 0, &up->page, &up->vma);
+//#endif
     if (retval != 1)
     {
         handle = CUNVME_NO_HANDLE;
@@ -268,5 +273,5 @@ module_exit(cunvme_exit);
 
 MODULE_AUTHOR("Jonas Markussen <jonassm@simula.no>");
 MODULE_DESCRIPTION("Stub module to page-lock memory and retrieve physical addresses");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(CUNVME_VERSION);
