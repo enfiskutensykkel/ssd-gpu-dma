@@ -168,6 +168,7 @@ Howto
  1. Verify that the IOMMU is disabled.
    
    * check `cat /proc/cmdline`
+   * remove any `iommu=on intel_iommu=on` in GRUB config
    * check the result of running `dmesg | grep DMAR`
    * disable IOMMU in BIOS (Intel VT-d, AMD-Vi)
 
