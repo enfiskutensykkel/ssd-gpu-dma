@@ -160,3 +160,43 @@ In our case, we could use GPUDirect Async to set up IO commands on the
 controller rather than in GPU memory, and only host the completion queue
 on the GPU, ensuring that we push data rather than pulling it.
 
+
+Howto
+==================================
+**Note:** This section is incomplete as I haven't finished my program yet.
+
+ 1. Verify that the IOMMU is disabled.
+   
+   * check `cat /proc/cmdline`
+   * check the result of running `dmesg | grep DMAR`
+   * disable IOMMU in BIOS (Intel VT-d, AMD-Vi)
+
+ 2. Compile the kernel module and program
+
+   * run `make` from the project root directory
+
+ 3. Find a suitable SSD
+   
+   * search the output from `lspci -tv` for a suitable device
+   * note the device BFD
+
+ 4. Make a new nvme namespace
+
+ 5. Find a suitable GPU
+
+   * the tool `nvidia-smi` lists Nvidia GPUs
+
+ 6. Unbind the SSD from the `nvme` driver
+ 
+   * run the script `./unbind.sh unbind <BDF>` as user root
+
+ 7. Load the kernel module
+
+   * run `make load` as root
+   * check `dmesg` and look for the line `cunvme loaded`
+   * check that the file `/proc/cunvme` exists
+
+ 8. Run the program
+
+   * run `./cuda-nvme --nvidia-dev=<device id> --nvme-dev=<BDF> --nvme-ns=<namespace>` as root
+
