@@ -9,15 +9,6 @@ extern "C" {
 #include "page.h"
 
 
-/* Doorbell register */
-#define SQ_DBL(p, y, dstrd)    \
-    ((volatile void*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y)) * (4 << (dstrd)))) )
-
-
-#define CQ_DBL(p, y, dstrd)    \
-    ((volatile void*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y) + 1) * (4 << (dstrd)))) )
-
-
 /* IO queue handle
  *
  * This structure represents an IO queue and holds information
@@ -61,6 +52,7 @@ struct nvm_controller
     uint16_t        n_queues;       // Number queues
     nvm_queue_t*    queue_handles;  // Pointer to queues (even numbered queues=SQ, odd numbered=CQ)
     uint32_t        n_ns;           // Number of namespaces
+    volatile void*  dbs;            // Doorbell registers
 };
 
 /* Convenience type for controller handle */

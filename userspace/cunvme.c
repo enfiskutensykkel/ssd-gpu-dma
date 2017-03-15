@@ -136,11 +136,12 @@ int main(int argc, char** argv)
     // Print some info about the controller
     print_controller_info(handle);
 
-    page_t cq_mem, sq_mem;
-    get_page(&cq_mem, ioctl_fd, -1);
-    get_page(&sq_mem, ioctl_fd, -1);
-
-
+    // Do CUDA work load
+    status = start_kernel(ioctl_fd, 0, handle);
+    if (status != 0)
+    {
+        fprintf(stderr, "Failed\n");
+    }
 
     // Clean up resources
     nvm_free(handle, ioctl_fd);
@@ -148,5 +149,5 @@ int main(int argc, char** argv)
     close(ioctl_fd);
     close(bar0_fd);
 
-    return 0;
+    return status;
 }

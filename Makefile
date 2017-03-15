@@ -1,5 +1,5 @@
 PROJECT	:= cuda-nvme
-OBJECTS := userspace/cunvme.c.o userspace/nvme_init.c.o userspace/page.cu.o userspace/nvme_core.c.o userspace/nvme_queue.c.o
+OBJECTS := userspace/cunvme.c.o userspace/nvme_init.c.o userspace/page.cu.o userspace/nvme_core.c.o userspace/nvme_queue.c.o userspace/cuda.cu.o
 RELEASE := $(shell uname -r)
 CUHOME	:= /usr/local/cuda
 MODULE	:= cunvme

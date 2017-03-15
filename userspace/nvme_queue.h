@@ -7,7 +7,17 @@ extern "C" {
 #include "nvme.h"
 
 
-int create_queue_pair(nvm_controller_t controller, volatile void* register_ptr);
+/*
+ * Allocate and prepare queue handles and initialize queue state
+ */
+int prepare_queue_handles(nvm_controller_t controller);
+
+
+/* 
+ * Submit the prepared queues.
+ * This function must only be called once.
+ */
+int create_queues(nvm_controller_t controller);
 
 
 #ifdef __cplusplus

@@ -314,6 +314,7 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     controller->n_queues = 0;
     controller->queue_handles = NULL;
     controller->n_ns = 0;
+    controller->dbs = (volatile void*) (((volatile unsigned char*) register_ptr) + 0x1000);
 
     // Allocate queue handle table
     controller->queue_handles = malloc(sizeof(struct nvme_queue*) * controller->max_queues);
@@ -331,7 +332,7 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     }
 
     // Create admin submission/completion queue pair
-    err = create_queue_pair(controller, register_ptr);
+    err = prepare_queue_handles(controller);
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate admin queue handles\n");

@@ -7,6 +7,16 @@
 #include <stdio.h>
 
 
+/* Doorbell register */
+#define SQ_DBL(p, y, dstrd)    \
+    ((volatile void*) (((volatile unsigned char*) (p)) + /*0x1000 +*/ ((2*(y)) * (4 << (dstrd)))) )
+
+
+#define CQ_DBL(p, y, dstrd)    \
+    ((volatile void*) (((volatile unsigned char*) (p)) + /*0x1000 +*/ ((2*(y) + 1) * (4 << (dstrd)))) )
+
+
+
 static void clear_page(page_t* page)
 {
     page->device = -1;
@@ -30,7 +40,7 @@ static void clear_queue_handle(nvm_queue_t queue, nvm_controller_t controller, u
 }
 
 
-int create_queue_pair(nvm_controller_t controller, volatile void* reg_ptr)
+int prepare_queue_handles(nvm_controller_t controller)
 {
     if (controller->n_queues >= (controller->max_queues - 1))
     {
@@ -57,11 +67,17 @@ int create_queue_pair(nvm_controller_t controller, volatile void* reg_ptr)
     clear_queue_handle(sq, controller, controller->n_queues - 2);
     clear_queue_handle(cq, controller, controller->n_queues - 1);
 
-    sq->db = SQ_DBL(reg_ptr, sq->no, controller->dstrd);
-    cq->db = CQ_DBL(reg_ptr, cq->no, controller->dstrd); // FIXME: cq->no ?
+    sq->db = SQ_DBL(controller->dbs, sq->no, controller->dstrd);
+    cq->db = CQ_DBL(controller->dbs, cq->no, controller->dstrd); // FIXME: cq->no ?
 
     controller->queue_handles[controller->n_queues - 2] = sq;
     controller->queue_handles[controller->n_queues - 1] = cq;
 
+    return 0;
+}
+
+
+int create_queues(nvm_controller_t controller)
+{
     return 0;
 }
