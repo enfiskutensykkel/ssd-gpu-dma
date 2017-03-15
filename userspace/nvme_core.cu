@@ -1,3 +1,4 @@
+#include <cuda.h>
 #include "nvme_core.h"
 #include "util.h"
 #include "nvme.h"
@@ -14,6 +15,7 @@
 #define PHASE(p)            _RB(*CQ_STATUS(p),  0,  0)
 
 
+extern "C" __host__ __device__
 struct command* sq_enqueue(nvm_queue_t sq)
 {
     // Check the capacity
@@ -39,6 +41,7 @@ struct command* sq_enqueue(nvm_queue_t sq)
 }
 
 
+extern "C" __host__ __device__
 struct completion* cq_poll(nvm_queue_t cq)
 {
     struct completion* ptr = 
@@ -54,6 +57,7 @@ struct completion* cq_poll(nvm_queue_t cq)
 }
 
 
+extern "C" __host__ __device__
 struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t controller)
 {
     struct completion* ptr = cq_poll(cq);
@@ -78,12 +82,14 @@ struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t controller)
 // TODO: cq_dequeue_block - dequeue but wait for controller->timeout before failing
 
 
+extern "C" __host__ __device__
 void sq_submit(nvm_queue_t sq)
 {
     *sq->db = sq->tail;
 }
 
 
+extern "C" __host__ __device__
 void cq_update(nvm_queue_t cq)
 {
     *cq->db = cq->head;

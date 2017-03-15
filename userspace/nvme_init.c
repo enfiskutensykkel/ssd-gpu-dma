@@ -183,7 +183,7 @@ static int identify_controller(nvm_controller_t controller, volatile void* regis
     uint16_t feature_id = *COMMAND_ID(get_features_cmd);
 
     identify_cmd->dword[0] |= (0 << 14) | (0 << 8) | IDENTIFY_CONTROLLER;
-    identify_cmd->dword[1] = 0xffffffff; // FIXME: should this be 0?
+    identify_cmd->dword[1] = 0x0; 
     identify_cmd->dword[10] = (0 << 16) | 1;
 
     uint64_t buff_addr = controller->data.phys_addr;

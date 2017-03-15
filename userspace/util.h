@@ -3,10 +3,17 @@
 
 #include <stdint.h>
 
+#ifndef __CUDACC__
+#define __host__
+#define __device__
+#endif
+
+
 #define _MIN(a, b) ( (a) <= (b) ? (a) : (b) )
 
 /* Convenience function for creating a bit mask */
-static inline uint64_t bitmask(int hi, int lo)
+__host__ __device__
+inline uint64_t bitmask(int hi, int lo)
 {
     uint64_t mask = 0;
 

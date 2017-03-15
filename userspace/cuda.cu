@@ -7,6 +7,22 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <stddef.h>
+#include <sys/types.h>
+
+
+__host__ __device__
+static ssize_t read(nvm_queue_t sq, uint32_t ns, page_t* buf, size_t len)
+{
+    return 0;
+}
+
+
+__host__ __device__
+static ssize_t write(nvm_queue_t sq, uint32_t ns, page_t* buf, size_t len)
+{
+    return 0;
+}
 
 
 static int create_io_queues(nvm_controller_t ctrl, int fd, int dev, size_t num_pairs)

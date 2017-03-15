@@ -8,6 +8,10 @@ extern "C" {
 #include "nvme.h"
 #include <stdint.h>
 
+#ifndef __CUDACC__
+#define __host__
+#define __device__
+#endif
 
 /* Pointer to command ID field (CID) in command */
 #define COMMAND_ID(ptr) _REG(ptr, 2, 16)
@@ -50,6 +54,7 @@ struct command
  *
  * Returns a pointer to the queue entry. or NULL if the queue is full.
  */
+__host__ __device__
 struct command* sq_enqueue(nvm_queue_t sq);
 
 
@@ -59,6 +64,7 @@ struct command* sq_enqueue(nvm_queue_t sq);
  *
  * Returns a pointer to the completion entry, or NULL if the queue is empty.
  */
+__host__ __device__
 struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t controller);
 
 
@@ -69,6 +75,7 @@ struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t controller);
  * Returns a pointer to an unprocessed completion entry, or NULL if the queue
  * is empty.
  */
+__host__ __device__
 struct completion* cq_poll(nvm_queue_t cq);
 
 
@@ -78,6 +85,7 @@ struct completion* cq_poll(nvm_queue_t cq);
  * The caller must make sure that all commands are prepared before calling
  * this.
  */
+__host__ __device__
 void sq_submit(nvm_queue_t sq);
 
 
@@ -87,6 +95,7 @@ void sq_submit(nvm_queue_t sq);
  * All completion pointers acquired before this must be discarded after
  * calling this.
  */
+__host__ __device__
 void cq_update(nvm_queue_t cq); 
 
 

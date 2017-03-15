@@ -79,8 +79,8 @@ int prepare_queue_handles(nvm_controller_t controller)
     clear_queue_handle(sq, controller, controller->n_queues - 2);
     clear_queue_handle(cq, controller, controller->n_queues - 1);
 
-    sq->db = SQ_DBL(controller->dbs, sq->no, controller->dstrd);
-    cq->db = CQ_DBL(controller->dbs, cq->no, controller->dstrd); // FIXME: Should this really be cq->no ?
+    sq->db = SQ_DBL(controller->dbs, (sq->no / 2), controller->dstrd);
+    cq->db = CQ_DBL(controller->dbs, (cq->no / 2), controller->dstrd); 
 
     controller->queue_handles[controller->n_queues - 2] = sq;
     controller->queue_handles[controller->n_queues - 1] = cq;
@@ -111,7 +111,7 @@ static int create_cq(nvm_controller_t controller, nvm_queue_t queue)
     cmd->dword[8] = 0;
     cmd->dword[9] = 0;
 
-    cmd->dword[10] = ((queue->max_entries  - 1) << 16) | (queue->no / 2 + 1);
+    cmd->dword[10] = ((queue->max_entries  - 1) << 16) | (queue->no / 2);
 
     // Interrupt vector | Interrupts enable | Physically contiguous 
     cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
@@ -155,7 +155,7 @@ static int create_sq(nvm_controller_t controller, nvm_queue_t queue)
     cmd->dword[10] = ((queue->max_entries  - 1) << 16) | queue->no;
 
     // Completion queue id | queue priority | PC */
-    cmd->dword[11] = ((queue->no / 2 + 1) << 16) | (0x00 << 1) | 0x01;
+    cmd->dword[11] = ((queue->no / 2) << 16) | (0x00 << 1) | 0x01;
 
     // Submit command and wait for completion
     sq_submit(controller->queue_handles[0]);
