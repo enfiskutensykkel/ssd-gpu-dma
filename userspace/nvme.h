@@ -16,7 +16,7 @@ extern "C" {
  */
 struct nvm_queue
 {
-    unsigned int        no;             // Queue number
+    uint16_t            no;             // Queue number
     page_t              page;           // Page handle to where the queue is hosted
     size_t              max_entries;    // Maximum number of queue entries supported
     size_t              entry_size;     // Entry size
@@ -41,7 +41,6 @@ struct nvm_controller
     page_t          data;           // Controller Identify structure
     size_t          page_size;      // Memory page size (MPS)
     uint8_t         dstrd;          // Doorbell stride (in encoded form)
-    int             enabled;        // Controller enabled
     uint64_t        timeout;        // Controller timeout in milliseconds
     size_t          max_out_cmds;   // Maximum outstanding commands (MAXCMD)
     size_t          max_data_size;  // Maximum data transfer size (MDTS)

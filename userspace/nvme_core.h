@@ -87,7 +87,11 @@ void sq_submit(nvm_queue_t sq);
  * All completion pointers acquired before this must be discarded after
  * calling this.
  */
-void cq_submit(nvm_queue_t cq); 
+void cq_update(nvm_queue_t cq); 
+
+
+// TODO: Some timeout count-down in order to determine when to not wait for messages anymore
+// maybe some form of cq_dequeue_block
 
 
 #ifdef __cplusplus

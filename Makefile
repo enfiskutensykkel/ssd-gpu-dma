@@ -14,7 +14,7 @@ KDIR ?= /lib/modules/$(RELEASE)/build
 ifeq ($(KERNELRELEASE),)
 	CC    	:= $(CUHOME)/bin/nvcc
 	CCBIN	:= /usr/bin/gcc
-	CFLAGS	:= -Wall -Wextra -O0
+	CFLAGS	:= -Wall -Wextra -O0 -Werror=missing-declarations -Werror=missing-prototypes -Werror=implicit-function-declaration
 	INCLUDE	:= -I$(CUHOME)/include -Iinclude -DCUNVME_PATH='"/proc/$(MODULE)"'
 	LDLIBS	:= -lcuda -lc
 	LDFLAGS	:= -L$(CUHOME)/lib64

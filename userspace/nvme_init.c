@@ -171,13 +171,13 @@ static int identify_controller(nvm_controller_t controller, volatile void* regis
     struct command* identify_cmd = sq_enqueue(controller->queue_handles[0]);
     if (identify_cmd  == NULL)
     {
-        return -ENOSPC;
+        return ENOSPC;
     }
 
     struct command* get_features_cmd = sq_enqueue(controller->queue_handles[0]);
     if (get_features_cmd == NULL)
     {
-        return -ENOSPC;
+        return ENOSPC;
     }
 
     uint16_t feature_id = *COMMAND_ID(get_features_cmd);
@@ -222,7 +222,7 @@ static int identify_controller(nvm_controller_t controller, volatile void* regis
             --completions_left;
         }
 
-        cq_submit(controller->queue_handles[1]);
+        cq_update(controller->queue_handles[1]);
     }
 
     unsigned char* bytes = controller->data.virt_addr;
@@ -246,7 +246,7 @@ static int set_num_queues(nvm_controller_t controller)
     cmd->dword[0] |= (0 << 14) | (0 << 8) | SET_FEATURES;
     cmd->dword[1] = 0;
 
-    cmd->dword[10] = (0 << 31) | 0x07;
+    cmd->dword[10] = (1 << 31) | 0x07;
     cmd->dword[11] = (controller->max_queues << 16) | controller->max_queues;
 
     sq_submit(controller->queue_handles[0]);
@@ -254,7 +254,7 @@ static int set_num_queues(nvm_controller_t controller)
     struct completion* cpl;
     while ((cpl = cq_dequeue(controller->queue_handles[1], controller)) == NULL);
 
-    cq_submit(controller->queue_handles[1]);
+    cq_update(controller->queue_handles[1]);
 
     return 0;
 }
@@ -304,7 +304,6 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     // Set controller properties
     controller->page_size = page_size;
     controller->dstrd = CAP$DSTRD(register_ptr);
-    controller->enabled = 0;
     controller->timeout = CAP$TO(register_ptr) * 500UL;
     controller->max_data_size = 0;
     controller->max_entries = CAP$MQES(register_ptr) + 1;   // CAP.MQES is a 0's based value
@@ -314,7 +313,7 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     controller->n_queues = 0;
     controller->queue_handles = NULL;
     controller->n_ns = 0;
-    controller->dbs = (volatile void*) (((volatile unsigned char*) register_ptr) + 0x1000);
+    controller->dbs = register_ptr;
 
     // Allocate queue handle table
     controller->queue_handles = malloc(sizeof(struct nvme_queue*) * controller->max_queues);

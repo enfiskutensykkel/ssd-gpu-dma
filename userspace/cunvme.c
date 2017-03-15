@@ -9,8 +9,7 @@
 #include <sys/mman.h>
 #include "nvme.h"
 #include "nvme_init.h"
-
-#include "nvme_queue.h"
+#include "cuda.h"
 
 
 /* Offset to the COMMAND register in config space */
@@ -137,7 +136,7 @@ int main(int argc, char** argv)
     print_controller_info(handle);
 
     // Do CUDA work load
-    status = start_kernel(ioctl_fd, 0, handle);
+    status = start_kernel(ioctl_fd, -1, handle);
     if (status != 0)
     {
         fprintf(stderr, "Failed\n");

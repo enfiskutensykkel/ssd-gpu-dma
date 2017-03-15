@@ -75,13 +75,16 @@ struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t controller)
 }
 
 
+// TODO: cq_dequeue_block - dequeue but wait for controller->timeout before failing
+
+
 void sq_submit(nvm_queue_t sq)
 {
     *sq->db = sq->tail;
 }
 
 
-void cq_submit(nvm_queue_t cq)
+void cq_update(nvm_queue_t cq)
 {
     *cq->db = cq->head;
 }

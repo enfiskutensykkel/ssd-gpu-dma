@@ -23,6 +23,7 @@ static int create_io_queues(nvm_controller_t ctrl, int fd, int dev, size_t num_p
             return status;
         }
 
+
         nvm_queue_t sq = ctrl->queue_handles[ctrl->n_queues - 2];
         status = get_page(&sq->page, fd, dev);
         if (status != 0)

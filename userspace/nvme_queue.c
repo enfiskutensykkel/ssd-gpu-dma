@@ -7,13 +7,25 @@
 #include <stdio.h>
 
 
-/* Doorbell register */
+/* Some admin command opcodes */
+enum
+{
+    DELETE_IO_SUBMISSION_QUEUE          = (0x00 << 7) | (0x00 << 2) | 0x00,
+    CREATE_IO_SUBMISSION_QUEUE          = (0x00 << 7) | (0x00 << 2) | 0x01,
+    DELETE_IO_COMPLETION_QUEUE          = (0x00 << 7) | (0x01 << 2) | 0x00,
+    CREATE_IO_COMPLETION_QUEUE          = (0x00 << 7) | (0x01 << 2) | 0x01,
+    ABORT                               = (0x00 << 7) | (0x02 << 2) | 0x00
+};
+
+
+/* SQ doorbell register */
 #define SQ_DBL(p, y, dstrd)    \
-    ((volatile void*) (((volatile unsigned char*) (p)) + /*0x1000 +*/ ((2*(y)) * (4 << (dstrd)))) )
+    ((volatile void*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y)) * (4 << (dstrd)))) )
 
 
+/* CQ doorbell register */
 #define CQ_DBL(p, y, dstrd)    \
-    ((volatile void*) (((volatile unsigned char*) (p)) + /*0x1000 +*/ ((2*(y) + 1) * (4 << (dstrd)))) )
+    ((volatile void*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y) + 1) * (4 << (dstrd)))) )
 
 
 
@@ -68,7 +80,7 @@ int prepare_queue_handles(nvm_controller_t controller)
     clear_queue_handle(cq, controller, controller->n_queues - 1);
 
     sq->db = SQ_DBL(controller->dbs, sq->no, controller->dstrd);
-    cq->db = CQ_DBL(controller->dbs, cq->no, controller->dstrd); // FIXME: cq->no ?
+    cq->db = CQ_DBL(controller->dbs, cq->no, controller->dstrd); // FIXME: Should this really be cq->no ?
 
     controller->queue_handles[controller->n_queues - 2] = sq;
     controller->queue_handles[controller->n_queues - 1] = cq;
@@ -77,7 +89,117 @@ int prepare_queue_handles(nvm_controller_t controller)
 }
 
 
+static int create_cq(nvm_controller_t controller, nvm_queue_t queue)
+{
+    struct command* cmd = sq_enqueue(controller->queue_handles[0]);
+    if (cmd == NULL)
+    {
+        return -EAGAIN;
+    }
+
+    cmd->dword[0] |= (0x00 << 14) | (0x00 << 8) | CREATE_IO_COMPLETION_QUEUE;
+    cmd->dword[1] = 0;
+
+    // Set metadata pointer
+    cmd->dword[4] = 0;
+    cmd->dword[5] = 0;
+
+    // Set data pointer
+    uint64_t data_ptr = queue->page.phys_addr;
+    cmd->dword[6] = (uint32_t) data_ptr;
+    cmd->dword[7] = (uint32_t) (data_ptr >> 32);
+    cmd->dword[8] = 0;
+    cmd->dword[9] = 0;
+
+    cmd->dword[10] = ((queue->max_entries  - 1) << 16) | (queue->no / 2 + 1);
+
+    // Interrupt vector | Interrupts enable | Physically contiguous 
+    cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
+
+    // Submit command and wait for completion
+    sq_submit(controller->queue_handles[0]);
+
+    struct completion* cpl;
+    while ((cpl = cq_dequeue(controller->queue_handles[1], controller)) == NULL);
+
+    int status = STATUS_CODE(cpl);
+
+    cq_update(controller->queue_handles[1]);
+
+    return status;
+}
+
+
+static int create_sq(nvm_controller_t controller, nvm_queue_t queue)
+{
+    struct command* cmd = sq_enqueue(controller->queue_handles[0]);
+    if (cmd == NULL)
+    {
+        return -EAGAIN;
+    }
+
+    cmd->dword[0] |= (0x00 << 14) | (0x00 << 8) | CREATE_IO_SUBMISSION_QUEUE;
+    cmd->dword[1] = 0;
+
+    // Set metadata pointer
+    cmd->dword[4] = 0;
+    cmd->dword[5] = 0;
+
+    // Set data pointer
+    uint64_t data_ptr = queue->page.phys_addr;
+    cmd->dword[6] = (uint32_t) data_ptr;
+    cmd->dword[7] = (uint32_t) (data_ptr >> 32);
+    cmd->dword[8] = 0;
+    cmd->dword[9] = 0;
+
+    cmd->dword[10] = ((queue->max_entries  - 1) << 16) | queue->no;
+
+    // Completion queue id | queue priority | PC */
+    cmd->dword[11] = ((queue->no / 2 + 1) << 16) | (0x00 << 1) | 0x01;
+
+    // Submit command and wait for completion
+    sq_submit(controller->queue_handles[0]);
+
+    struct completion* cpl;
+    while ((cpl = cq_dequeue(controller->queue_handles[1], controller)) == NULL);
+
+    int status = STATUS_CODE(cpl);
+
+    cq_update(controller->queue_handles[1]);
+
+    return status;
+}
+
+
 int create_queues(nvm_controller_t controller)
 {
+    int status;
+
+    /* Create IO queue pairs */
+    for (uint16_t i = 2; i < controller->n_queues; i += 2)
+    {
+        status = create_cq(controller, controller->queue_handles[i + 1]);
+        if (status != 0)
+        {
+            fprintf(stderr, "An error occured while creating IO queues\n");
+            if (status < 0)
+            {
+                return -status;
+            }
+            return EIO;
+        }
+
+        status = create_sq(controller, controller->queue_handles[i]);
+        if (status != 0)
+        {
+            fprintf(stderr, "An error occured while creating IO queues\n");
+            if (status < 0)
+            {
+                return -status;
+            }
+            return EIO;
+        }
+    }
+
     return 0;
 }
