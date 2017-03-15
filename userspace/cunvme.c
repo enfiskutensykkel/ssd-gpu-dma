@@ -10,6 +10,8 @@
 #include "nvme.h"
 #include "nvme_init.h"
 
+#include "nvme_queue.h"
+
 
 /* Offset to the COMMAND register in config space */
 #define CONFIG_COMMAND  0x04
@@ -57,6 +59,7 @@ static void print_controller_info(nvm_controller_t controller)
     fprintf(stdout, "Serial Number           : %s\n", serial);
     fprintf(stdout, "Model Number            : %s\n", model);
     fprintf(stdout, "Number of namespaces    : %u\n", controller->n_ns);
+    fprintf(stdout, "Maximum number of queues: %u\n", controller->max_queues);
 }
 
 
@@ -133,7 +136,11 @@ int main(int argc, char** argv)
     // Print some info about the controller
     print_controller_info(handle);
 
-    // TODO: stuff
+    page_t cq_mem, sq_mem;
+    get_page(&cq_mem, ioctl_fd, -1);
+    get_page(&sq_mem, ioctl_fd, -1);
+
+
 
     // Clean up resources
     nvm_free(handle, ioctl_fd);

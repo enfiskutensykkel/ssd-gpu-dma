@@ -57,8 +57,8 @@ struct nvm_controller
     size_t          max_entries;    // Maximum queue entries supported
     size_t          cq_entry_size;  // CQ entry size (CQES)
     size_t          sq_entry_size;  // SQ entry size (SQES)
-    int             max_queues;     // Maximum number of IO queues
-    int             n_queues;       // Number queues
+    uint16_t        max_queues;     // Maximum number of IO queues
+    uint16_t        n_queues;       // Number queues
     nvm_queue_t*    queue_handles;  // Pointer to queues (even numbered queues=SQ, odd numbered=CQ)
     uint32_t        n_ns;           // Number of namespaces
 };

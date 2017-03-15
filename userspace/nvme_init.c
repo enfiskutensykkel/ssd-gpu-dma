@@ -1,6 +1,7 @@
 #include "nvme.h"
 #include "nvme_init.h"
 #include "nvme_core.h"
+#include "nvme_queue.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -47,7 +48,8 @@
 enum 
 {
     IDENTIFY_CONTROLLER     = (0x00 << 7) | (0x01 << 2) | 0x02,
-    GET_FEATURES            = (0x00 << 7) | (0x02 << 2) | 0x02
+    GET_FEATURES            = (0x00 << 7) | (0x02 << 2) | 0x02,
+    SET_FEATURES            = (0x00 << 7) | (0x02 << 2) | 0x01
 };
 
 
@@ -147,39 +149,6 @@ static void configure_entry_sizes(volatile void* register_ptr, nvm_controller_t 
 }
 
 
-static nvm_queue_t alloc_admin_queue(int ioctl_fd, unsigned int no, size_t entry_size)
-{
-    // Allocate queue handle
-    nvm_queue_t queue = malloc(sizeof(struct nvm_queue));
-    if (queue == NULL)
-    {
-        fprintf(stderr, "Failed to allocate queue handle: %s\n", strerror(errno));
-        return NULL;
-    }
-
-    // Create page of memory
-    int err = get_page(&queue->page, ioctl_fd, -1);
-    if (err != 0)
-    {
-        fprintf(stderr, "Failed to allocate and pin queue memory: %s\n", strerror(err));
-        free(queue);
-        return NULL;
-    }
-
-    queue->no = no;
-    queue->max_entries = _MIN(16, queue->page.page_size / entry_size);
-    queue->entry_size = entry_size;
-    queue->head = 0;
-    queue->tail = 0;
-    queue->phase = 1;
-    queue->db = NULL;
-
-    memset(queue->page.virt_addr, 0, queue->page.page_size);
-
-    return queue;
-}
-
-
 /* Set admin queue registers */
 static void configure_admin_queues(volatile void* register_ptr, nvm_controller_t controller)
 {
@@ -232,21 +201,29 @@ static int identify_controller(nvm_controller_t controller, volatile void* regis
     sq_submit(controller->queue_handles[0]);
 
     // Wait for completions
-    struct completion* cpl;
-    while ((cpl = cq_poll(controller->queue_handles[1])) == NULL);
-
-    // Consume completions
-    while ((cpl = cq_dequeue(controller->queue_handles[1], controller)) != NULL)
+    size_t completions_left = 2;
+    while (completions_left > 0)
     {
-        // Update the maximum number of supported queues
-        if (*COMPLETION_ID(cpl) == feature_id)
-        {
-            uint16_t max_queues = _MIN(cpl->dword[0] >> 16, cpl->dword[0] & 0xffff);
-            controller->max_queues = _MIN(max_queues, controller->max_queues);
-        }
-    }
+        struct completion* cpl;
 
-    cq_submit(controller->queue_handles[1]);
+        // Poll until there are any completions
+        while ((cpl = cq_poll(controller->queue_handles[1])) == NULL);
+
+        // Consume completions
+        while ((cpl = cq_dequeue(controller->queue_handles[1], controller)) != NULL)
+        {
+            // Update the maximum number of supported queues
+            if (*COMPLETION_ID(cpl) == feature_id)
+            {
+                uint16_t max_queues = _MIN(cpl->dword[0] >> 16, cpl->dword[0] & 0xffff);
+                controller->max_queues = _MIN(max_queues, controller->max_queues);
+            }
+
+            --completions_left;
+        }
+
+        cq_submit(controller->queue_handles[1]);
+    }
 
     unsigned char* bytes = controller->data.virt_addr;
     controller->max_data_size = bytes[77] * (1 << (12 + CAP$MPSMIN(register_ptr)));
@@ -254,6 +231,31 @@ static int identify_controller(nvm_controller_t controller, volatile void* regis
     controller->cq_entry_size = _RB(bytes[513], 3, 0);
     controller->max_out_cmds = *((uint16_t*) (bytes + 514));
     controller->n_ns = *((uint32_t*) (bytes + 516));
+    return 0;
+}
+
+
+static int set_num_queues(nvm_controller_t controller)
+{
+    struct command* cmd = sq_enqueue(controller->queue_handles[0]);
+    if (cmd == NULL)
+    {
+        return -ENOSPC;
+    }
+
+    cmd->dword[0] |= (0 << 14) | (0 << 8) | SET_FEATURES;
+    cmd->dword[1] = 0;
+
+    cmd->dword[10] = (0 << 31) | 0x07;
+    cmd->dword[11] = (controller->max_queues << 16) | controller->max_queues;
+
+    sq_submit(controller->queue_handles[0]);
+
+    struct completion* cpl;
+    while ((cpl = cq_dequeue(controller->queue_handles[1], controller)) == NULL);
+
+    cq_submit(controller->queue_handles[1]);
+
     return 0;
 }
 
@@ -306,15 +308,15 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     controller->timeout = CAP$TO(register_ptr) * 500UL;
     controller->max_data_size = 0;
     controller->max_entries = CAP$MQES(register_ptr) + 1;   // CAP.MQES is a 0's based value
-    controller->cq_entry_size = 0;
-    controller->sq_entry_size = 0;
-    controller->max_queues = (int16_t) (db_size / (4 << controller->dstrd));
+    controller->cq_entry_size = sizeof(struct completion);
+    controller->sq_entry_size = sizeof(struct command);
+    controller->max_queues = (uint16_t) (db_size / (4 << controller->dstrd));
     controller->n_queues = 0;
     controller->queue_handles = NULL;
     controller->n_ns = 0;
 
     // Allocate queue handle table
-    controller->queue_handles = malloc(sizeof(struct nvm_queue) * controller->max_queues);
+    controller->queue_handles = malloc(sizeof(struct nvme_queue*) * controller->max_queues);
     if (controller->queue_handles == NULL)
     {
         fprintf(stderr, "Failed to allocate queue handle table: %s\n", strerror(errno));
@@ -323,25 +325,38 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     }
 
     // Reset queues
-    for (int16_t i = 0; i < controller->max_queues; ++i)
+    for (uint16_t i = 0; i < controller->max_queues; ++i)
     {
         controller->queue_handles[i] = NULL;
     }
 
     // Create admin submission/completion queue pair
-    controller->n_queues = 2;
-    controller->queue_handles[0] = alloc_admin_queue(fd, 0, 64);
-    controller->queue_handles[1] = alloc_admin_queue(fd, 0, 16);
-
-    if (controller->queue_handles[0] == NULL || controller->queue_handles[1] == NULL)
+    err = create_queue_pair(controller, register_ptr);
+    if (err != 0)
     {
-        fprintf(stderr, "Failed to allocate admin queues\n");
+        fprintf(stderr, "Failed to allocate admin queue handles\n");
         nvm_free(controller, fd);
-        return errno;
+        return err;
+    }
+    
+    err = get_page(&controller->queue_handles[0]->page, fd, -1);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to allocate and pin admin queue memory: %s\n", strerror(err));
+        nvm_free(controller, fd);
+        return err;
     }
 
-    controller->queue_handles[0]->db = SQ_DBL(register_ptr, 0, controller->dstrd);
-    controller->queue_handles[1]->db = CQ_DBL(register_ptr, 1, controller->dstrd);
+    err = get_page(&controller->queue_handles[1]->page, fd, -1);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to allocate and pin admin queue memory: %s\n", strerror(err));
+        nvm_free(controller, fd);
+        return err;
+    }
+
+    memset(controller->queue_handles[0]->page.virt_addr, 0, controller->queue_handles[0]->page.page_size);
+    memset(controller->queue_handles[1]->page.virt_addr, 0, controller->queue_handles[1]->page.page_size);
 
     // Reset controller
     reset_controller(register_ptr, controller->timeout);
@@ -364,6 +379,15 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     // Set CQES and SQES in CC
     configure_entry_sizes(register_ptr, controller);
 
+    // Set features
+    err = set_num_queues(controller);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to submit command: %s\n", strerror(err));
+        nvm_free(controller, fd);
+        return err;
+    }
+
     *handle = controller;
     return 0;
 }
@@ -375,10 +399,14 @@ void nvm_free(nvm_controller_t handle, int ioctl_fd)
 
     if (handle->queue_handles != NULL)
     {
-        // TODO: submit stop processing command
-        
-        int16_t i;
-        for (i = 0; i < 2; ++i)
+        for (uint16_t i = 2; i < handle->n_queues; ++i)
+        {
+            // TODO: submit stop processing command
+            //delete_queue(handle, i);
+        }
+
+        // TODO: clean this up
+        for (uint16_t i = 0; i < 2; ++i)
         {
             if (handle->queue_handles[i])
             {
@@ -386,11 +414,6 @@ void nvm_free(nvm_controller_t handle, int ioctl_fd)
             }
 
             free(handle->queue_handles[i]);
-        }
-
-        for (; i < handle->n_queues; ++i)
-        {
-            //delete_queue(handle, i);
         }
 
         free(handle->queue_handles);

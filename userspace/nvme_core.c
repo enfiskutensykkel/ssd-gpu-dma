@@ -1,12 +1,6 @@
 #include "nvme_core.h"
 #include "util.h"
 #include "nvme.h"
-#include <stddef.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <string.h>
-#include <stdio.h>
 
 
 // Bitfields in the completion structure
@@ -25,7 +19,6 @@ struct command* sq_enqueue(nvm_queue_t sq)
     // Check the capacity
     if (sq->tail - sq->head >= sq->max_entries)
     {
-        fprintf(stderr, "Queue %u is full\n", sq->no);
         return NULL;
     }
 

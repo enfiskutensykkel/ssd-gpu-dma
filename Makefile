@@ -1,9 +1,9 @@
 PROJECT	:= cuda-nvme
-OBJECTS := userspace/cunvme.c.o userspace/nvme_init.c.o userspace/page.cu.o userspace/nvme_core.c.o
+OBJECTS := userspace/cunvme.c.o userspace/nvme_init.c.o userspace/page.cu.o userspace/nvme_core.c.o userspace/nvme_queue.c.o
 RELEASE := $(shell uname -r)
 CUHOME	:= /usr/local/cuda
 MODULE	:= cunvme
-DEFINES	:= -DCUNVME_FILE='"$(MODULE)"' -DCUNVME_VERSION='"0.1"' -DMAX_DBL_MEM=0x1000
+DEFINES	:= -DCUNVME_FILE='"$(MODULE)"' -DCUNVME_VERSION='"0.1"' -DMAX_DBL_MEM=0x256
 
 
 obj-m := $(MODULE).o
