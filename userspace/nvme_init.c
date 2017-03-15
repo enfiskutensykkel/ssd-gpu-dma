@@ -43,6 +43,14 @@
 #define AQA$AQC(v)      _WB(v, 11,  0)          // Admin Submission Queue Size
 
 
+/* List of admin command opcodes */
+enum 
+{
+    IDENTIFY_CONTROLLER     = (0x00 << 7) | (0x01 << 2) | 0x02,
+    GET_FEATURES            = (0x00 << 7) | (0x02 << 2) | 0x02
+};
+
+
 /* Encode page size to a the format required by the controller */
 static uint8_t encode_page_size(size_t page_size)
 {
@@ -189,14 +197,64 @@ static void configure_admin_queues(volatile void* register_ptr, nvm_controller_t
 }
 
 
-static void extract_controller_properties(nvm_controller_t controller, volatile void* register_ptr)
+static int identify_controller(nvm_controller_t controller, volatile void* register_ptr)
 {
+    struct command* identify_cmd = sq_enqueue(controller->queue_handles[0]);
+    if (identify_cmd  == NULL)
+    {
+        return -ENOSPC;
+    }
+
+    struct command* get_features_cmd = sq_enqueue(controller->queue_handles[0]);
+    if (get_features_cmd == NULL)
+    {
+        return -ENOSPC;
+    }
+
+    uint16_t feature_id = *COMMAND_ID(get_features_cmd);
+
+    identify_cmd->dword[0] |= (0 << 14) | (0 << 8) | IDENTIFY_CONTROLLER;
+    identify_cmd->dword[1] = 0xffffffff; // FIXME: should this be 0?
+    identify_cmd->dword[10] = (0 << 16) | 1;
+
+    uint64_t buff_addr = controller->data.phys_addr;
+    identify_cmd->dword[6] = (uint32_t) buff_addr;
+    identify_cmd->dword[7] = (uint32_t) (buff_addr >> 32);
+    identify_cmd->dword[8] = 0;
+    identify_cmd->dword[9] = 0;
+
+    get_features_cmd->dword[0] |= (0 << 14) | (0 << 8) | GET_FEATURES;
+    get_features_cmd->dword[1] = 0; // We think this is supposed to be 0
+
+    get_features_cmd->dword[10] = (0x03 << 8) | 0x07;
+    get_features_cmd->dword[11] = 0;
+
+    sq_submit(controller->queue_handles[0]);
+
+    // Wait for completions
+    struct completion* cpl;
+    while ((cpl = cq_poll(controller->queue_handles[1])) == NULL);
+
+    // Consume completions
+    while ((cpl = cq_dequeue(controller->queue_handles[1], controller)) != NULL)
+    {
+        // Update the maximum number of supported queues
+        if (*COMPLETION_ID(cpl) == feature_id)
+        {
+            uint16_t max_queues = _MIN(cpl->dword[0] >> 16, cpl->dword[0] & 0xffff);
+            controller->max_queues = _MIN(max_queues, controller->max_queues);
+        }
+    }
+
+    cq_submit(controller->queue_handles[1]);
+
     unsigned char* bytes = controller->data.virt_addr;
     controller->max_data_size = bytes[77] * (1 << (12 + CAP$MPSMIN(register_ptr)));
     controller->sq_entry_size = _RB(bytes[512], 3, 0);
     controller->cq_entry_size = _RB(bytes[513], 3, 0);
     controller->max_out_cmds = *((uint16_t*) (bytes + 514));
     controller->n_ns = *((uint32_t*) (bytes + 516));
+    return 0;
 }
 
 
@@ -295,16 +353,13 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     enable_controller(register_ptr, host_page_size, controller->timeout);
 
     // Submit identify controller command
-    err = identify_controller(controller, &controller->data);
+    err = identify_controller(controller, register_ptr);
     if (err != 0)
     {
-        fprintf(stderr, "Failed to execute identify controller command: %s\n", strerror(err));
+        fprintf(stderr, "Failed to submit command: %s\n", strerror(err));
         nvm_free(controller, fd);
         return err;
     }
-
-    // Parse controller identification and extract properties
-    extract_controller_properties(controller, register_ptr);
 
     // Set CQES and SQES in CC
     configure_entry_sizes(register_ptr, controller);
