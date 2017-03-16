@@ -73,23 +73,29 @@ struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t controller)
 
         // Update head pointer of submission queue
         controller->queue_handles[*CQ_SQID(ptr)]->head = *CQ_SQHD(ptr);
+
     }
 
     return ptr;
 }
 
 
-// TODO: cq_dequeue_block - dequeue but wait for controller->timeout before failing
+extern "C" __host__ 
+struct completion* cq_dequeue_block(nvm_queue_t cq, nvm_controller_t controller)
+{
+    // TODO: cq_dequeue_block - dequeue but wait for controller->timeout before returning NULL
+    return NULL;
+}
 
 
-extern "C" __host__ __device__
+extern "C" __host__
 void sq_submit(nvm_queue_t sq)
 {
     *sq->db = sq->tail;
 }
 
 
-extern "C" __host__ __device__
+extern "C" __host__
 void cq_update(nvm_queue_t cq)
 {
     *cq->db = cq->head;

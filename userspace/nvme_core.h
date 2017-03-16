@@ -13,6 +13,10 @@ extern "C" {
 #define __device__
 #endif
 
+
+// TODO: some kind of error lookup based on chapter 4.6.1.2.1
+
+
 /* Pointer to command ID field (CID) in command */
 #define COMMAND_ID(ptr) _REG(ptr, 2, 16)
 
@@ -60,12 +64,24 @@ struct command* sq_enqueue(nvm_queue_t sq);
 
 /* Dequeue completion queue entry
  *
- * Dequeue a completion event from the completion queue.
+ * Dequeue a completion entry from the completion queue.
  *
  * Returns a pointer to the completion entry, or NULL if the queue is empty.
  */
 __host__ __device__
 struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t controller);
+
+
+/* Dequeue completion queue entry
+ *
+ * Dequeue a completion entry from the completion queue.
+ * If none are available at the time, try again until a controller
+ * timeout interval.
+ *
+ * Returns a pointer to the completion entry, or NULL if the queue is empty.
+ */
+__host__
+struct completion* cq_dequeue_block(nvm_queue_t cq, nvm_controller_t controller);
 
 
 /* Poll a completion queue
@@ -85,7 +101,7 @@ struct completion* cq_poll(nvm_queue_t cq);
  * The caller must make sure that all commands are prepared before calling
  * this.
  */
-__host__ __device__
+__host__ 
 void sq_submit(nvm_queue_t sq);
 
 
@@ -95,13 +111,11 @@ void sq_submit(nvm_queue_t sq);
  * All completion pointers acquired before this must be discarded after
  * calling this.
  */
-__host__ __device__
+__host__ 
 void cq_update(nvm_queue_t cq); 
 
 
-// TODO: Some timeout count-down in order to determine when to not wait for messages anymore
-// maybe some form of cq_dequeue_block
-
+// TODO: need some function to submit from kernel
 
 #ifdef __cplusplus
 }

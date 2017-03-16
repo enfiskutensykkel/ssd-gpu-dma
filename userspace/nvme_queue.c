@@ -41,7 +41,7 @@ static void clear_page(page_t* page)
 
 static void clear_queue_handle(nvm_queue_t queue, nvm_controller_t controller, uint16_t no)
 {
-    queue->no = no;
+    queue->no = no / 2;
     clear_page(&queue->page);
     queue->max_entries = controller->max_entries;
     queue->entry_size = (no % 2 == 0) ? controller->sq_entry_size : controller->cq_entry_size;
@@ -79,8 +79,8 @@ int prepare_queue_handles(nvm_controller_t controller)
     clear_queue_handle(sq, controller, controller->n_queues - 2);
     clear_queue_handle(cq, controller, controller->n_queues - 1);
 
-    sq->db = SQ_DBL(controller->dbs, (sq->no / 2), controller->dstrd);
-    cq->db = CQ_DBL(controller->dbs, (cq->no / 2), controller->dstrd); 
+    sq->db = SQ_DBL(controller->dbs, sq->no, controller->dstrd);
+    cq->db = CQ_DBL(controller->dbs, cq->no, controller->dstrd); 
 
     controller->queue_handles[controller->n_queues - 2] = sq;
     controller->queue_handles[controller->n_queues - 1] = cq;
@@ -111,7 +111,7 @@ static int create_cq(nvm_controller_t controller, nvm_queue_t queue)
     cmd->dword[8] = 0;
     cmd->dword[9] = 0;
 
-    cmd->dword[10] = ((queue->max_entries  - 1) << 16) | (queue->no / 2);
+    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no ;
 
     // Interrupt vector | Interrupts enable | Physically contiguous 
     cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
@@ -126,7 +126,23 @@ static int create_cq(nvm_controller_t controller, nvm_queue_t queue)
 
     cq_update(controller->queue_handles[1]);
 
-    return status;
+    switch (status)
+    {
+        case 0x01:
+            fprintf(stderr, "Invalid queue identifier\n");
+            return -EBADF;
+
+        case 0x02:
+            fprintf(stderr, "Invalid queue size\n");
+            return -EINVAL;
+
+        case 0x08:
+            fprintf(stderr, "Invalid interrupt vector\n");
+            return -EINVAL;
+
+        default:
+            return status;
+    }
 }
 
 
@@ -155,7 +171,7 @@ static int create_sq(nvm_controller_t controller, nvm_queue_t queue)
     cmd->dword[10] = ((queue->max_entries  - 1) << 16) | queue->no;
 
     // Completion queue id | queue priority | PC */
-    cmd->dword[11] = ((queue->no / 2) << 16) | (0x00 << 1) | 0x01;
+    cmd->dword[11] = (((uint32_t) queue->no) << 16) | (0x00 << 1) | 0x01;
 
     // Submit command and wait for completion
     sq_submit(controller->queue_handles[0]);
@@ -167,7 +183,19 @@ static int create_sq(nvm_controller_t controller, nvm_queue_t queue)
 
     cq_update(controller->queue_handles[1]);
 
-    return status;
+    switch (status)
+    {
+        case 0x01:
+            fprintf(stderr, "Invalid queue identifier\n");
+            return -EBADF;
+
+        case 0x02:
+            fprintf(stderr, "Invalid queue size\n");
+            return -EINVAL;
+
+        default:
+            return status;
+    }
 }
 
 
@@ -181,23 +209,25 @@ int create_queues(nvm_controller_t controller)
         status = create_cq(controller, controller->queue_handles[i + 1]);
         if (status != 0)
         {
-            fprintf(stderr, "An error occured while creating IO queues\n");
-            if (status < 0)
+            if (status > 0)
             {
-                return -status;
+                fprintf(stderr, "An unknown error occured while creating CQ\n");
+                return EIO;
             }
-            return EIO;
+
+            return -status;
         }
 
         status = create_sq(controller, controller->queue_handles[i]);
         if (status != 0)
         {
-            fprintf(stderr, "An error occured while creating IO queues\n");
-            if (status < 0)
+            if (status > 0)
             {
-                return -status;
+                fprintf(stderr, "An unknown error occured while creating SQ\n");
+                return EIO;
             }
-            return EIO;
+
+            return -status;
         }
     }
 
