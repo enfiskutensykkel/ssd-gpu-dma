@@ -151,16 +151,16 @@ int start_kernel(int fd, int dev, nvm_controller_t ctrl)
     int status;
     page_t data;
 
-    status = get_page(&data, fd, dev);
+    status = get_page(&data, fd, 0);
     if (status != 0)
     {
         fprintf(stderr, "Failed to create data buffer\n");
         return status;
     }
 
-    printf("value in mem=%x\n", *((volatile unsigned int*) data.virt_addr));
-    volatile uint32_t* x = (volatile uint32_t*) data.virt_addr;
-
+//    printf("value in mem=%x\n", *((volatile unsigned int*) data.virt_addr));
+//    volatile uint32_t* x = (volatile uint32_t*) data.virt_addr;
+//
     status = create_io_queues(ctrl, fd, dev, 1);
     if (status != 0)
     {
@@ -168,8 +168,8 @@ int start_kernel(int fd, int dev, nvm_controller_t ctrl)
         return status;
     }
 
-    //*x = 0xcafebabe;
-    //prepare_write(ctrl->queue_handles[2], 1, &data, 0, 1);
+//*x = 0xdeadbeef;
+//prepare_write(ctrl->queue_handles[2], 1, &data, 0, 1);
 
     prepare_read(ctrl->queue_handles[2], 1, &data, 0, 1);
 
@@ -184,7 +184,13 @@ int start_kernel(int fd, int dev, nvm_controller_t ctrl)
     cq_update(ctrl->queue_handles[3]);
 
     usleep(500000);
-    printf("value in mem=%x\n", *((volatile unsigned int*) data.virt_addr));
+//    printf("value in mem=%x\n", *((volatile unsigned int*) data.virt_addr));
         
+    uint32_t x = 0;
+
+    cudaMemcpy((void*) &x, data.virt_addr, sizeof(uint32_t), cudaMemcpyDeviceToHost);
+
+    printf("value: %x\n", x);
+
     return 0;
 }

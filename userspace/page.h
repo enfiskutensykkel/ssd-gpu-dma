@@ -17,6 +17,7 @@ struct page
     int             device;         // CUDA device page is hosted on (-1 for no device)
     long            kernel_handle;  // handle retrieved from kernel module
     void*           virt_addr;      // virtual address of page
+    void*           dev_ptr;        // device pointer
     uint64_t        phys_addr;      // physical address of page
     size_t          page_size;      // page size
 };

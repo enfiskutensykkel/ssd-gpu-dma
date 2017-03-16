@@ -4,12 +4,14 @@ RELEASE := $(shell uname -r)
 CUHOME	:= /usr/local/cuda
 MODULE	:= cunvme
 DEFINES	:= -DCUNVME_FILE='"$(MODULE)"' -DCUNVME_VERSION='"0.1"' -DMAX_DBL_MEM=0x256
+NVDRIVE := 367.48
 
 
 obj-m := $(MODULE).o
 $(MODULE)-objs := module/cunvme.o
-ccflags-y += -I$(PWD)/include $(DEFINES)
+ccflags-y += -I$(PWD)/include $(DEFINES) -I/usr/src/nvidia-$(NVDRIVE)/
 KDIR ?= /lib/modules/$(RELEASE)/build
+KBUILD_EXTRA_SYMBOLS := /usr/src/nvidia-$(NVDRIVE)/Module.symvers
 
 ifeq ($(KERNELRELEASE),)
 	CC    	:= $(CUHOME)/bin/nvcc

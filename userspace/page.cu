@@ -44,7 +44,7 @@ static int unpin_memory(page_t* page, int fd)
 }
 
 
-static int pin_memory(page_t* page, int fd)
+static int pin_memory(page_t* page, int fd, int dev)
 {
     if (fd < 0)
     {
@@ -57,7 +57,15 @@ static int pin_memory(page_t* page, int fd)
     struct cunvme_pin request;
     request.handle = CUNVME_NO_HANDLE;
     request.paddr = (unsigned long long) NULL;
-    request.vaddr = (unsigned long long) page->virt_addr;
+    if (dev >= 0)
+    {
+        request.vaddr = (unsigned long long) page->dev_ptr;
+    }
+    else
+    {
+        request.vaddr = (unsigned long long) page->virt_addr;
+    }
+    request.gpu = dev;
 
     int err = ioctl(fd, CUNVME_PIN, &request);
     if (err < 0)
@@ -74,7 +82,26 @@ static int pin_memory(page_t* page, int fd)
 
 static int get_gpu_page(page_t* page, size_t size, int fd, int dev)
 {
-    // TODO: Copy magic from rdma bench
+    page->device = dev;
+    
+    void* dev_mem = NULL;
+
+    cudaError_t err = cudaSetDevice(dev);
+
+    // TODO: error check
+    
+    err = cudaMalloc(&dev_mem, size);
+
+    cudaPointerAttributes attrs;
+
+    err = cudaPointerGetAttributes(&attrs, dev_mem);
+
+    page->virt_addr = dev_mem;
+    page->dev_ptr = attrs.devicePointer;
+
+    pin_memory(page, fd, page->device);
+
+    printf("get_gpu_page finish\n");
     return 0;
 }
 
@@ -83,9 +110,10 @@ int get_page(page_t* page, int fd, int dev)
 {
     int err;
 
-    page->device = -1;
+    page->device = CUNVME_NO_CUDA_DEVICE;
     page->kernel_handle = CUNVME_NO_HANDLE;
     page->virt_addr = NULL;
+    page->dev_ptr = NULL;
     page->phys_addr = (uint64_t) NULL;
     page->page_size = 0;
 
@@ -95,12 +123,12 @@ int get_page(page_t* page, int fd, int dev)
         fprintf(stderr, "Failed to retrieve page size: %s\n", strerror(errno));
         return errno;
     }
-    
+
     if (dev >= 0)
     {
         return get_gpu_page(page, page_size, fd, dev);
     }
-
+    
     void* virt_addr;
     
     err = posix_memalign(&virt_addr, page_size, page_size);
@@ -113,7 +141,7 @@ int get_page(page_t* page, int fd, int dev)
     page->virt_addr = virt_addr;
     page->page_size = page_size;
 
-    if (pin_memory(page, fd) != 0)
+    if (pin_memory(page, fd, CUNVME_NO_CUDA_DEVICE) != 0)
     {
         put_page(page, -1);
         return EIO;

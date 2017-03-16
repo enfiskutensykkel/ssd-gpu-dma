@@ -12,18 +12,25 @@
 #include <linux/sched.h>
 #include <cunvme_ioctl.h>
 #include <linux/mm.h>
+#include <nvidia/nv-p2p.h>
 
 //#define PAGE_MASK ~((1 << PAGE_SHIFT) - 1)
+
+#define GPU_BOUND_SHIFT     16
+#define GPU_BOUND_SIZE      (1UL << GPU_BOUND_SHIFT)
+#define GPU_BOUND_OFFSET    (GPU_BOUND_SIZE-1)
+#define GPU_BOUND_MASK      (~GPU_BOUND_OFFSET)
 
 
 /* Describes a page of user memory */
 struct user_page
 {
-    struct task_struct*     owner;      /* user process that owns the page */
-    struct page*            page;       /* page in question */
-    struct vm_area_struct*  vma;        /* virtual memory mapping stuff */
-    unsigned long long      virt_addr;  /* virtual address of the page */
-    dma_addr_t              phys_addr;  /* physical address of page */
+    struct task_struct*         owner;      /* user process that owns the page */
+    struct page*                page;       /* page in question */
+    nvidia_p2p_page_table_t*    page_tbl;   /* gpu pages in question */
+    struct vm_area_struct*      vma;        /* virtual memory mapping stuff */
+    unsigned long long          virt_addr;  /* virtual address of the page */
+    dma_addr_t                  phys_addr;  /* physical address of page */
 };
 
 
@@ -58,11 +65,72 @@ static const struct file_operations ioctl_fops = {
 };
 
 
+/* Free callback */
+static void free_gpu_page(void* data)
+{
+    struct user_page* up = (struct user_page*) data;
+
+    if (up->page_tbl != NULL)
+    {
+        //nvidia_p2p_free_pages(up->page_tbl);
+        nvidia_p2p_free_page_table(up->page_tbl);
+    }
+
+    up->page_tbl = NULL;
+    up->owner = NULL;
+
+    printk(KERN_DEBUG "Free'd GPU memory\n");
+}
+
+
+/* Get a free slot in the user page table */
+static struct user_page* get_user_page_slot(void)
+{
+    long handle;
+
+    for (handle = 0; handle < num_user_pages; ++handle)
+    {
+        spin_lock(&user_pages_lock);
+        if (user_pages[handle].owner == NULL)
+        {
+            user_pages[handle].owner = current;
+            user_pages[handle].page = NULL;
+            spin_unlock(&user_pages_lock);
+            return &user_pages[handle];
+        }
+        spin_unlock(&user_pages_lock);
+    }
+
+    return NULL;
+}
+
+
+/* Release slot in user page table */
+static int put_user_page_slot(struct user_page* up)
+{
+    if (up->owner == current)
+    {
+        if (up->page != NULL)
+        {
+            put_page(up->page);
+            up->page = NULL;
+        }
+        else
+        {
+            nvidia_p2p_put_pages(0, 0, up->virt_addr, up->page_tbl);
+        }
+
+        up->owner = NULL;
+        return 0;
+    }
+
+    return -EBADF;
+}
+
+
 static long unpin_user_page(struct cunvme_unpin __user* requestp)
 {
     struct cunvme_unpin request;
-    int retval = 0;
-    struct user_page* up;
 
     if (copy_from_user(&request, requestp, sizeof(request)) != 0)
     {
@@ -76,21 +144,7 @@ static long unpin_user_page(struct cunvme_unpin __user* requestp)
         return -EBADF;
     }
 
-    up = &user_pages[request.handle];
-
-    spin_lock(&user_pages_lock);
-    if (up->owner == current)
-    {
-        put_page(up->page);
-        up->owner = NULL;
-    }
-    else
-    {
-        retval = -EBADF;
-    }
-    spin_unlock(&user_pages_lock);
-
-    return retval;
+    return put_user_page_slot(&user_pages[request.handle]);
 }
 
 
@@ -99,21 +153,9 @@ static long pin_user_page(struct cunvme_pin __user* request_ptr)
     struct cunvme_pin request;
     struct user_page* up = NULL;
     int retval = 0;
-    long handle;
+    long handle = CUNVME_NO_HANDLE;
 
-    for (handle = 0; handle < num_user_pages; ++handle)
-    {
-        spin_lock(&user_pages_lock);
-        if (user_pages[handle].owner == NULL)
-        {
-            up = &user_pages[handle];
-            up->owner = current;
-            spin_unlock(&user_pages_lock);
-            break;
-        }
-        spin_unlock(&user_pages_lock);
-    }
-
+    up = get_user_page_slot();
     if (up == NULL)
     {
         printk(KERN_WARNING "Out of available page slots\n");
@@ -121,25 +163,46 @@ static long pin_user_page(struct cunvme_pin __user* request_ptr)
         goto out;
     }
 
+    handle = up - user_pages;
+
     if (copy_from_user(&request, request_ptr, sizeof(request)) != 0)
     {
         printk(KERN_ERR "Failed to read userspace request from %d\n", current->pid);
         return -EIO;
     }
 
-    up->virt_addr = request.vaddr & PAGE_MASK;
-
-//#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 4, 57))
-    retval = get_user_pages(current, current->mm, up->virt_addr, 1, 1, 0, &up->page, &up->vma);
-//#endif
-    if (retval != 1)
+    if (request.gpu != CUNVME_NO_CUDA_DEVICE)
     {
-        handle = CUNVME_NO_HANDLE;
-        printk(KERN_ERR "Call to get_user_pages() failed: %d\n", retval);
-        goto out;
+        up->page = NULL;
+        up->virt_addr = request.vaddr & GPU_BOUND_MASK;
+
+        retval = nvidia_p2p_get_pages(0, 0, up->virt_addr, GPU_BOUND_SIZE, &up->page_tbl, free_gpu_page, up);
+        if (retval != 0)
+        {
+            handle = CUNVME_NO_HANDLE;
+            printk(KERN_ERR "nvidia_p2p_get_pages() failed: %d\n", retval);
+            goto out;
+        }
+
+        up->phys_addr = (dma_addr_t) up->page_tbl->pages[0]->physical_address;
+    }
+    else
+    {
+        up->page_tbl = NULL;
+        up->virt_addr = request.vaddr & PAGE_MASK;
+
+        //#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 4, 57))
+        retval = get_user_pages(current, current->mm, up->virt_addr, 1, 1, 0, &up->page, &up->vma);
+        //#endif
+        if (retval != 1)
+        {
+            handle = CUNVME_NO_HANDLE;
+            printk(KERN_ERR "Call to get_user_pages() failed: %d\n", retval);
+            goto out;
+        }
+        up->phys_addr = page_to_phys(up->page);
     }
 
-    up->phys_addr = page_to_phys(up->page);
     request.paddr = up->phys_addr;
 
     printk(KERN_DEBUG "pid=%d vaddr=%llx paddr=%llx\n", current->pid, up->virt_addr, up->phys_addr);
@@ -196,7 +259,10 @@ static int release_file(struct inode* inode, struct file* file)
         spin_lock(&user_pages_lock);
         if (user_pages[i].owner == current)
         {
-            put_page(user_pages[i].page);
+            if (user_pages[i].page != NULL)
+            {
+                put_page(user_pages[i].page);
+            }
             user_pages[i].owner = NULL;
             ++in_use;
         }
@@ -227,6 +293,8 @@ static int __init cunvme_entry(void)
     for (i = 0; i < num_user_pages; ++i)
     {
         user_pages[i].owner = NULL;
+        user_pages[i].page = NULL;
+        user_pages[i].page_tbl = NULL;
     }
     
     ioctl_file = proc_create(CUNVME_FILE, 0, NULL, &ioctl_fops);
@@ -253,7 +321,10 @@ static void __exit cunvme_exit(void)
         if (user_pages[i].owner != NULL)
         {
             ++count;
-            put_page(user_pages[i].page);
+            if (user_pages[i].page != NULL)
+            {
+                put_page(user_pages[i].page);
+            }
             user_pages[i].owner = NULL;
         }
     }

@@ -17,11 +17,11 @@
 enum
 {
     CUNVME_PIN          = _IO('S', CUNVME_MAGIC | 0x01),
-    CUNVME_UNPIN        = _IO('S', CUNVME_MAGIC | 0x02)
+    CUNVME_UNPIN        = _IO('S', CUNVME_MAGIC | 0x02),
 };
 
 
-/* Pin request
+/* Pin page request
  *
  * Find memory page, pin it in RAM and get the physical address.
  */
@@ -30,10 +30,11 @@ struct cunvme_pin
     long                handle;     /* out: kernel handle */
     unsigned long long  paddr;      /* out: physical address */
     unsigned long long  vaddr;      /* in:  virtual address */
+    int                 gpu;        /* in:  indicate if gpu memory */
 };
 
 
-/* Unpin request
+/* Unpin page request
  *
  * Release a previously pinned page.
  */
