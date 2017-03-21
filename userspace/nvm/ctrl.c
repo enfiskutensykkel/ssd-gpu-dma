@@ -16,16 +16,6 @@
 #include <stdio.h>
 
 
-/* SQ doorbell register */
-#define SQ_DBL(p, y, dstrd)    \
-    ((volatile void*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y)) * (4 << (dstrd)))) )
-
-
-/* CQ doorbell register */
-#define CQ_DBL(p, y, dstrd)    \
-    ((volatile void*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y) + 1) * (4 << (dstrd)))) )
-
-
 /* Controller registers */
 #define CAP(p)          _REG(p, 0x0000, 64)     // Controller Capabilities
 #define CC(p)           _REG(p, 0x0014, 32)     // Controller Configuration

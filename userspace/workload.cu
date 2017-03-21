@@ -25,10 +25,11 @@ static int prepare_read_cmd(nvm_queue_t sq, uint32_t ns_id, uint32_t blk_size, m
         return EAGAIN;
     }
 
-    size_t len = (n_blks * blk_size) / buffer->page_size;
+    //size_t len = (n_blks * blk_size) / buffer->page_size;
 
     cmd_header(cmd, NVM_READ, ns_id);
-    cmd_data_ptr(cmd, NULL, buffer, _MIN(buffer->n_addrs, len));
+    //cmd_data_ptr(cmd, NULL, buffer, _MIN(buffer->n_addrs, len));
+    cmd_data_ptr(cmd, NULL, buffer, 1);
 
     cmd->dword[10] = (uint32_t) start_lba;
     cmd->dword[11] = (uint32_t) (start_lba >> 32);
@@ -45,7 +46,8 @@ static int prepare_read_cmd(nvm_queue_t sq, uint32_t ns_id, uint32_t blk_size, m
 
 __global__ void do_work(memory_t* buffer, nvm_queue_t sq, nvm_queue_t cq, uint32_t* result)
 {
-    prepare_read_cmd(sq, 1, 512, buffer, 0, 1);
+    //prepare_read_cmd(sq, 1, 512, buffer, 0, 1);
+    
     sq_submit(sq);
 
     //while (cq_poll(cq) == NULL);
@@ -65,21 +67,25 @@ static int create_queues(int ioctl_fd, nvm_controller_t ctrl, int dev, nvm_queue
         return err;
     }
 
-    err = get_gpu_page(ioctl_fd, dev, &((*cq)->page));
+    //err = get_gpu_page(ioctl_fd, dev, &((*cq)->page));
+    err = get_ram_page(ioctl_fd, &((*cq)->page));
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate queue memory\n");
         return ENOMEM;
     }
-    cudaMemset((*cq)->page.virt_addr, 0, (*cq)->page.page_size);
+    memset((*cq)->page.virt_addr, 0, (*cq)->page.page_size);
+    //cudaMemset((*cq)->page.virt_addr, 0, (*cq)->page.page_size);
 
-    err = get_gpu_page(ioctl_fd, dev, &((*sq)->page));
+    //err = get_gpu_page(ioctl_fd, dev, &((*sq)->page));
+    err = get_ram_page(ioctl_fd, &((*sq)->page));
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate queue memory\n");
         return ENOMEM;
     }
-    cudaMemset((*sq)->page.virt_addr, 0, (*sq)->page.page_size);
+    memset((*sq)->page.virt_addr, 0, (*sq)->page.page_size);
+    //cudaMemset((*sq)->page.virt_addr, 0, (*sq)->page.page_size);
 
     err = nvm_commit_queues(ctrl);
     if (err != 0)
@@ -93,7 +99,7 @@ static int create_queues(int ioctl_fd, nvm_controller_t ctrl, int dev, nvm_queue
 
 
 extern "C" __host__
-int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev)
+int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev, void* reg_ptr, size_t reg_len)
 {
     cudaError_t err = cudaSetDevice(dev);
     if (err != cudaSuccess)
@@ -102,7 +108,8 @@ int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev)
         return EBADF;
     }
 
-    nvm_queue_t host_sq, host_cq;
+    nvm_queue_t host_sq;
+    nvm_queue_t host_cq;
     int status = create_queues(ioctl_fd, ctrl, dev, &host_cq, &host_sq);
     if (status != 0)
     {
@@ -110,7 +117,8 @@ int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev)
         return status;
     }
 
-    nvm_queue_t dev_sq, dev_cq;
+    nvm_queue_t dev_sq;
+    nvm_queue_t dev_cq;
 
     err = cudaMalloc(&dev_sq, sizeof(struct nvm_queue));
     if (err != cudaSuccess)
@@ -147,11 +155,13 @@ int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev)
         return ENOMEM;
     }
 
-    cudaHostRegister((void*) host_sq->db, sizeof(uint32_t), cudaHostRegisterIoMemory);
+    cudaHostRegister(reg_ptr, reg_len, cudaHostRegisterIoMemory);
     
     void* db;
-    cudaHostGetDevicePointer(&db, (void*) host_sq->db, 0);
-    host_sq->db = (volatile uint32_t*) db;
+    cudaHostGetDevicePointer(&db, reg_ptr, 0);
+    host_sq->db = SQ_DBL(db, host_sq->no, ctrl->dstrd);
+
+    prepare_read_cmd(host_sq, 1, 512, host_buffer, 0, 1);
 
     cudaMemcpy(dev_sq, host_sq, sizeof(struct nvm_queue), cudaMemcpyHostToDevice);
     cudaMemcpy(dev_cq, host_cq, sizeof(struct nvm_queue), cudaMemcpyHostToDevice);
@@ -162,13 +172,21 @@ int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev)
 
     do_work<<<1, 1>>>(dev_buffer, dev_sq, dev_cq, value);
 
-    //uint32_t result = 0xcafebabe;
+    // hack
+    usleep(5000000);
+
+    fprintf(stderr, "Polling...\n");
+    struct completion* cpl = cq_dequeue_block(host_cq, ctrl);
+    if (cpl != NULL)
+    {
+        fprintf(stderr, "cid=%u sct=%x sc=%x\n", *CPL_CID(cpl), SCT(cpl), SC(cpl));
+    }
+
+    uint32_t result = 0xfefefefe;
     //cudaMemcpy(&result, value, sizeof(uint32_t), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&result, host_buffer->virt_addr, sizeof(uint32_t), cudaMemcpyDeviceToHost);
 
-    usleep(50000);
-
-    fprintf(stderr, "%x\n", *((uint32_t*) host_buffer->virt_addr));
-    //fprintf(stderr, "%x\n", result);
+    fprintf(stderr, "%x\n", result);
 
     cudaFree(value);
     cudaFree(dev_buffer);

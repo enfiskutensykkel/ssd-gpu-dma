@@ -32,7 +32,8 @@ MODULE_VERSION(CUNVME_VERSION);
 /* Describes a handle to bound memory */
 struct page_handle
 {
-    struct task_struct*         owner;          /* user process that owns the pages */
+    //struct task_struct*         owner;          /* user process that owns the pages */
+    pid_t                       owner;
     struct page**               ram_pages;      /* array of pointers to pinned pages */
     struct vm_area_struct**     vmas;           /* virtual memory mapping stuff */
     nvidia_p2p_page_table_t*    gpu_pages;      /* gpu pages in question */
@@ -95,7 +96,8 @@ static void free_callback(void* handlep)
 {
     struct page_handle* handle = (struct page_handle*) handlep;
 
-    if (handle->owner != NULL && handle->gpu_pages != NULL)
+    //if (handle->owner != NULL && handle->gpu_pages != NULL)
+    if (handle->owner != 0 && handle->gpu_pages != NULL)
     {
         nvidia_p2p_free_page_table(handle->gpu_pages);
         handle->gpu_pages = NULL;
@@ -111,9 +113,11 @@ static struct page_handle* get_page_handle(void)
     for (i = 0; i < num_page_handles; ++i)
     {
         spin_lock(&page_handles_lock);
-        if (page_handles[i].owner == NULL)
+        //if (page_handles[i].owner == NULL)
+        if (page_handles[i].owner == 0)
         {
-            page_handles[i].owner = current;
+            //page_handles[i].owner = current;
+            page_handles[i].owner = current->pid;
             spin_unlock(&page_handles_lock);
 
             page_handles[i].num_pages = 0;
@@ -160,7 +164,8 @@ static int put_page_handle(struct page_handle* handle)
         }
 
         handle->num_pages = 0;
-        handle->owner = NULL;
+        //handle->owner = NULL;
+        handle->owner = 0;
         return 0;
     }
 
@@ -185,7 +190,8 @@ static long unpin_memory(void __user* requestp)
     }
 
     spin_lock(&page_handles_lock);
-    if (page_handles[request.handle].owner != current)
+    //if (page_handles[request.handle].owner != current)
+    if (page_handles[request.handle].owner != current->pid)
     {
         spin_unlock(&page_handles_lock);
         printk(KERN_WARNING "Attempted to release handle not owned by %d\n", current->pid);
@@ -250,6 +256,8 @@ static long pin_gpu_memory(void __user* requestp)
     {
         addr = handle->gpu_pages->pages[i]->physical_address;
         copy_to_user(ptr + i, &addr, sizeof(addr));
+
+        printk(KERN_DEBUG "pid=%d va=%llx pa=%llx\n", current->pid, handle->vaddr_start + (i * GPU_BOUND_SIZE), addr);
     }
 
 out:
@@ -396,7 +404,13 @@ static int release_file(struct inode* inode, struct file* file)
 
     for (i = in_use = 0; i < num_page_handles; ++i)
     {
-        if (page_handles[i].owner == current)
+        if (page_handles[i].owner != 0)
+        {
+            printk(KERN_DEBUG "owner=%d current=%d\n", page_handles[i].owner, current->pid);
+        }
+
+        //if (page_handles[i].owner == current)
+        if (page_handles[i].owner == current->pid)
         {
             put_page_handle(&page_handles[i]);
             ++in_use;
@@ -427,7 +441,8 @@ static int __init cunvme_entry(void)
 
     for (i = 0; i < num_page_handles; ++i)
     {
-        page_handles[i].owner = NULL;
+        //page_handles[i].owner = NULL;
+        page_handles[i].owner = 0;
     }
     
     ioctl_file = proc_create(CUNVME_FILENAME, 0, NULL, &ioctl_fops);
@@ -455,7 +470,8 @@ static void __exit cunvme_exit(void)
 
     for (i = 0; i < num_page_handles; ++i)
     {
-        if (page_handles[i].owner != NULL)
+        //if (page_handles[i].owner != NULL)
+        if (page_handles[i].owner != 0)
         {
             ++count;
             put_page_handle(&page_handles[i]); // FIXME not sure if this works, but should never happen

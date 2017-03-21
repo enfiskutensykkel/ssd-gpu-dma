@@ -9,6 +9,17 @@ extern "C" {
 #define __device__
 #endif
 
+
+/* SQ doorbell register */
+#define SQ_DBL(p, y, dstrd)    \
+    ((volatile uint32_t*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y)) * (4 << (dstrd)))) )
+
+
+/* CQ doorbell register */
+#define CQ_DBL(p, y, dstrd)    \
+    ((volatile uint32_t*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y) + 1) * (4 << (dstrd)))) )
+
+
 #include "types.h"
 struct completion;
 struct command;

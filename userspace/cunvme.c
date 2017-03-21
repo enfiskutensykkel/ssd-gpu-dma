@@ -13,7 +13,7 @@
 #include <getopt.h>
 
 
-extern int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev);
+extern int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev, void* reg_ptr, size_t reg_len);
 
 
 static struct option opts[] = {
@@ -213,7 +213,7 @@ int main(int argc, char** argv)
     }
 
     // Do CUDA workload to demonstrate queues hosted on GPU memory
-    cuda_workload(ioctl_fd, ctrl, cuda_device);
+    cuda_workload(ioctl_fd, ctrl, cuda_device, (void*) reg_ptr, 0x1000 + MAX_DBL_MEM);
 
     // Clean up resources
     nvm_free(ctrl, ioctl_fd);
