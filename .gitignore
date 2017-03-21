@@ -15,4 +15,4 @@ modules.order
 .tmp_versions/*
 
 # Userspace executable
-cuda-nvme
+cunvme

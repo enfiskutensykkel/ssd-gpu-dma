@@ -1,49 +1,32 @@
+#include "pci.h"
+#include "nvm/types.h"
+#include "nvm/ctrl.h"
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
-#include "nvme.h"
-#include "nvme_init.h"
-#include "cuda.h"
+#include <errno.h>
+#include <string.h>
+#include <stdio.h>
+#include <getopt.h>
 
 
-/* Offset to the COMMAND register in config space */
-#define CONFIG_COMMAND  0x04
+extern int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev);
 
 
-
-static FILE* open_config_space(char* path)
-{
-    char filename[256];
-    filename[0] = '\0';
-    strncpy(filename, path, sizeof(filename));
-    strncat(filename, "/config", sizeof(filename) - strlen(filename) - 1);
-    return fopen(filename, "r+");
-}
-
-
-static void read_register(FILE* fptr, size_t offset, size_t size, void* ptr)
-{
-    fseek(fptr, offset, SEEK_SET);
-    fread(ptr, 1, size, fptr);
-}
-
-
-static void write_register(FILE* fptr, size_t offset, size_t size, void* ptr)
-{
-    fseek(fptr, offset, SEEK_SET);
-    fwrite(ptr, 1, size, fptr);
-}
-
+static struct option opts[] = {
+    { "help", no_argument, NULL, 'h' },
+    { "controller", required_argument, NULL, 'c' },
+    { "cuda-device", required_argument, NULL, 'g' },
+    { "identify", no_argument, NULL, 'i' },
+    { NULL, 0, NULL, 0 }
+};
 
 static void print_controller_info(nvm_controller_t controller)
 {
-    unsigned char* data = controller->data.virt_addr;
+    unsigned char* data = controller->data->virt_addr;
 
     char serial[21];
     memset(serial, 0, 21);
@@ -62,91 +45,182 @@ static void print_controller_info(nvm_controller_t controller)
 }
 
 
+static void give_usage(const char* program_name)
+{
+    fprintf(stderr, "Usage: %s --controller=<pci bdf> [options...]\n", program_name);
+}
+
+static void show_help(const char* program_name)
+{
+    give_usage(program_name);
+    fprintf(stderr,
+            "\n"
+            "    This program is intended to demonstrate how NVM submission and completion\n"
+            "    queues can be hosted in memory on an Nvidia GPU. Note that this program\n"
+            "    will do read and writes to blocks on the specified SSD disk and may ruin\n"
+            "    any data stored there.\n"
+            "\n"
+            "  --controller=<pci bdf>      Specify the PCI BDF of the SSD disk to use.\n"
+            "                              A BDF is on the format [xxxx:]xx:xx.x\n"
+            "                              Use lspci -tv to find a suitable NVM controller.\n\n"
+            "  --cuda-device=<device>      Specify CUDA device to use.\n"
+            "                              Use nvidia-smi to identify available devices.\n\n"
+           );
+}
+
+
+static int parse_bdf(const char* str, size_t len, uint64_t* bdf)
+{
+    char buffer[len + 1];
+    strcpy(buffer, str);
+
+    char* endptr;
+    const char* sep = ":.";
+
+    *bdf = 0UL;
+    for (char* ptr = strtok(buffer, sep); ptr != NULL; ptr = strtok(NULL, sep))
+    {
+        uint32_t i = strtoul(ptr, &endptr, 16);
+        
+        if (endptr == NULL || *endptr != '\0' || i > 0xff)
+        {
+            return 1;
+        }
+
+        *bdf <<= 8UL;
+        *bdf |= i;
+    }
+
+    return !(0UL < *bdf && *bdf <= 0xffffff1f07UL); // 0000:00:00.0 < bdf <= ffff:ff:1f.7
+}
+
+
 int main(int argc, char** argv)
 {
-    if (argc != 2)
+    int opt;
+    int idx;
+    int err;
+
+    int identify = 0;
+    uint64_t bdf = 0;
+    int cuda_device = 0;
+
+    while ((opt = getopt_long(argc, argv, ":hc:g:i", opts, &idx)) != -1)
     {
-        fprintf(stderr, "Usage: %s <domain>:<bus>:<device>.<fn>\n", argv[0]);
-        return 1;
+        switch (opt)
+        {
+            case '?': // unknown option
+                fprintf(stderr, "Unknown option: `%s'\n", argv[optind - 1]);
+                give_usage(argv[0]);
+                return '?';
+
+            case ':': // missing option argument
+                fprintf(stderr, "Missing argument for option `%s'\n", argv[optind - 1]);
+                give_usage(argv[0]);
+                return ':';
+
+            case 'h': // show help
+                show_help(argv[0]);
+                return 0;
+
+            case 'c': // set controller
+                err = parse_bdf(optarg, strlen(optarg), &bdf);
+                if (err != 0)
+                {
+                    fprintf(stderr, "Invalid PCI BDF string: %s\n", optarg);
+                    return 'c';
+                }
+                break;
+
+            case 'i': // identify controller
+                identify = 1;
+                break;
+
+            case 'g': // set CUDA device
+                break;
+
+        }
     }
 
-    char path[256];
-    path[0] = '\0';
-    strcpy(path, "/sys/bus/pci/devices/");
-    strncat(path, argv[1], sizeof(path) - strlen(path) - 1);
-    
-    // Set Bus Master Enable to enable DMA for controller
-    FILE* config_fd = open_config_space(path);
-    if (config_fd == NULL)
+    int domain = (int) (bdf >> 24) & 0xffff;
+    int bus = (int) (bdf >> 16) & 0xff;
+    int slot = (int) (bdf >> 8) & 0x1f;
+    int fun = (int) (bdf & 0x7);
+
+    if (bus == 0 && slot == 0)
     {
-        fprintf(stderr, "Couldn't open config space file: %s\n", strerror(errno));
+        fprintf(stderr, "No NVM controller specified\n");
+        give_usage(argv[0]);
+        return 'c';
+    }
+
+    // Set up controller's config space as necessary
+    err = pci_set_config(domain, bus, slot, fun);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to access device config space %04x:%02x:%02x.%x\n",
+                domain, bus, slot, fun);
         return 2;
     }
-
-    uint16_t command;
-    read_register(config_fd, CONFIG_COMMAND, 2, &command);
-    command |= 1 << 2;
-    write_register(config_fd, CONFIG_COMMAND, 2, &command);
-
-    fclose(config_fd);
 
     // Open communication channel with kernel module
     int ioctl_fd = open(CUNVME_PATH, O_SYNC | O_RDONLY);
     if (ioctl_fd < 0)
     {
-        fprintf(stderr, "Couldn't open ioctl file: %s\n", strerror(errno));
-        return 3;
+        fprintf(stderr, "Failed to open ioctl file: %s\n", strerror(errno));
+        return 1;
     }
 
-    // Open file descriptor to device's BAR0 resource file
-    strncat(path, "/resource0", sizeof(path) - strlen(path) - 1);
-    int bar0_fd = open(path, O_RDWR);
-    if (bar0_fd < 0)
+    // Get descriptor to device's BAR0
+    int reg_fd = pci_open_bar(domain, bus, slot, fun, 0);
+    if (reg_fd < 0)
     {
-        fprintf(stderr, "Couldn't open resource file: %s\n", strerror(errno));
+        fprintf(stderr, "Failed to access device BAR resource file\n");
         close(ioctl_fd);
-        return 3;
+        return 2;
     }
 
-    // Memory map resource file
-    volatile void* register_mem = mmap(NULL, 0x1000 + MAX_DBL_MEM, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FILE, bar0_fd, 0);
-    if (register_mem == NULL)
+    // Memory map device's BAR0
+    volatile void* reg_ptr = mmap(NULL, 0x1000 + MAX_DBL_MEM, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FILE, reg_fd, 0);
+    if (reg_ptr == NULL)
     {
-        fprintf(stderr, "Failed to mmap: %s\n", strerror(errno));
+        fprintf(stderr, "Failed to mmap BAR resource file: %s\n", strerror(errno));
+        close(reg_fd);
         close(ioctl_fd);
-        close(bar0_fd);
-        return 3;
+        return 2;
     }
 
-    nvm_controller_t handle;
+    nvm_controller_t ctrl;
 
-    // Initialize controller
-    fprintf(stderr, "Resetting device...\n");
-    int status = nvm_init(&handle, ioctl_fd, register_mem, MAX_DBL_MEM);
-    if (status != 0)
+    // Reset and initialize controller
+    fprintf(stderr, "Resetting controller %04x:%02x:%02x.%x...\n",
+            domain, bus, slot, fun);
+
+    err = nvm_init(&ctrl, ioctl_fd, reg_ptr, MAX_DBL_MEM);
+    if (err != 0)
     {
-        fprintf(stderr, "Failed to reset and initialize device: %s\n", strerror(status));
-        munmap((void*) register_mem, 0x1000 + MAX_DBL_MEM);
+        fprintf(stderr, "Failed to reset and initialize device: %s\n", strerror(err));
+        munmap((void*) reg_ptr, 0x1000 + MAX_DBL_MEM);
+        close(reg_fd);
         close(ioctl_fd);
-        close(bar0_fd);
-        return 4;
+        return 2;
     }
+    fprintf(stderr, "Controller initialized.\n");
 
-    // Print some info about the controller
-    print_controller_info(handle);
-
-    // Do CUDA work load
-    status = start_kernel(ioctl_fd, -1, handle);
-    if (status != 0)
+    if (identify)
     {
-        fprintf(stderr, "Failed\n");
+        print_controller_info(ctrl);
     }
+
+    // Do CUDA workload to demonstrate queues hosted on GPU memory
+    cuda_workload(ioctl_fd, ctrl, cuda_device);
 
     // Clean up resources
-    nvm_free(handle, ioctl_fd);
-    munmap((void*) register_mem, 0x1000 + MAX_DBL_MEM);
+    nvm_free(ctrl, ioctl_fd);
+    munmap((void*) reg_ptr, 0x1000 + MAX_DBL_MEM);
+    close(reg_fd);
     close(ioctl_fd);
-    close(bar0_fd);
 
-    return status;
+    return 0;
 }
+

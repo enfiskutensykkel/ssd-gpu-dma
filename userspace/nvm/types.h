@@ -1,12 +1,12 @@
-#ifndef __NVME_H__
-#define __NVME_H__
+#ifndef __NVM_TYPES_H__
+#define __NVM_TYPES_H__
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include <stddef.h>
 #include <stdint.h>
-#include "page.h"
+#include <memory/types.h>
 
 
 /* IO queue handle
@@ -17,7 +17,7 @@ extern "C" {
 struct nvm_queue
 {
     uint16_t            no;             // Queue number
-    page_t              page;           // Page handle to where the queue is hosted
+    page_t              page;           // Memory handle to where the queue is hosted
     size_t              max_entries;    // Maximum number of queue entries supported
     size_t              entry_size;     // Entry size
     uint32_t            head;           // Head pointer
@@ -25,6 +25,7 @@ struct nvm_queue
     uint64_t            phase;          // Current phase bit
     volatile uint32_t*  db;             // Pointer to doorbell register
 };
+
 
 /* Convenience type for queue handle */
 typedef struct nvm_queue* nvm_queue_t;
@@ -38,7 +39,7 @@ typedef struct nvm_queue* nvm_queue_t;
  */
 struct nvm_controller
 {
-    page_t          data;           // Controller Identify structure
+    memory_t*       data;           // Controller Identify structure
     size_t          page_size;      // Memory page size (MPS)
     uint8_t         dstrd;          // Doorbell stride (in encoded form)
     uint64_t        timeout;        // Controller timeout in milliseconds
@@ -49,10 +50,11 @@ struct nvm_controller
     size_t          sq_entry_size;  // SQ entry size (SQES)
     uint16_t        max_queues;     // Maximum number of IO queues
     uint16_t        n_queues;       // Number queues
-    nvm_queue_t*    queue_handles;  // Pointer to queues (even numbered queues=SQ, odd numbered=CQ)
+    nvm_queue_t*    queues;         // Pointer to queues (even numbered queues=SQ, odd numbered=CQ)
     uint32_t        n_ns;           // Number of namespaces
     volatile void*  dbs;            // Doorbell registers
 };
+
 
 /* Convenience type for controller handle */
 typedef struct nvm_controller* nvm_controller_t;

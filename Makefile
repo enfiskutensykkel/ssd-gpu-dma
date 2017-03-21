@@ -1,52 +1,63 @@
-PROJECT	:= cuda-nvme
-OBJECTS := userspace/cunvme.c.o userspace/nvme_init.c.o userspace/page.cu.o userspace/nvme_core.cu.o userspace/nvme_queue.c.o userspace/cuda.cu.o
-RELEASE := $(shell uname -r)
-CUHOME	:= /usr/local/cuda
-MODULE	:= cunvme
-DEFINES	:= -DCUNVME_FILE='"$(MODULE)"' -DCUNVME_VERSION='"0.1"' -DMAX_DBL_MEM=0x256
-NVDRIVE := 367.48
+PROJECT 	:= cunvme
+DEFINES		:= -DMAX_DBL_MEM=0x256 -DMAX_RAM_PAGES=64 -DMAX_GPU_PAGES=8
 
+# These should be overrided from command line
+# e.g. make CUDA_PATH=/usr/local/cuda-8.0 NV_DRIVER_PATH=/opt/nvidia-367.48
+KERNEL_RELEASE 	:= $(shell uname -r)
+CUDA_PATH 	:= /usr/local/cuda
+NV_DRIVER_PATH	:= /usr/src/nvidia-367.48
 
-obj-m := $(MODULE).o
-$(MODULE)-objs := module/cunvme.o
-ccflags-y += -I$(PWD)/include $(DEFINES) -I/usr/src/nvidia-$(NVDRIVE)/
-KDIR ?= /lib/modules/$(RELEASE)/build
-KBUILD_EXTRA_SYMBOLS := /usr/src/nvidia-$(NVDRIVE)/Module.symvers
+# Kernel module make variables
+obj-m 		:= $(PROJECT).o
+$(PROJECT)-objs := module/$(PROJECT).o
+ccflags-y	+= -I$(PWD)/include -DCUNVME_FILENAME='"$(PROJECT)"' -DCUNVME_VERSION='"0.1"' -I$(NV_DRIVER_PATH) 
+KDIR		?= /lib/modules/$(KERNEL_RELEASE)/build
+KBUILD_EXTRA_SYMBOLS := $(NV_DRIVER_PATH)/Module.symvers
 
+# If we're building userspace, use these variables:
 ifeq ($(KERNELRELEASE),)
-	CC    	:= $(CUHOME)/bin/nvcc
-	CCBIN	:= /usr/bin/gcc
-	CFLAGS	:= -Wall -Wextra -O0 -Werror=missing-declarations -Werror=missing-prototypes -Werror=implicit-function-declaration
-	INCLUDE	:= -I$(CUHOME)/include -Iinclude -DCUNVME_PATH='"/proc/$(MODULE)"'
-	LDLIBS	:= -lcuda -lc
-	LDFLAGS	:= -L$(CUHOME)/lib64
+CC 		:= $(CUDA_PATH)/bin/nvcc
+CCBIN		:= /usr/bin/gcc
+CFLAGS		:= -Wall -Wextra -Werror=implicit-function-declaration
+INCLUDE		:= -I$(CUDA_PATH)/include -Iinclude  -Iuserspace
+DEFINES		+= -DCUNVME_PATH='"/proc/$(PROJECT)"'
+LDLIBS		:= -lcuda -lc
+LDFLAGS		:= -L$(CUDA_PATH)/lib64
+SOURCE_FILES	:= $(shell find userspace/ -type f -name "*.cu") $(shell find userspace/ -type f -name "*.c")
+HEADER_FILES	:= $(shell find userspace/ -type f -name "*.h")
+OBJECT_FILES	:= $(SOURCE_FILES:%=%.o)
 endif
 
 
-.PHONY: default reload unload load
+## Set make targets
+.PHONY: default reload unload load clean
+
 
 default: modules $(PROJECT)
 
 clean:
-	-$(RM) $(PROJECT) $(OBJECTS)
+	-$(RM) $(PROJECT) $(OBJECT_FILES)
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
-$(PROJECT): $(OBJECTS)
+$(PROJECT): $(OBJECT_FILES)
 	$(CC) -ccbin $(CCBIN) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
 reload: unload load
 
 unload:
-	-rmmod $(MODULE).ko
+	-rmmod $(PROJECT).ko
 
 load:
-	insmod $(MODULE).ko num_user_pages=128
+	insmod $(PROJECT).ko num_page_handles=128 max_ram_pages=64 max_gpu_pages=8
 
-userspace/%.c.o: userspace/%.c
-	$(CCBIN) -std=gnu11 $(CFLAGS) -pedantic $(DEFINES) $(INCLUDE) -o $@ $< -c
+# How to compile C files
+userspace/%.c.o: userspace/%.c $(HDR_FILES)
+	$(CCBIN) -std=gnu11 $(CFLAGS) $(DEFINES) $(INCLUDE) -o $@ $< -c
 
-userspace/%.cu.o: userspace/%.cu
-	$(CC) -std=c++11 -ccbin $(CCBIN) -Xcompiler "$(CFLAGS) $(DEFINES)" $(INCLUDE) -o $@ $< -c
+# How to compile CUDA files
+userspace/%.cu.o: userspace/%.cu $(HDR_FILES)
+	$(CC) -std=c++11 -ccbin $(CCBIN) -Xcompiler "$(CFLAGS) $(DEFINES)" $(INCLUDE) -o $@ $< -c -dc
 
+# Hack to mix userspace and kernel module stuff together in same makefile
 %:
 	$(MAKE) -C $(KDIR) M=$(PWD) $@

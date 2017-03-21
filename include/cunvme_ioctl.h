@@ -16,31 +16,34 @@
 /* Supported operations */
 enum
 {
-    CUNVME_PIN          = _IO('S', CUNVME_MAGIC | 0x01),
-    CUNVME_UNPIN        = _IO('S', CUNVME_MAGIC | 0x02),
+    CUNVME_PIN_RAM      = _IO('S', CUNVME_MAGIC | 0x01),
+    CUNVME_PIN_GPU      = _IO('S', CUNVME_MAGIC | 0x02),
+    CUNVME_UNPIN        = _IO('S', CUNVME_MAGIC | 0x03),
 };
 
 
-/* Pin page request
+/* Pin memory region
  *
- * Find memory page, pin it in RAM and get the physical address.
+ * Find pages associated to a memory range, page-lock them and return
+ * valid DMA addresses.
  */
 struct cunvme_pin
 {
-    long                handle;     /* out: kernel handle */
-    unsigned long long  paddr;      /* out: physical address */
-    unsigned long long  vaddr;      /* in:  virtual address */
-    int                 gpu;        /* in:  indicate if gpu memory */
+    long                handle;         /* out: kernel handle */
+    unsigned long long  virt_addr;      /* in:  virtual address of memory region*/
+    long                num_pages;      /* inout: number of pages to pin */
+    unsigned long long  bus_addr[0];    /* out: array of bus addresses */
 };
 
 
-/* Unpin page request
+/* Unpin memory region
  *
- * Release a previously pinned page.
+ * Release a previously pinned memory region.
  */
 struct cunvme_unpin
 {
-    long                handle;     /* in: kernel handle */
+    long                handle;         /* in: kernel handle */
 };
+
 
 #endif

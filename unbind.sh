@@ -15,7 +15,7 @@ if [[ -z "$DEVICE" ]]; then
 fi
 
 case "$1" in
-	"bind)"
+	"bind")
 		echo 0 > "/sys/bus/pci/devices/0000:$DEVICE/enable"
 		echo -n "0000:$DEVICE" > /sys/bus/pci/drivers/nvme/bind
 		;;

@@ -1,5 +1,5 @@
-#ifndef __UTIL_H__
-#define __UTIL_H__
+#ifndef __NVM_UTIL_H__
+#define __NVM_UTIL_H__
 
 #include <stdint.h>
 

@@ -14,35 +14,57 @@
 #include <linux/mm.h>
 #include <nvidia/nv-p2p.h>
 
-//#define PAGE_MASK ~((1 << PAGE_SHIFT) - 1)
 
-#define GPU_BOUND_SHIFT     16
-#define GPU_BOUND_SIZE      (1UL << GPU_BOUND_SHIFT)
-#define GPU_BOUND_OFFSET    (GPU_BOUND_SIZE-1)
-#define GPU_BOUND_MASK      (~GPU_BOUND_OFFSET)
+/* Some handy constants */
+#define RAM_BOUND_SIZE      PAGE_SIZE
+#define RAM_BOUND_MASK      PAGE_MASK
+#define GPU_BOUND_SIZE      (1UL << 16)
+#define GPU_BOUND_MASK      ~(GPU_BOUND_SIZE - 1)
 
 
-/* Describes a page of user memory */
-struct user_page
+/* Some general information */
+MODULE_AUTHOR("Jonas Markussen <jonassm@simula.no>");
+MODULE_DESCRIPTION("Page-lock userspace buffers and retrieve physical addresses of their pages");
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_VERSION(CUNVME_VERSION);
+
+
+/* Describes a handle to bound memory */
+struct page_handle
 {
-    struct task_struct*         owner;      /* user process that owns the page */
-    struct page*                page;       /* page in question */
-    nvidia_p2p_page_table_t*    page_tbl;   /* gpu pages in question */
-    struct vm_area_struct*      vma;        /* virtual memory mapping stuff */
-    unsigned long long          virt_addr;  /* virtual address of the page */
-    dma_addr_t                  phys_addr;  /* physical address of page */
+    struct task_struct*         owner;          /* user process that owns the pages */
+    struct page**               ram_pages;      /* array of pointers to pinned pages */
+    struct vm_area_struct**     vmas;           /* virtual memory mapping stuff */
+    nvidia_p2p_page_table_t*    gpu_pages;      /* gpu pages in question */
+    unsigned long long          vaddr_start;    /* start address of the pages */
+    long                        num_pages;      /* number of pages pinned */
 };
 
 
-static spinlock_t user_pages_lock; 
+/* Spinlock that ensures atomic access to the page handles */
+static spinlock_t page_handles_lock; 
 
 
-static struct user_page* user_pages = NULL;
+/* List of page handles */
+static struct page_handle* page_handles = NULL;
 
 
-static long num_user_pages = 0;
-module_param(num_user_pages, long, 0);
-MODULE_PARM_DESC(num_user_pages, "Maximum number of pinned pages");
+/* Maximum number of page handles allowed */
+static long num_page_handles = 0;
+module_param(num_page_handles, long, 0);
+MODULE_PARM_DESC(num_page_handles, "Number of available handles to pinned memory regions");
+
+
+/* Maximum number of user pages per handle */
+static long max_ram_pages = 0;
+module_param(max_ram_pages, long, 0);
+MODULE_PARM_DESC(max_ram_pages, "Maximum number of RAM pages per handle");
+
+
+/* Maximum number of GPU pages per handle */
+static long max_gpu_pages = 0;
+module_param(max_gpu_pages, long, 0);
+MODULE_PARM_DESC(max_gpu_pages, "Maximum number of GPU pages per handle");
 
 
 /* ioctl handler prototype */
@@ -65,62 +87,80 @@ static const struct file_operations ioctl_fops = {
 };
 
 
-/* Free callback */
-static void free_gpu_page(void* data)
+/* 
+ * Free callback used when Nvidia driver must 
+ * forcefully take back pinned memory 
+ */
+static void free_callback(void* handlep)
 {
-    struct user_page* up = (struct user_page*) data;
+    struct page_handle* handle = (struct page_handle*) handlep;
 
-    if (up->page_tbl != NULL)
+    if (handle->owner != NULL && handle->gpu_pages != NULL)
     {
-        //nvidia_p2p_free_pages(up->page_tbl);
-        nvidia_p2p_free_page_table(up->page_tbl);
+        nvidia_p2p_free_page_table(handle->gpu_pages);
+        handle->gpu_pages = NULL;
     }
-
-    up->page_tbl = NULL;
-    up->owner = NULL;
-
-    printk(KERN_DEBUG "Free'd GPU memory\n");
 }
 
 
-/* Get a free slot in the user page table */
-static struct user_page* get_user_page_slot(void)
+/* Get a free page handle */
+static struct page_handle* get_page_handle(void)
 {
-    long handle;
+    long i;
 
-    for (handle = 0; handle < num_user_pages; ++handle)
+    for (i = 0; i < num_page_handles; ++i)
     {
-        spin_lock(&user_pages_lock);
-        if (user_pages[handle].owner == NULL)
+        spin_lock(&page_handles_lock);
+        if (page_handles[i].owner == NULL)
         {
-            user_pages[handle].owner = current;
-            user_pages[handle].page = NULL;
-            spin_unlock(&user_pages_lock);
-            return &user_pages[handle];
+            page_handles[i].owner = current;
+            spin_unlock(&page_handles_lock);
+
+            page_handles[i].num_pages = 0;
+            page_handles[i].ram_pages = NULL;
+            page_handles[i].vmas = NULL;
+            page_handles[i].gpu_pages = NULL;
+            return &page_handles[i];
         }
-        spin_unlock(&user_pages_lock);
+        spin_unlock(&page_handles_lock);
     }
 
     return NULL;
 }
 
 
-/* Release slot in user page table */
-static int put_user_page_slot(struct user_page* up)
+/* Release a page handle */
+static int put_page_handle(struct page_handle* handle)
 {
-    if (up->owner == current)
+    long curr_page;
+
+    if (handle != NULL)
     {
-        if (up->page != NULL)
+        if (handle->ram_pages != NULL)
         {
-            put_page(up->page);
-            up->page = NULL;
-        }
-        else
-        {
-            nvidia_p2p_put_pages(0, 0, up->virt_addr, up->page_tbl);
+            for (curr_page = 0; curr_page < handle->num_pages; ++curr_page)
+            {
+                put_page(handle->ram_pages[curr_page]);
+            }
+            
+            kfree(handle->ram_pages);
+            handle->ram_pages = NULL;
         }
 
-        up->owner = NULL;
+        if (handle->vmas != NULL)
+        {
+            kfree(handle->vmas);
+            handle->vmas = NULL;
+        }
+
+        if (handle->gpu_pages != NULL)
+        {
+            nvidia_p2p_put_pages(0, 0, handle->vaddr_start, handle->gpu_pages);
+            handle->gpu_pages = NULL;
+        }
+
+        handle->num_pages = 0;
+        handle->owner = NULL;
         return 0;
     }
 
@@ -128,7 +168,7 @@ static int put_user_page_slot(struct user_page* up)
 }
 
 
-static long unpin_user_page(struct cunvme_unpin __user* requestp)
+static long unpin_memory(void __user* requestp)
 {
     struct cunvme_unpin request;
 
@@ -138,80 +178,178 @@ static long unpin_user_page(struct cunvme_unpin __user* requestp)
         return -EIO;
     }
 
-    if (request.handle < 0 || request.handle >= num_user_pages)
+    if (request.handle < 0 || request.handle >= num_page_handles || request.handle == CUNVME_NO_HANDLE)
     {
         printk(KERN_WARNING "Invalid kernel handle from %d: %ld\n", current->pid, request.handle);
         return -EBADF;
     }
 
-    return put_user_page_slot(&user_pages[request.handle]);
+    spin_lock(&page_handles_lock);
+    if (page_handles[request.handle].owner != current)
+    {
+        spin_unlock(&page_handles_lock);
+        printk(KERN_WARNING "Attempted to release handle not owned by %d\n", current->pid);
+        return -EACCES;
+    }
+    spin_unlock(&page_handles_lock);
+
+    return put_page_handle(&page_handles[request.handle]);
 }
 
 
-static long pin_user_page(struct cunvme_pin __user* request_ptr)
+static long pin_gpu_memory(void __user* requestp)
 {
     struct cunvme_pin request;
-    struct user_page* up = NULL;
+    struct page_handle* handle;
     int retval = 0;
-    long handle = CUNVME_NO_HANDLE;
+    long i;
+    unsigned long long* ptr;
+    unsigned long long addr;
 
-    up = get_user_page_slot();
-    if (up == NULL)
+    handle = get_page_handle();
+    if (handle == NULL)
     {
-        printk(KERN_WARNING "Out of available page slots\n");
+        printk(KERN_WARNING "Maximum number of page handles reached\n");
         retval = -ENOMEM;
         goto out;
     }
 
-    handle = up - user_pages;
-
-    if (copy_from_user(&request, request_ptr, sizeof(request)) != 0)
+    if (copy_from_user(&request, requestp, sizeof(request)) != 0)
     {
         printk(KERN_ERR "Failed to read userspace request from %d\n", current->pid);
-        return -EIO;
+        retval = -EIO;
+        goto out;
     }
 
-    if (request.gpu != CUNVME_NO_CUDA_DEVICE)
-    {
-        up->page = NULL;
-        up->virt_addr = request.vaddr & GPU_BOUND_MASK;
-
-        retval = nvidia_p2p_get_pages(0, 0, up->virt_addr, GPU_BOUND_SIZE, &up->page_tbl, free_gpu_page, up);
-        if (retval != 0)
-        {
-            handle = CUNVME_NO_HANDLE;
-            printk(KERN_ERR "nvidia_p2p_get_pages() failed: %d\n", retval);
-            goto out;
-        }
-
-        up->phys_addr = (dma_addr_t) up->page_tbl->pages[0]->physical_address;
-    }
-    else
-    {
-        up->page_tbl = NULL;
-        up->virt_addr = request.vaddr & PAGE_MASK;
-
-        //#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 4, 57))
-        retval = get_user_pages(current, current->mm, up->virt_addr, 1, 1, 0, &up->page, &up->vma);
-        //#endif
-        if (retval != 1)
-        {
-            handle = CUNVME_NO_HANDLE;
-            printk(KERN_ERR "Call to get_user_pages() failed: %d\n", retval);
-            goto out;
-        }
-        up->phys_addr = page_to_phys(up->page);
-    }
-
-    request.paddr = up->phys_addr;
-
-    printk(KERN_DEBUG "pid=%d vaddr=%llx paddr=%llx\n", current->pid, up->virt_addr, up->phys_addr);
+    request.handle = handle - page_handles;
+    handle->vaddr_start = request.virt_addr & GPU_BOUND_MASK;
+    handle->num_pages = 0;
     
+    if (request.num_pages <= 0 || request.num_pages > max_gpu_pages)
+    {
+        printk(KERN_WARNING "Number of GPU pages requested by %d exceeds limit: %ld\n", current->pid, request.num_pages);
+        retval = -EINVAL;
+        goto out;
+    }
+
+    // Pin pages and get handles
+    retval = nvidia_p2p_get_pages(0, 0, handle->vaddr_start, GPU_BOUND_SIZE * request.num_pages, &handle->gpu_pages, free_callback, handle);
+    if (retval != 0)
+    {
+        printk(KERN_ERR "nvidia_p2p_get_pages() failed: %d\n", retval);
+        goto out;
+    }
+
+    // Update number of pages to actual number of pages
+    handle->num_pages = handle->gpu_pages->entries;
+    request.num_pages = handle->num_pages;
+
+    // Walk page table and set bus addresses
+    ptr = (unsigned long long*) (((unsigned char*) requestp) + offsetof(struct cunvme_pin, bus_addr));
+    for (i = 0; i < handle->num_pages; ++i)
+    {
+        addr = handle->gpu_pages->pages[i]->physical_address;
+        copy_to_user(ptr + i, &addr, sizeof(addr));
+    }
 
 out:
-    request.handle = handle;
+    if (retval != 0)
+    {
+        request.handle = CUNVME_NO_HANDLE;
+        put_page_handle(handle);
+    }
 
-    if (copy_to_user(request_ptr, &request, sizeof(request)) != 0)
+    if (copy_to_user(requestp, &request, sizeof(request)) != 0)
+    {
+        printk(KERN_ERR "Failed to write back result to userspace\n");
+        retval = -EIO;
+    }
+
+    return retval;
+}
+
+
+static long pin_user_pages(void __user* requestp)
+{
+    struct cunvme_pin request;
+    struct page_handle* handle;
+    long retval = 0;
+    long i;
+    unsigned long long* ptr;
+    unsigned long long addr;
+
+    handle = get_page_handle();
+    if (handle == NULL)
+    {
+        printk(KERN_WARNING "Maximum number of page handles reached\n");
+        retval = -ENOMEM;
+        goto out;
+    }
+
+    if (copy_from_user(&request, requestp, sizeof(request)) != 0)
+    {
+        printk(KERN_ERR "Failed to read userspace request from %d\n", current->pid);
+        retval = -EIO;
+        goto out;
+    }
+
+    request.handle = handle - page_handles;
+    handle->vaddr_start = request.virt_addr & RAM_BOUND_MASK;
+    handle->num_pages = 0;
+    
+    if (request.num_pages <= 0 || request.num_pages > max_ram_pages)
+    {
+        printk(KERN_WARNING "Number of RAM pages requested by %d exceeds limit: %ld\n", current->pid, request.num_pages);
+        retval = -EINVAL;
+        goto out;
+    }
+
+    handle->ram_pages = (struct page**) kcalloc(request.num_pages, sizeof(struct page*), GFP_KERNEL);
+    if (handle->ram_pages == NULL)
+    {
+        printk(KERN_ERR "Failed to allocate user page table\n");
+        retval = -ENOMEM;
+        goto out;
+    }
+
+    handle->vmas = (struct vm_area_struct**) kcalloc(request.num_pages, sizeof(struct vm_area_struct*), GFP_KERNEL);
+    if (handle->vmas == NULL)
+    {
+        printk(KERN_ERR "Failed to allocate user page table\n");
+        retval = -ENOMEM;
+        goto out;
+    }
+
+    //#if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 4, 57))
+    retval = get_user_pages(current, current->mm, handle->vaddr_start, request.num_pages, 1, 0, handle->ram_pages, handle->vmas);
+    //#endif
+    
+    if (retval <= 0)
+    {
+        printk(KERN_ERR "get_user_pages() failed with error code: %lu\n", retval);
+        goto out;
+    }
+
+    handle->num_pages = retval;
+    request.num_pages = retval;
+    retval = 0;
+
+    // Walk page table and set bus addresses
+    ptr = (unsigned long long*) (((unsigned char*) requestp) + offsetof(struct cunvme_pin, bus_addr));
+    for (i = 0; i < handle->num_pages; ++i)
+    {
+        addr = page_to_phys(handle->ram_pages[i]);
+        copy_to_user(ptr + i, &addr, sizeof(addr));
+    }
+    
+out:
+    if (retval != 0)
+    {
+        request.handle = CUNVME_NO_HANDLE;
+        put_page_handle(handle);
+    }
+
+    if (copy_to_user(requestp, &request, sizeof(request)) != 0)
     {
         printk(KERN_ERR "Failed to write back result to userspace\n");
         retval = -EIO;
@@ -228,12 +366,16 @@ static long handle_request(struct file* ioctl_file, unsigned int cmd, unsigned l
 
     switch (cmd)
     {
-        case CUNVME_PIN:
-            retval = pin_user_page((struct cunvme_pin __user*) arg);
+        case CUNVME_PIN_RAM:
+            retval = pin_user_pages((void __user*) arg);
+            break;
+
+        case CUNVME_PIN_GPU:
+            retval = pin_gpu_memory((void __user*) arg);
             break;
 
         case CUNVME_UNPIN:
-            retval = unpin_user_page((struct cunvme_unpin __user*) arg);
+            retval = unpin_memory((void __user*) arg);
             break;
 
         default:
@@ -252,26 +394,18 @@ static int release_file(struct inode* inode, struct file* file)
     long i;
     long in_use;
 
-    printk(KERN_DEBUG "Cleaning up after process %d\n", current->pid);
-
-    for (i = in_use = 0; i < num_user_pages; ++i)
+    for (i = in_use = 0; i < num_page_handles; ++i)
     {
-        spin_lock(&user_pages_lock);
-        if (user_pages[i].owner == current)
+        if (page_handles[i].owner == current)
         {
-            if (user_pages[i].page != NULL)
-            {
-                put_page(user_pages[i].page);
-            }
-            user_pages[i].owner = NULL;
+            put_page_handle(&page_handles[i]);
             ++in_use;
         }
-        spin_unlock(&user_pages_lock);
     }
 
     if (in_use > 0)
     {
-        printk(KERN_INFO "%ld pages were still pinned\n", in_use);
+        printk(KERN_INFO "%ld handles were still in use by process %d\n", in_use, current->pid);
     }
 
     return 0;
@@ -282,31 +416,34 @@ static int __init cunvme_entry(void)
 {
     long i;
 
-    spin_lock_init(&user_pages_lock);
-    user_pages = kcalloc(num_user_pages, sizeof(struct user_page), GFP_KERNEL);
-    if (user_pages == NULL)
+    spin_lock_init(&page_handles_lock);
+
+    page_handles = kcalloc(num_page_handles, sizeof(struct page_handle), GFP_KERNEL);
+    if (page_handles == NULL)
     {
-        printk(KERN_ERR "Failed to allocate user page table\n");
+        printk(KERN_ERR "Failed to allocate page handles\n");
         return -ENOMEM;
     }
 
-    for (i = 0; i < num_user_pages; ++i)
+    for (i = 0; i < num_page_handles; ++i)
     {
-        user_pages[i].owner = NULL;
-        user_pages[i].page = NULL;
-        user_pages[i].page_tbl = NULL;
+        page_handles[i].owner = NULL;
     }
     
-    ioctl_file = proc_create(CUNVME_FILE, 0, NULL, &ioctl_fops);
+    ioctl_file = proc_create(CUNVME_FILENAME, 0, NULL, &ioctl_fops);
     if (ioctl_file == NULL)
     {
-        printk(KERN_ERR "Failed to create proc file: %s\n", CUNVME_FILE);
+        printk(KERN_ERR "Failed to create proc file: %s\n", CUNVME_FILENAME);
+        kfree(page_handles);
         return -ENOMEM;
     }
 
-    printk(KERN_INFO KBUILD_MODNAME " loaded\n");
+    printk(KERN_DEBUG KBUILD_MODNAME " loaded (num_page_handles=%ld max_ram_pages=%lu max_gpu_pages=%lu)\n",
+            num_page_handles, max_ram_pages, max_gpu_pages);
+
     return 0;
 }
+module_init(cunvme_entry);
 
 
 static void __exit cunvme_exit(void)
@@ -316,33 +453,23 @@ static void __exit cunvme_exit(void)
 
     proc_remove(ioctl_file);
 
-    for (i = 0; i < num_user_pages; ++i)
+    for (i = 0; i < num_page_handles; ++i)
     {
-        if (user_pages[i].owner != NULL)
+        if (page_handles[i].owner != NULL)
         {
             ++count;
-            if (user_pages[i].page != NULL)
-            {
-                put_page(user_pages[i].page);
-            }
-            user_pages[i].owner = NULL;
+            put_page_handle(&page_handles[i]); // FIXME not sure if this works, but should never happen
         }
     }
 
-    kfree(user_pages);
-    printk(KERN_INFO KBUILD_MODNAME " unloaded\n");
+    kfree(page_handles);
+
+    printk(KERN_DEBUG KBUILD_MODNAME " unloaded\n");
 
     if (count > 0)
     {
-        printk(KERN_WARNING "%ld pages were still pinned\n", count);
+        printk(KERN_CRIT "%ld handles were still in use!!\n", count);
     }
 }
-
-
-module_init(cunvme_entry);
 module_exit(cunvme_exit);
 
-MODULE_AUTHOR("Jonas Markussen <jonassm@simula.no>");
-MODULE_DESCRIPTION("Stub module to page-lock memory and retrieve physical addresses");
-MODULE_LICENSE("Dual BSD/GPL");
-MODULE_VERSION(CUNVME_VERSION);
