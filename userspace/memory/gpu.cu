@@ -10,7 +10,6 @@
 #include <errno.h>
 
 #define GPU_PAGE_SIZE   (1UL << 16) // Pointers need to be 64KB aligned
-//#define GPU_PAGE_SIZE   (1UL << 12)
 
 
 extern "C" int pin_memory(int fd, memory_t* handle, int reqno);
@@ -31,6 +30,7 @@ memory_t* get_gpu_buffer(int fd, int dev, size_t size)
     }
 
     size_t range_size = (size + GPU_PAGE_SIZE - 1) & ~(GPU_PAGE_SIZE - 1);
+    printf("size=%zu range_size=%zu\n", size, range_size);
     size_t n_addrs = range_size / GPU_PAGE_SIZE;
     size_t handle_size = sizeof(memory_t) + sizeof(uint64_t) * n_addrs;
 

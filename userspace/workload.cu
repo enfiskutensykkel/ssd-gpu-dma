@@ -15,6 +15,26 @@
 #include <errno.h>
 
 
+__host__ __device__
+static int prepare_write_cmd(nvm_queue_t sq, uint32_t ns_id, uint32_t blk_size, memory_t* buffer, uint64_t start_lba, uint16_t n_blks)
+{
+    struct command* cmd = sq_enqueue(sq);
+    if (cmd == NULL)
+    {
+        return EAGAIN;
+    }
+
+    cmd_header(cmd, NVM_WRITE, ns_id);
+    cmd_data_ptr(cmd, NULL, buffer, 1);
+    cmd->dword[10] = (uint32_t) start_lba;
+    cmd->dword[11] = (uint32_t) (start_lba >> 1);
+
+    cmd->dword[12] = n_blks;
+    cmd->dword[13] = 0;
+    cmd->dword[14] = 0;
+    cmd->dword[15] = 0;
+    return 0;
+}
 
 __host__ __device__
 static int prepare_read_cmd(nvm_queue_t sq, uint32_t ns_id, uint32_t blk_size, memory_t* buffer, uint64_t start_lba, uint16_t n_blks)
@@ -44,11 +64,14 @@ static int prepare_read_cmd(nvm_queue_t sq, uint32_t ns_id, uint32_t blk_size, m
 }
 
 
-__global__ void do_work(memory_t* buffer, nvm_queue_t sq, nvm_queue_t cq, uint32_t* result)
+__global__ void do_work(memory_t* buffer, nvm_queue_t sq, uint32_t* tailst) //, nvm_queue_t cq)
 {
-    //prepare_read_cmd(sq, 1, 512, buffer, 0, 1);
-    
-    sq_submit(sq);
+    *tailst = 0;
+    if (prepare_read_cmd(sq, 1, 512, buffer, 0, 1) == 0)
+    {
+        *tailst = sq->tail;
+        sq_submit(sq); // this works
+    }
 
     //while (cq_poll(cq) == NULL);
 
@@ -67,25 +90,25 @@ static int create_queues(int ioctl_fd, nvm_controller_t ctrl, int dev, nvm_queue
         return err;
     }
 
-    //err = get_gpu_page(ioctl_fd, dev, &((*cq)->page));
-    err = get_ram_page(ioctl_fd, &((*cq)->page));
+    err = get_gpu_page(ioctl_fd, dev, &((*cq)->page));
+    //err = get_ram_page(ioctl_fd, &((*cq)->page));
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate queue memory\n");
         return ENOMEM;
     }
-    memset((*cq)->page.virt_addr, 0, (*cq)->page.page_size);
-    //cudaMemset((*cq)->page.virt_addr, 0, (*cq)->page.page_size);
+    //memset((*cq)->page.virt_addr, 0, (*cq)->page.page_size);
+    cudaMemset((*cq)->page.virt_addr, 0, (*cq)->page.page_size);
 
-    //err = get_gpu_page(ioctl_fd, dev, &((*sq)->page));
-    err = get_ram_page(ioctl_fd, &((*sq)->page));
+    err = get_gpu_page(ioctl_fd, dev, &((*sq)->page));
+    //err = get_ram_page(ioctl_fd, &((*sq)->page));
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate queue memory\n");
         return ENOMEM;
     }
-    memset((*sq)->page.virt_addr, 0, (*sq)->page.page_size);
-    //cudaMemset((*sq)->page.virt_addr, 0, (*sq)->page.page_size);
+    //memset((*sq)->page.virt_addr, 0, (*sq)->page.page_size);
+    cudaMemset((*sq)->page.virt_addr, 0, (*sq)->page.page_size);
 
     err = nvm_commit_queues(ctrl);
     if (err != 0)
@@ -118,7 +141,7 @@ int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev, void* reg_ptr, s
     }
 
     nvm_queue_t dev_sq;
-    nvm_queue_t dev_cq;
+    //nvm_queue_t dev_cq;
 
     err = cudaMalloc(&dev_sq, sizeof(struct nvm_queue));
     if (err != cudaSuccess)
@@ -127,30 +150,30 @@ int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev, void* reg_ptr, s
         return ENOMEM;
     }
 
-    err = cudaMalloc(&dev_cq, sizeof(struct nvm_queue));
-    if (err != cudaSuccess)
-    {
-        cudaFree(dev_sq);
-        fprintf(stderr, "Failed to allocate device memory: %s\n", cudaGetErrorString(err));
-        return ENOMEM;
-    }
+//    err = cudaMalloc(&dev_cq, sizeof(struct nvm_queue));
+//    if (err != cudaSuccess)
+//    {
+//        cudaFree(dev_sq);
+//        fprintf(stderr, "Failed to allocate device memory: %s\n", cudaGetErrorString(err));
+//        return ENOMEM;
+//    }
 
     memory_t* host_buffer = get_gpu_buffer(ioctl_fd, dev, sizeof(uint32_t));
     if (host_buffer == NULL)
     {
         cudaFree(dev_sq);
-        cudaFree(dev_cq);
+        //cudaFree(dev_cq);
         fprintf(stderr, "Failed to allocate buffer\n");
         return ENOMEM;
     }
 
     memory_t* dev_buffer;
-    err = cudaMalloc(&dev_buffer, sizeof(memory_t));
+    err = cudaMalloc(&dev_buffer, sizeof(memory_t) + sizeof(uint64_t) * host_buffer->n_addrs);
     if (err != cudaSuccess)
     {
         put_gpu_buffer(ioctl_fd, host_buffer);
         cudaFree(dev_sq);
-        cudaFree(dev_cq);
+        //cudaFree(dev_cq);
         fprintf(stderr, "Failed to allocate device memory: %s\n", cudaGetErrorString(err));
         return ENOMEM;
     }
@@ -161,74 +184,57 @@ int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev, void* reg_ptr, s
     cudaHostGetDevicePointer(&db, reg_ptr, 0);
     host_sq->db = SQ_DBL(db, host_sq->no, ctrl->dstrd);
 
-    prepare_read_cmd(host_sq, 1, 512, host_buffer, 0, 1);
+    //prepare_read_cmd(host_sq, 1, 512, host_buffer, 0, 1);
+    uint32_t result = 0xcafebabe;
+    //prepare_write_cmd(host_sq, 1, 512, host_buffer, 0, 1);
+    //uint32_t result = 0xdeadbeef;
 
     cudaMemcpy(dev_sq, host_sq, sizeof(struct nvm_queue), cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_cq, host_cq, sizeof(struct nvm_queue), cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_buffer, host_buffer, sizeof(memory_t), cudaMemcpyHostToDevice);
+    //cudaMemcpy(dev_cq, host_cq, sizeof(struct nvm_queue), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_buffer, host_buffer, sizeof(memory_t) + sizeof(uint64_t) * host_buffer->n_addrs, cudaMemcpyHostToDevice);
 
-    uint32_t* value;
-    cudaMalloc(&value, sizeof(uint32_t));
+    //cudaMemset(host_buffer->virt_addr, 0xca, sizeof(uint32_t));
+    cudaMemcpy(host_buffer->virt_addr, &result, sizeof(uint32_t), cudaMemcpyHostToDevice);
 
-    do_work<<<1, 1>>>(dev_buffer, dev_sq, dev_cq, value);
+    // this works on gpu too
+    //sq_submit(host_sq);
+
+    uint32_t* v;
+    cudaMalloc(&v, sizeof(uint32_t));
+
+    do_work<<<1, 1>>>(dev_buffer, dev_sq, v);
 
     // hack
     usleep(5000000);
 
     fprintf(stderr, "Polling...\n");
-    struct completion* cpl = cq_dequeue_block(host_cq, ctrl);
-    if (cpl != NULL)
-    {
-        fprintf(stderr, "cid=%u sct=%x sc=%x\n", *CPL_CID(cpl), SCT(cpl), SC(cpl));
-    }
+    //struct completion* cpl = cq_dequeue_block(host_cq, ctrl);
+//    if (cpl != NULL)
+//    {
+//        fprintf(stderr, "cid=%u sct=%x sc=%x\n", *CPL_CID(cpl), SCT(cpl), SC(cpl));
+//    }
 
-    uint32_t result = 0xfefefefe;
+    struct completion cpl;
+    memset(&cpl, 0xff, sizeof(cpl));
+    fprintf(stderr, "cid=%u sct=%x sc=%x\n", *CPL_CID(&cpl), SCT(&cpl), SC(&cpl));
+    cudaMemcpy(&cpl, host_cq->page.virt_addr, sizeof(struct completion), cudaMemcpyDeviceToHost);
+    fprintf(stderr, "cid=%u sct=%x sc=%x\n", *CPL_CID(&cpl), SCT(&cpl), SC(&cpl));
+    
+        
+    result = 0xfefefefe;
     //cudaMemcpy(&result, value, sizeof(uint32_t), cudaMemcpyDeviceToHost);
     cudaMemcpy(&result, host_buffer->virt_addr, sizeof(uint32_t), cudaMemcpyDeviceToHost);
 
     fprintf(stderr, "%x\n", result);
 
-    cudaFree(value);
+    cudaMemcpy(&result, v, sizeof(uint32_t), cudaMemcpyDeviceToHost);
+    fprintf(stderr, "%x\n", result);
+
     cudaFree(dev_buffer);
     put_gpu_buffer(ioctl_fd, host_buffer);
     cudaFree(dev_sq);
-    cudaFree(dev_cq);
+//    cudaFree(dev_cq);
     return 0;
 }
 
 
-
-//__host__ __device__
-//static int prepare_write(nvm_queue_t sq, uint32_t ns_id, page_t* buf, uint64_t start_lba, uint16_t n_blks)
-//{
-//    struct command* cmd = sq_enqueue(sq);
-//    if (cmd == NULL)
-//    {
-//        return EAGAIN;
-//    }
-//
-//    // Set command header
-//    cmd->dword[0] |= (0x00 << 14) | (0x00 << 8) | WRITE;
-//
-//    // Specify namespace
-//    cmd->dword[1] = ns_id;
-//
-//    cmd->dword[4] = 0;
-//    cmd->dword[5] = 0;
-//
-//    uint64_t phys_addr = buf->phys_addr;
-//    cmd->dword[6] = (uint32_t) phys_addr;
-//    cmd->dword[7] = (uint32_t) (phys_addr >> 32);
-//    cmd->dword[8] = 0;
-//    cmd->dword[9] = 0;
-//
-//    cmd->dword[10] = (uint32_t) start_lba;
-//    cmd->dword[11] = (uint32_t) (start_lba >> 32);
-//
-//    cmd->dword[12] = n_blks;
-//    cmd->dword[13] = 0;
-//    cmd->dword[14] = 0;
-//    cmd->dword[15] = 0;
-//
-//    return 0;
-//}
