@@ -3,9 +3,7 @@
 #include "queue.h"
 #include "command.h"
 #include "ctrl.h"
-#include "memory/types.h"
-#include "memory/ram.h"
-#include "memory/gpu.h"
+#include "memory.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -78,47 +76,45 @@ static uint8_t encode_page_size(size_t page_size)
 
 
 /* Delay execution by 1 millisecond */
-static uint64_t delay(uint64_t timeout, uint64_t remaining, uint64_t reset)
+static inline uint64_t delay(uint64_t remaining)
 {
-    struct timespec ts;
-    ts.tv_sec = timeout / 1000;
-    ts.tv_nsec = 1000000UL * (timeout % 1000);
-
-    nanosleep(&ts, NULL);
-
     if (remaining == 0)
-    {
-        return reset; 
-    }
-    
-    if (remaining < timeout)
     {
         return 0;
     }
 
-    return remaining - timeout;
+    struct timespec ts;
+    ts.tv_sec = 0;
+    ts.tv_nsec = _MIN(1000000UL, remaining);
+
+    clock_nanosleep(CLOCK_REALTIME, 0, &ts, NULL);
+
+    remaining -= _MIN(1000000UL, remaining);
+    return remaining;
 }
 
 
-static int reset_controller(volatile void* register_ptr, uint64_t timeout)
+static int reset_controller(const nvm_ctrl_t* ctrl)
 {
-    volatile uint32_t* cc = CC(register_ptr);
+    volatile uint32_t* cc = CC(ctrl->reg_ptr);
 
     // Set CC.EN to 0
     *cc = *cc & ~1;
 
     // Wait for CSTS.RDY to transition from 1 to 0
-    uint64_t remaining = delay(1, 0, timeout);
+    uint64_t timeout = ctrl->timeout * 1000000UL;
+    uint64_t remaining = delay(timeout);
 
-    while (CSTS$RDY(register_ptr) != 0)
+    while (CSTS$RDY(ctrl->reg_ptr) != 0)
     {
         if (remaining == 0)
         {
             fprintf(stderr, "Timeout exceeded while waiting for CSTS.RDY 1 -> 0\n");
+            remaining = timeout;
             return ETIME;
         }
 
-        remaining = delay(1, remaining, timeout);
+        remaining = delay(remaining);
     }
 
     return 0;
@@ -133,60 +129,72 @@ static int enable_controller(volatile void* register_ptr, uint8_t encoded_page_s
     *cc = CC$IOCQES(0) | CC$IOSQES(0) | CC$MPS(encoded_page_size) | CC$CSS(0) | CC$EN(1);
 
     // Wait for CSTS.RDY to transition from 0 to 1
-    uint64_t remaining = delay(1, 0, timeout);
+    timeout = timeout * 1000000UL;
+    uint64_t remaining = delay(timeout);
 
     while (CSTS$RDY(register_ptr) != 1)
     {
         if (remaining == 0)
         {
             fprintf(stderr, "Timeout exceeded while waiting for CSTS.RDY 0 -> 1\n");
+            remaining = timeout;
             return ETIME;
         }
 
-        remaining = delay(1, remaining, timeout);
+        remaining = delay(remaining);
     }
 
     return 0;
 }
 
 
-static void configure_entry_sizes(volatile void* register_ptr, nvm_controller_t controller)
+static void configure_entry_sizes(const nvm_ctrl_t* controller)
 {
-    volatile uint32_t* cc = CC(register_ptr);
+    volatile uint32_t* cc = CC(controller->reg_ptr);
     *cc |= CC$IOCQES(controller->cq_entry_size) | CC$IOSQES(controller->sq_entry_size);
 }
 
 
 /* Set admin queue registers */
-static void configure_admin_queues(volatile void* register_ptr, nvm_controller_t controller)
+static void configure_admin_queues(nvm_ctrl_t* controller)
 {
-    nvm_queue_t sq = controller->queues[0];
-    nvm_queue_t cq = controller->queues[1];
+    nvm_queue_t* sq = &controller->admin_sq;
+    nvm_queue_t* cq = &controller->admin_cq;
 
-    volatile uint32_t* aqa = AQA(register_ptr);
+    sq->virt_addr = controller->admin_sq_page.virt_addr;
+    sq->bus_addr = controller->admin_sq_page.bus_addr;
+    sq->max_entries = controller->admin_sq_page.page_size / controller->sq_entry_size;
+    memset(ctrl->admin_sq_page.virt_addr, 0, ctrl->admin_sq_page.page_size);
+
+    cq->virt_addr = controller->admin_cq_page.virt_addr;
+    cq->bus_addr = controller->admin_cq_page.bus_addr;
+    sq->max_entries = controller->admin_cq_page.page_size / controller->cq_entry_size;
+    memset(ctrl->admin_cq_page.virt_addr, 0, ctrl->admin_cq_page.page_size);
+
+    volatile uint32_t* aqa = AQA(controller->reg_ptr);
     *aqa = AQA$AQS(sq->max_entries - 1) | AQA$AQC(cq->max_entries - 1);
 
-    volatile uint64_t* asq = ASQ(register_ptr);
-    *asq = sq->page.bus_addr;
+    volatile uint64_t* asq = ASQ(controller->reg_ptr);
+    *asq = sq->bus_addr;
 
-    volatile uint64_t* acq = ACQ(register_ptr);
-    *acq = cq->page.bus_addr;
+    volatile uint64_t* acq = ACQ(controller->reg_ptr);
+    *acq = cq->bus_addr;
 }
 
 
-static int identify_controller(nvm_controller_t controller, volatile void* register_ptr)
+static int identify_controller(nvm_ctrl_t* controller)
 {
-    struct command* identify = sq_enqueue(controller->queues[0]);
+    struct command* identify = sq_enqueue(&controller->admin_sq);
     if (identify  == NULL)
     {
         return ENOSPC;
     }
 
     cmd_header(identify, ADMIN_IDENTIFY_CONTROLLER, 0);
-    cmd_data_ptr(identify, NULL, controller->data, 1);
+    cmd_dptr_prp(identify, &controller->identify);
     identify->dword[10] = (0 << 16) | 0x01;
 
-    struct command* get_features = sq_enqueue(controller->queues[0]);
+    struct command* get_features = sq_enqueue(&controller->admin_sq);
     if (get_features == NULL)
     {
         return ENOSPC;
@@ -199,15 +207,17 @@ static int identify_controller(nvm_controller_t controller, volatile void* regis
     get_features->dword[11] = 0;
 
     // Wait for completions
-    sq_submit(controller->queues[0]);
+    sq_submit(&controller->admin_sq);
     for (size_t i = 0; i < 2; ++i)
     {
-        struct completion* cpl = cq_dequeue_block(controller->queues[1], controller);
+        struct completion* cpl = cq_dequeue_block(&controller->admin_cq, controller->timeout);
         if (cpl == NULL)
         {
             fprintf(stderr, "Waiting for completion timed out\n");
             return ETIME;
         }
+
+        sq_update(&controller->admin_sq, cpl);
 
         if (SCT(cpl) != 0 && SC(cpl) != 0)
         {
@@ -218,15 +228,15 @@ static int identify_controller(nvm_controller_t controller, volatile void* regis
         if (*CPL_CID(cpl) == expected_id)
         {
             uint16_t max_queues = _MIN(cpl->dword[0] >> 16, cpl->dword[0] & 0xffff);
-            controller->max_queues = _MIN(max_queues, controller->max_queues);
+            controller->max_queues = max_queues;
         }
     }
 
-    cq_update(controller->queues[1]);
+    cq_update(&controller->admin_cq);
 
     // Extract information from identify structure
-    unsigned char* bytes = controller->data->virt_addr;
-    controller->max_data_size = bytes[77] * (1 << (12 + CAP$MPSMIN(register_ptr)));
+    unsigned char* bytes = controller->identify.virt_addr;
+    controller->max_data_size = bytes[77] * (1 << (12 + CAP$MPSMIN(controller->reg_ptr)));
     controller->sq_entry_size = _RB(bytes[512], 3, 0);
     controller->cq_entry_size = _RB(bytes[513], 3, 0);
     controller->max_out_cmds = *((uint16_t*) (bytes + 514));
@@ -236,9 +246,9 @@ static int identify_controller(nvm_controller_t controller, volatile void* regis
 }
 
 
-static int set_num_queues(nvm_controller_t controller)
+static int set_num_queues(nvm_ctrl_t* controller)
 {
-    struct command* cmd = sq_enqueue(controller->queues[0]);
+    struct command* cmd = sq_enqueue(&controller->admin_sq);
     if (cmd == NULL)
     {
         return ENOSPC;
@@ -249,24 +259,49 @@ static int set_num_queues(nvm_controller_t controller)
     cmd->dword[10] = (1 << 31) | 0x07;
     cmd->dword[11] = (controller->max_queues << 16) | controller->max_queues;
 
-    sq_submit(controller->queues[0]);
+    sq_submit(&controller->admin_sq);
 
-    struct completion* cpl = cq_dequeue_block(controller->queues[1], controller);
+    struct completion* cpl = cq_dequeue_block(&controller->admin_cq, controller->timeout);
     if (cpl == NULL)
     {
         return ETIME;
     }
-
-    cq_update(controller->queues[1]);
+    sq_update(&controller->admin_sq, cpl);
+    cq_update(&controller->admin_cq);
 
     return 0;
 }
 
 
-int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size_t db_size)
+/* Helper function to clear state in a queue handle */
+static void clear_queue(nvm_queue_t* queue, nvm_ctrl_t* ctrl, uint16_t no, int is_sq)
 {
-    *handle = NULL;
-    struct nvm_controller* ctrl;
+    queue->no = no;
+    queue->max_entries = 0;
+    queue->entry_size = is_sq ? ctrl->sq_entry_size : ctrl->cq_entry_size;
+    queue->head = 0;
+    queue->tail = 0;
+    queue->phase = 1;
+    queue->virt_addr = NULL;
+    queue->bus_addr = 0;
+    queue->db = is_sq ? SQ_DBL(ctrl->reg_ptr, queue->no, ctrl->dstrd) : CQ_DBL(ctrl->reg_ptr, queue->no, ctrl->dstrd);
+}
+
+
+/* Helper function to clear queue's page struct */
+static void clear_page(page_t* page)
+{
+    page->kernel_handle = -1;
+    page->device = -1;
+    page->virt_addr = NULL;
+    page->page_size = 0;
+    page->bus_addr = 0;
+}
+
+
+int nvm_init(nvm_ctrl_t* ctrl, int fd, volatile void* register_ptr)
+{
+    int err;
 
     // Read out controller capabilities of interest
     long page_size = sysconf(_SC_PAGESIZE);
@@ -287,87 +322,62 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
         return ENOSPC;
     }
 
-    // Allocate controller handle
-    ctrl = malloc(sizeof(struct nvm_controller));
-    if (ctrl == NULL)
-    {
-        fprintf(stderr, "Failed to allocate controller structure: %s\n", strerror(errno));
-        return errno;
-    }
-
-    // Allocate buffer for controller data
-    ctrl->data = get_ram_buffer(fd, page_size);
-    if (ctrl->data == NULL)
-    {
-        fprintf(stderr, "Failed to allocate controller data memory\n");
-        free(ctrl);
-        return ENOMEM;
-    }
-
     // Set controller properties
     ctrl->page_size = page_size;
     ctrl->dstrd = CAP$DSTRD(register_ptr);
     ctrl->timeout = CAP$TO(register_ptr) * 500UL;
+    ctrl->max_queues = 0;
+    ctrl->max_out_cmds = 0;
     ctrl->max_data_size = 0;
     ctrl->max_entries = CAP$MQES(register_ptr) + 1;   // CAP.MQES is a 0's based value
     ctrl->cq_entry_size = sizeof(struct completion);
     ctrl->sq_entry_size = sizeof(struct command);
-    ctrl->max_queues = (uint16_t) (db_size / (4 << ctrl->dstrd));
-    ctrl->n_queues = 0;
-    ctrl->queues = NULL;
+    ctrl->reg_ptr = register_ptr;
     ctrl->n_ns = 0;
-    ctrl->dbs = register_ptr;
 
-    // Allocate queue handle table
-    ctrl->queues = calloc(ctrl->max_queues, sizeof(struct nvme_queue*));
-    if (ctrl->queues == NULL)
-    {
-        fprintf(stderr, "Failed to allocate queue handle table: %s\n", strerror(errno));
-        nvm_free(ctrl, fd);
-        return errno;
-    }
+    clear_queue(&ctrl->admin_cq, ctrl, 0, 0);
+    clear_page(&ctrl->admin_cq_page);
+    clear_queue(&ctrl->admin_sq, ctrl, 0, 1);
+    clear_page(&ctrl->admin_sq_page);
+    clear_page(&ctrl->identify);
 
     // Create admin submission/completion queue pair
-    int err = nvm_prepare_queues(ctrl, NULL, NULL);
+    err = get_page(fd, -1, &ctrl->admin_cq_page);
     if (err != 0)
     {
-        fprintf(stderr, "Failed to allocate admin queue handles\n");
+        fprintf(stderr, "Failed to allocate queue memory: %s\n", strerror(err));
         nvm_free(ctrl, fd);
         return err;
     }
-    
-    err = get_ram_page(fd, &ctrl->queues[0]->page);
+
+    err = get_page(fd, -1, &ctrl->admin_sq_page);
     if (err != 0)
     {
-        fprintf(stderr, "Failed to allocate and pin admin queue memory\n");
+        fprintf(stderr, "Failed to allocate queue memory: %s\n", strerror(err));
         nvm_free(ctrl, fd);
-        return ENOMEM;
+        return err;
     }
-    ctrl->queues[0]->max_entries = _MIN(ctrl->max_entries, ctrl->queues[0]->page.page_size / ctrl->queues[0]->entry_size);
 
-    err = get_ram_page(fd, &ctrl->queues[1]->page);
+    // Allocate buffer for controller data
+    err = get_page(fd, -1, &ctrl->identify);
     if (err != 0)
     {
-        fprintf(stderr, "Failed to allocate and pin admin queue memory\n");
+        fprintf(stderr, "Failed to allocate controller identify memory: %s\n", strerror(err));
         nvm_free(ctrl, fd);
-        return ENOMEM;
+        return err;
     }
-    ctrl->queues[1]->max_entries = _MIN(ctrl->max_entries, ctrl->queues[1]->page.page_size / ctrl->queues[1]->entry_size);
-
-    memset(ctrl->queues[0]->page.virt_addr, 0, ctrl->queues[0]->page.page_size);
-    memset(ctrl->queues[1]->page.virt_addr, 0, ctrl->queues[1]->page.page_size);
 
     // Reset controller
-    reset_controller(register_ptr, ctrl->timeout);
+    reset_controller(ctrl);
 
     // Set admin CQ and SQ
-    configure_admin_queues(register_ptr, ctrl);
+    configure_admin_queues(ctrl);
 
     // Bring controller back up
     enable_controller(register_ptr, host_page_size, ctrl->timeout);
 
     // Submit identify controller command
-    err = identify_controller(ctrl, register_ptr);
+    err = identify_controller(ctrl);
     if (err != 0)
     {
         fprintf(stderr, "Failed to submit command: %s\n", strerror(err));
@@ -376,7 +386,7 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
     }
 
     // Set CQES and SQES in CC
-    configure_entry_sizes(register_ptr, ctrl);
+    configure_entry_sizes(ctrl);
 
     // Set features
     err = set_num_queues(ctrl);
@@ -387,191 +397,84 @@ int nvm_init(nvm_controller_t* handle, int fd, volatile void* register_ptr, size
         return err;
     }
 
-    *handle = ctrl;
     return 0;
 }
 
 
-void nvm_free(nvm_controller_t ctrl, int ioctl_fd)
+void nvm_free(nvm_ctrl_t* ctrl, int ioctl_fd)
 {
     if (ctrl != NULL)
     {
-        // TODO issue delete queue command for all active queue pairs
-
-        put_ram_buffer(ioctl_fd, ctrl->data);
-
-        if (ctrl->queues != NULL)
-        {
-            for (uint16_t i = 0; i < ctrl->n_queues; ++i)
-            {
-                nvm_queue_t queue = ctrl->queues[i];
-                // TODO: handle gpu and ram memory stuff
-                free(queue);
-            }
-
-            free(ctrl->queues);
-        }
-
-        free(ctrl);
+        // TODO: send abort and prepare reset commands
+        put_page(ioctl_fd, &ctrl->identify);
+        put_page(ioctl_fd, &ctrl->admin_cq_page);
+        put_page(ioctl_fd, &ctrl->admin_sq_page);
     }
 }
 
 
-/* Helper function to clear queue's page struct */
-static void clear_page(page_t* page)
-{
-    page->kernel_handle = -1;
-    page->device = -1;
-    page->virt_addr = NULL;
-    page->page_size = 0;
-    page->bus_addr = 0;
-}
-
-
-/* Helper function to clear state in a queue handle */
-static void clear_queue_handle(nvm_queue_t queue, nvm_controller_t ctrl, uint16_t no)
-{
-    queue->no = no / 2;
-    clear_page(&queue->page);
-    queue->max_entries = 0;
-    queue->entry_size = (no % 2 == 0) ? ctrl->sq_entry_size : ctrl->cq_entry_size;
-    queue->head = 0;
-    queue->tail = 0;
-    queue->phase = 1;
-    queue->db = (no % 2 == 0) ? SQ_DBL(ctrl->dbs, queue->no, ctrl->dstrd) : CQ_DBL(ctrl->dbs, queue->no, ctrl->dstrd);
-}
-
-
-int nvm_prepare_queues(nvm_controller_t ctrl, nvm_queue_t* cq_handle, nvm_queue_t* sq_handle)
-{
-    if ((ctrl->n_queues - 2) / 2 >= (ctrl->max_queues - 1))
-    {
-        fprintf(stderr, "Maximum number of queues already created\n");
-        return ENOSPC;
-    }
-
-    struct nvm_queue* sq = malloc(sizeof(struct nvm_queue));
-    if (sq == NULL)
-    {
-        fprintf(stderr, "Failed to allocate queue handle: %s\n", strerror(errno));
-        return errno;
-    }
-
-    clear_queue_handle(sq, ctrl, ctrl->n_queues);
-
-    struct nvm_queue* cq = malloc(sizeof(struct nvm_queue));
-    if (cq == NULL)
-    {
-        fprintf(stderr, "Failed to allocate queue handle: %s\n", strerror(errno));
-        return errno;
-    }
-
-    clear_queue_handle(cq, ctrl, ctrl->n_queues + 1);
-
-    ctrl->n_queues += 2;
-    ctrl->queues[ctrl->n_queues - 2] = sq;
-    ctrl->queues[ctrl->n_queues - 1] = cq;
-
-    if (cq_handle != NULL)
-    {
-        *cq_handle = cq;
-    }
-
-    if (sq_handle != NULL)
-    {
-        *sq_handle = sq;
-    }
-
-    return 0;
-}
-
-
-static int create_cq(nvm_controller_t ctrl, nvm_queue_t queue)
-{
-    struct command* cmd = sq_enqueue(ctrl->queues[0]);
-    if (cmd == NULL)
-    {
-        return EAGAIN;
-    }
-
-    queue->max_entries = _MIN(ctrl->max_entries, queue->page.page_size / queue->entry_size);
-
-    cmd_header(cmd, ADMIN_CREATE_COMPLETION_QUEUE, 0);
-
-    cmd->dword[6] = (uint32_t) queue->page.bus_addr;
-    cmd->dword[7] = (uint32_t) (queue->page.bus_addr >> 32);
-    cmd->dword[8] = 0;
-    cmd->dword[9] = 0;
-
-    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
-    cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
-
-    sq_submit(ctrl->queues[0]);
-
-    struct completion* cpl = cq_dequeue_block(ctrl->queues[1], ctrl);
-    if (cpl == NULL)
-    {
-        return ETIME;
-    }
-
-    // TODO check status code
-    return 0;
-}
-
-
-static int create_sq(nvm_controller_t ctrl, nvm_queue_t queue)
-{
-    struct command* cmd = sq_enqueue(ctrl->queues[0]);
-    if (cmd == NULL)
-    {
-        return EAGAIN;
-    }
-
-    queue->max_entries = _MIN(ctrl->max_entries, queue->page.page_size / queue->entry_size);
-
-    cmd_header(cmd, ADMIN_CREATE_SUBMISSION_QUEUE, 0);
-
-    cmd->dword[6] = (uint32_t) queue->page.bus_addr;
-    cmd->dword[7] = (uint32_t) (queue->page.bus_addr >> 32);
-    cmd->dword[8] = 0;
-    cmd->dword[9] = 0;
-    
-    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
-    cmd->dword[11] = (((uint32_t) queue->no) << 16) | (0x00 << 1) | 0x01;
-
-    sq_submit(ctrl->queues[0]);
-
-    struct completion* cpl = cq_dequeue_block(ctrl->queues[1], ctrl);
-    if (cpl == NULL)
-    {
-        return ETIME;
-    }
-
-    // TODO Check status code
-    return 0;
-}
-
-
-int nvm_commit_queues(nvm_controller_t ctrl)
-{
-    int err;
-
-    // Create IO queue pairs
-    for (uint16_t i = 2; i < ctrl->n_queues; i += 2)
-    {
-        err = create_cq(ctrl, ctrl->queues[i + 1]);
-        if (err != 0)
-        {
-            return err;
-        }
-
-        err = create_sq(ctrl, ctrl->queues[i]);
-        if (err != 0)
-        {
-            return err;
-        }
-    }
-
-    return 0;
-}
-
+//static int create_cq(nvm_controller_t ctrl, nvm_queue_t queue)
+//{
+//    struct command* cmd = sq_enqueue(ctrl->queues[0]);
+//    if (cmd == NULL)
+//    {
+//        return EAGAIN;
+//    }
+//
+//    queue->max_entries = _MIN(ctrl->max_entries, queue->page.page_size / queue->entry_size);
+//
+//    cmd_header(cmd, ADMIN_CREATE_COMPLETION_QUEUE, 0);
+//
+//    cmd->dword[6] = (uint32_t) queue->page.bus_addr;
+//    cmd->dword[7] = (uint32_t) (queue->page.bus_addr >> 32);
+//    cmd->dword[8] = 0;
+//    cmd->dword[9] = 0;
+//
+//    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
+//    cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
+//
+//    sq_submit(ctrl->queues[0]);
+//
+//    struct completion* cpl = cq_dequeue_block(ctrl->queues[1], ctrl);
+//    if (cpl == NULL)
+//    {
+//        return ETIME;
+//    }
+//
+//    // TODO check status code
+//    return 0;
+//}
+//
+//
+//static int create_sq(nvm_controller_t ctrl, nvm_queue_t queue)
+//{
+//    struct command* cmd = sq_enqueue(ctrl->queues[0]);
+//    if (cmd == NULL)
+//    {
+//        return EAGAIN;
+//    }
+//
+//    queue->max_entries = _MIN(ctrl->max_entries, queue->page.page_size / queue->entry_size);
+//
+//    cmd_header(cmd, ADMIN_CREATE_SUBMISSION_QUEUE, 0);
+//
+//    cmd->dword[6] = (uint32_t) queue->page.bus_addr;
+//    cmd->dword[7] = (uint32_t) (queue->page.bus_addr >> 32);
+//    cmd->dword[8] = 0;
+//    cmd->dword[9] = 0;
+//    
+//    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
+//    cmd->dword[11] = (((uint32_t) queue->no) << 16) | (0x00 << 1) | 0x01;
+//
+//    sq_submit(ctrl->queues[0]);
+//
+//    struct completion* cpl = cq_dequeue_block(ctrl->queues[1], ctrl);
+//    if (cpl == NULL)
+//    {
+//        return ETIME;
+//    }
+//
+//    // TODO Check status code
+//    return 0;
+//}
+//

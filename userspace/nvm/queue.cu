@@ -9,12 +9,11 @@
 #include <errno.h>
 
 
-// Offset to phase tag bit
-#define PHASE(p)            _RB(*CPL_STATUS(p),  0,  0)
+#define PHASE(p)    _RB(*CPL_STATUS(p),  0,  0) // Offset to phase tag bit
 
 
 extern "C" __host__ __device__
-int cmd_data_ptr(struct command* cmd, memory_t* prp_list, memory_t* prps, size_t n_prps)
+int cmd_dptr_prps(struct command* cmd, page_t* prp_list, buffer_t* prps, size_t n_prps)
 {
     cmd->dword[0] &= ~( (0x03 << 14) | (0x03 << 8) );
 
@@ -46,6 +45,17 @@ int cmd_data_ptr(struct command* cmd, memory_t* prp_list, memory_t* prps, size_t
 
 
 extern "C" __host__ __device__
+void cmd_dptr_prp(struct command* cmd, page_t* data)
+{
+    cmd->dword[0] &= ~( (0x03 << 14) | (0x03 << 8) );
+    cmd->dword[6] = (uint32_t) data->bus_addr;
+    cmd->dword[7] = (uint32_t) (data->bus_addr >> 32);
+    cmd->dword[8] = 0;
+    cmd->dword[9] = 0;
+}
+
+
+extern "C" __host__ __device__
 void cmd_header(struct command* cmd, uint8_t opcode, uint32_t ns_id)
 {
     cmd->dword[0] &= 0xffff0000;
@@ -55,7 +65,7 @@ void cmd_header(struct command* cmd, uint8_t opcode, uint32_t ns_id)
 
 
 extern "C" __host__ __device__
-struct command* sq_enqueue(nvm_queue_t sq)
+struct command* sq_enqueue(nvm_queue_t* sq)
 {
     // Check the capacity
     if (sq->tail - sq->head >= sq->max_entries)
@@ -64,7 +74,8 @@ struct command* sq_enqueue(nvm_queue_t sq)
     }
 
     // Get slot at end of queue
-    struct command* ptr = (struct command*) (((unsigned char*) sq->page.virt_addr) + sq->entry_size * sq->tail);
+    struct command* ptr = 
+        (struct command*) (((unsigned char*) sq->virt_addr) + sq->entry_size * sq->tail);
 
     // Increase tail pointer and wrap around if necessary
     if (++sq->tail >= sq->max_entries)
@@ -81,10 +92,10 @@ struct command* sq_enqueue(nvm_queue_t sq)
 
 
 extern "C" __host__ __device__
-struct completion* cq_poll(nvm_queue_t cq)
+struct completion* cq_poll(const nvm_queue_t* cq)
 {
     struct completion* ptr = 
-        (struct completion*) (((unsigned char*) cq->page.virt_addr) + cq->entry_size * cq->head);
+        (struct completion*) (((unsigned char*) cq->virt_addr) + cq->entry_size * cq->head);
 
     // Check if new completion is ready by checking the phase tag
     if (PHASE(ptr) != cq->phase)
@@ -97,7 +108,7 @@ struct completion* cq_poll(nvm_queue_t cq)
 
 
 extern "C" __host__ __device__
-struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t ctrl)
+struct completion* cq_dequeue(nvm_queue_t* cq)
 {
     struct completion* ptr = cq_poll(cq);
 
@@ -108,12 +119,6 @@ struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t ctrl)
         {
             cq->head = 0;
             cq->phase = !cq->phase;
-        }
-
-        if (ctrl != NULL)
-        {
-            // Update head pointer of submission queue
-            ctrl->queues[*CPL_SQID(ptr)]->head = *CPL_SQHD(ptr);
         }
     }
 
@@ -141,15 +146,15 @@ static inline void delay(uint64_t& remaining_nsecs)
 
 
 extern "C" __host__ 
-struct completion* cq_dequeue_block(nvm_queue_t cq, nvm_controller_t ctrl)
+struct completion* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout)
 {
-    uint64_t nsecs = ctrl->timeout * 1000000UL;
-    struct completion* cpl = cq_dequeue(cq, ctrl);
+    uint64_t nsecs = timeout * 1000000UL;
+    struct completion* cpl = cq_dequeue(cq);
 
     while (cpl == NULL && nsecs > 0)
     {
         delay(nsecs);
-        cpl = cq_dequeue(cq, ctrl);
+        cpl = cq_dequeue(cq);
     }
 
     return cpl;
@@ -157,15 +162,34 @@ struct completion* cq_dequeue_block(nvm_queue_t cq, nvm_controller_t ctrl)
 
 
 extern "C" __host__ __device__
-void sq_submit(nvm_queue_t sq)
+void sq_submit(const nvm_queue_t* sq)
 {
     *((volatile uint32_t*) sq->db) = sq->tail;
 }
 
 
 extern "C" __host__ __device__
-void cq_update(nvm_queue_t cq)
+void cq_update(const nvm_queue_t* cq)
 {
     *((volatile uint32_t*) cq->db) = cq->head;
+}
+
+
+extern "C" __host__ __device__
+int sq_update(nvm_queue_t* sq, const struct completion* cpl)
+{
+    if (cpl == NULL)
+    {
+        return EAGAIN;
+    }
+
+    if (sq->no == *CPL_SQID(cpl))
+    {
+        // Update head pointer of submission queue
+        sq->head = *CPL_SQHD(cpl);
+        return 0;
+    }
+
+    return EBADF;
 }
 

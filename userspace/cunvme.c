@@ -13,7 +13,7 @@
 #include <getopt.h>
 
 
-extern int cuda_workload(int ioctl_fd, nvm_controller_t ctrl, int dev, void* reg_ptr, size_t reg_len);
+extern int cuda_workload(int ioctl_fd, const nvm_ctrl_t* ctrl, int dev, void* reg_ptr, size_t reg_len);
 
 
 static struct option opts[] = {
@@ -24,9 +24,9 @@ static struct option opts[] = {
     { NULL, 0, NULL, 0 }
 };
 
-static void print_controller_info(nvm_controller_t controller)
+static void print_controller_info(nvm_ctrl_t* controller)
 {
-    unsigned char* data = controller->data->virt_addr;
+    unsigned char* data = controller->identify.virt_addr;
 
     char serial[21];
     memset(serial, 0, 21);
@@ -181,7 +181,7 @@ int main(int argc, char** argv)
     }
 
     // Memory map device's BAR0
-    volatile void* reg_ptr = mmap(NULL, 0x1000 + MAX_DBL_MEM, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FILE, reg_fd, 0);
+    volatile void* reg_ptr = mmap(NULL, 0x2000, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FILE, reg_fd, 0);
     if (reg_ptr == NULL)
     {
         fprintf(stderr, "Failed to mmap BAR resource file: %s\n", strerror(errno));
@@ -190,17 +190,17 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    nvm_controller_t ctrl;
+    nvm_ctrl_t ctrl;
 
     // Reset and initialize controller
     fprintf(stderr, "Resetting controller %04x:%02x:%02x.%x...\n",
             domain, bus, slot, fun);
 
-    err = nvm_init(&ctrl, ioctl_fd, reg_ptr, MAX_DBL_MEM);
+    err = nvm_init(&ctrl, ioctl_fd, reg_ptr);
     if (err != 0)
     {
         fprintf(stderr, "Failed to reset and initialize device: %s\n", strerror(err));
-        munmap((void*) reg_ptr, 0x1000 + MAX_DBL_MEM);
+        munmap((void*) reg_ptr, 0x2000);
         close(reg_fd);
         close(ioctl_fd);
         return 2;
@@ -209,15 +209,15 @@ int main(int argc, char** argv)
 
     if (identify)
     {
-        print_controller_info(ctrl);
+        print_controller_info(&ctrl);
     }
 
     // Do CUDA workload to demonstrate queues hosted on GPU memory
-    cuda_workload(ioctl_fd, ctrl, cuda_device, (void*) reg_ptr, 0x1000 + MAX_DBL_MEM);
+    //cuda_workload(ioctl_fd, ctrl, cuda_device, (void*) reg_ptr, 0x2000);
 
     // Clean up resources
-    nvm_free(ctrl, ioctl_fd);
-    munmap((void*) reg_ptr, 0x1000 + MAX_DBL_MEM);
+    nvm_free(&ctrl, ioctl_fd);
+    munmap((void*) reg_ptr, 0x2000);
     close(reg_fd);
     close(ioctl_fd);
 

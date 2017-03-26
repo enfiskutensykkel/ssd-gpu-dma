@@ -8,6 +8,7 @@ extern "C" {
 #include "util.h"
 #include <stdint.h>
 #include <stddef.h>
+#include "memory.h"
 
 #ifndef __CUDACC__
 #define __host__
@@ -61,13 +62,19 @@ void cmd_header(struct command* cmd, uint8_t opcode, uint32_t ns_id);
 
 
 /* 
- * Properly set up PRP list pointers in command's DPTR field 
+ * Set up PRP list pointers in command's DPTR field.
  * The caller must ensure himself that the memory region pointed to
  * by prps has at least n_prps pages.
  */
 __host__ __device__
-int cmd_data_ptr(struct command* cmd, memory_t* prp_list, memory_t* prps, size_t n_prps);
+int cmd_dptr_prps(struct command* cmd, page_t* prp_list, buffer_t* prps, size_t n_prps);
 
+
+/*
+ * Set up PRP pointer in command's DPTR field.
+ */
+__host__ __device__
+void cmd_dptr_prp(struct command* cmd, page_t* data);
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,5 @@
 PROJECT 	:= cunvme
-DEFINES		:= -DMAX_DBL_MEM=0x256 -DMAX_RAM_PAGES=64 -DMAX_GPU_PAGES=8
+DEFINES		:= -DMAX_RAM_PAGES=64 -DMAX_GPU_PAGES=8
 
 # These should be overrided from command line
 # e.g. make CUDA_PATH=/usr/local/cuda-8.0 NV_DRIVER_PATH=/opt/nvidia-367.48

@@ -10,17 +10,8 @@ extern "C" {
 #endif
 
 
-/* SQ doorbell register */
-#define SQ_DBL(p, y, dstrd)    \
-    ((volatile uint32_t*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y)) * (4 << (dstrd)))) )
-
-
-/* CQ doorbell register */
-#define CQ_DBL(p, y, dstrd)    \
-    ((volatile uint32_t*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y) + 1) * (4 << (dstrd)))) )
-
-
 #include "types.h"
+
 struct completion;
 struct command;
 
@@ -33,7 +24,7 @@ struct command;
  * Returns a pointer to the queue entry. or NULL if the queue is full.
  */
 __host__ __device__
-struct command* sq_enqueue(nvm_queue_t sq);
+struct command* sq_enqueue(nvm_queue_t* sq);
 
 
 /* Poll completion queue
@@ -45,27 +36,27 @@ struct command* sq_enqueue(nvm_queue_t sq);
  * is empty.
  */
 __host__ __device__
-struct completion* cq_poll(nvm_queue_t cq);
+struct completion* cq_poll(const nvm_queue_t* cq);
 
 
 /* Dequeue completion queue entry
  *
- * Dequeue a completion entry from the completion queue. If there is a ready
- * completion, this function will also update the SQ head pointer of the 
- * queue specified in the completion.
+ * Dequeue a completion entry from the completion queue. If there is no ready
+ * completions, this function returns NULL.
+ *
+ * The caller must update the corresponding SQ manually.
  *
  * Returns a pointer to the completion entry, or NULL if the queue is empty.
  */
 __host__ __device__
-struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t ctrl);
+struct completion* cq_dequeue(nvm_queue_t* cq);
 
 
 /* Dequeue completion queue entry
  *
  * Dequeue a completion entry from the completion queue. If none are ready
  * at the time, this function will block until a controller timeout interval
- * or a ready completion. This function will also update the SQ head pointer
- * of the queue specified in the completion.
+ * or a ready completion. 
  *
  * Returns a pointer to the completion entry, or NULL if the queue is empty.
  *
@@ -73,7 +64,7 @@ struct completion* cq_dequeue(nvm_queue_t cq, nvm_controller_t ctrl);
  * block a CUDA kernel.
  */
 __host__
-struct completion* cq_dequeue_block(nvm_queue_t cq, nvm_controller_t ctrl);
+struct completion* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout);
 
 
 /* Update SQ tail pointer
@@ -83,7 +74,15 @@ struct completion* cq_dequeue_block(nvm_queue_t cq, nvm_controller_t ctrl);
  * this.
  */
 __host__ __device__
-void sq_submit(nvm_queue_t sq);
+void sq_submit(const nvm_queue_t* sq);
+
+
+/* Update SQ head pointer
+ *
+ * Update SQ head pointer according to the head pointer field in a completion.
+ */
+__host__ __device__
+int sq_update(nvm_queue_t* sq, const struct completion* cpl);
 
 
 /* Update controller's CQ head pointer
@@ -93,7 +92,7 @@ void sq_submit(nvm_queue_t sq);
  * calling this.
  */
 __host__  __device__
-void cq_update(nvm_queue_t cq); 
+void cq_update(const nvm_queue_t* cq); 
 
 
 #ifdef __cplusplus

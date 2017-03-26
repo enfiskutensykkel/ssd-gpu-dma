@@ -5,11 +5,13 @@ extern "C" {
 #endif
 
 #include "types.h"
+#include "memory.h"
 #include <stddef.h>
+#include <stdint.h>
 
 
 /*
- * Reset the actual NVMe controller and initialise the controller structure.
+ * Reset the NVM controller and initialize the controller structure.
  *
  * ctrl             pointer to controller handle
  *
@@ -19,46 +21,33 @@ extern "C" {
  *
  * register_ptr     mmap'd BAR0 address space of the controller
  *
- * db_size          maximum space used to map in doorbell registers
- *
  * Returns 0 on success, or an error code on failure.
  *
  */
-int nvm_init(nvm_controller_t* ctrl, int ioctl_fd, volatile void* register_ptr, size_t db_size);
+int nvm_init(nvm_ctrl_t* ctrl, int ioctl_fd, volatile void* register_ptr);
 
 
 /*
  * Free allocated resources.
  */
-void nvm_free(nvm_controller_t ctrl, int ioctl_fd);
+void nvm_free(nvm_ctrl_t* ctrl, int ioctl_fd);
 
 
 /*
- * Allocate and prepare queue handles
+ * Prepare queue handle and create IO completion queue (CQ)
  *
- * Allocate queue handles and set initial queue state.
- * Note that this does not actually allocate the memory used by the queue,
- * the caller must make the necessary calls to create memory handles for the
- * queues.
- *
- * Returns 0 and sets cq and sq on success, or an errno indicating error on failure.
+ * At the moment, only page-sized queues are supported.
  */
-int nvm_prepare_queues(nvm_controller_t ctrl, nvm_queue_t* cq_handle, nvm_queue_t* sq_handle);
+int nvm_create_cq(nvm_queue_t* cq, uint16_t no, nvm_ctrl_t* ctrl, void* vaddr, uint64_t paddr);
 
 
 /* 
- * Submit prepared queues
+ * Prepare queue handle and create IO submission queue (SQ)
  *
- * This will send the necessary NVM commands to the controller and set up the
- * prepared queues. The caller must be sure that all queues are prepared and
- * have associated memory handles before calling this.
- *
- * This function must only be called once.
- *
- * Returns 0 on success or an errno indicating the error on failure.
+ * Corresponding CQ must have been created first.
+ * At the moment, only page-sized queues are supported.
  */
-int nvm_commit_queues(nvm_controller_t ctrl);
-
+int nvm_create_sq(nvm_queue_t* sq, uint16_t cq_no, nvm_ctrl_t* ctrl, void* vaddr, uint64_t paddr);
 
 
 #ifdef __cplusplus
