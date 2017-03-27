@@ -199,5 +199,5 @@ Howto
 
  8. Run the program
 
-   * run `./cuda-nvme --nvidia-dev=<device id> --nvme-dev=<BDF> --nvme-ns=<namespace>` as root
+   * run `./cuda-nvme --controller=<BDF> --identify` as user root
 
