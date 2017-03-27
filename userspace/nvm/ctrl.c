@@ -284,6 +284,7 @@ static void clear_queue(nvm_queue_t* queue, nvm_ctrl_t* ctrl, uint16_t no, int i
     queue->phase = 1;
     queue->virt_addr = NULL;
     queue->bus_addr = 0;
+    //queue->host_db = is_sq ? SQ_DBL(ctrl->reg_ptr, queue->no, ctrl->dstrd) : CQ_DBL(ctrl->reg_ptr, queue->no, ctrl->dstrd);
     queue->db = is_sq ? SQ_DBL(reg_ptr, queue->no, ctrl->dstrd) : CQ_DBL(reg_ptr, queue->no, ctrl->dstrd);
 }
 
@@ -413,7 +414,7 @@ void nvm_free(nvm_ctrl_t* ctrl, int ioctl_fd)
 }
 
 
-int nvm_create_cq(nvm_queue_t* queue, uint16_t no, nvm_ctrl_t* ctrl, void* vaddr, uint64_t paddr, void* regptr)
+int nvm_create_cq(nvm_ctrl_t* ctrl, nvm_queue_t* queue, uint16_t no, void* vaddr, uint64_t paddr, volatile void* regptr)
 {
     if (!(0 < no && no <= ctrl->max_queues))
     {
@@ -448,14 +449,22 @@ int nvm_create_cq(nvm_queue_t* queue, uint16_t no, nvm_ctrl_t* ctrl, void* vaddr
         return ETIME;
     }
 
+    uint8_t sct = SCT(cpl);
+    uint8_t sc = SC(cpl);
+
     sq_update(&ctrl->admin_sq, cpl);
     cq_update(&ctrl->admin_cq);
+
+    if (sct != 0 && sc != 0)
+    {
+        return -1; // FIXME: look up error code in specification
+    }
 
     return 0;
 }
 
 
-int nvm_create_sq(nvm_queue_t* queue, uint16_t no, nvm_ctrl_t* ctrl, void* vaddr, uint64_t paddr, void* regptr)
+int nvm_create_sq(nvm_ctrl_t* ctrl, const nvm_queue_t* cq, nvm_queue_t* queue, uint16_t no, void* vaddr, uint64_t paddr, volatile void* regptr)
 {
     if (!(0 < no && no <= ctrl->max_queues))
     {
@@ -480,7 +489,7 @@ int nvm_create_sq(nvm_queue_t* queue, uint16_t no, nvm_ctrl_t* ctrl, void* vaddr
     cmd_data_ptr(cmd, queue->bus_addr, 0);
 
     cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
-    cmd->dword[11] = (((uint32_t) queue->no) << 16) | (0x00 << 1) | 0x01;
+    cmd->dword[11] = (((uint32_t) cq->no) << 16) | (0x00 << 1) | 0x01;
 
     sq_submit(&ctrl->admin_sq);
 
@@ -490,8 +499,16 @@ int nvm_create_sq(nvm_queue_t* queue, uint16_t no, nvm_ctrl_t* ctrl, void* vaddr
         return ETIME;
     }
 
+    uint8_t sct = SCT(cpl);
+    uint8_t sc = SC(cpl);
+
     sq_update(&ctrl->admin_sq, cpl);
     cq_update(&ctrl->admin_cq);
+
+    if (sct != 0 && sc != 0)
+    {
+        return -1; // FIXME: look up error code in specification
+    }
 
     return 0;
 }
