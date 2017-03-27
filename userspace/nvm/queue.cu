@@ -13,58 +13,6 @@
 
 
 extern "C" __host__ __device__
-int cmd_dptr_prps(struct command* cmd, page_t* prp_list, buffer_t* prps, size_t n_prps)
-{
-    cmd->dword[0] &= ~( (0x03 << 14) | (0x03 << 8) );
-
-    if (n_prps > prps->n_addrs)
-    {
-        return ENOSPC;
-    }
-
-    cmd->dword[6] = (uint32_t) prps->bus_addr[0];
-    cmd->dword[7] = (uint32_t) (prps->bus_addr[0] >> 32);
-
-    if (n_prps <= 1)
-    {
-        cmd->dword[8] = 0;
-        cmd->dword[9] = 0;
-    }
-    else if (n_prps == 2)
-    {
-        cmd->dword[8] = (uint32_t) prps->bus_addr[1];
-        cmd->dword[9] = (uint32_t) (prps->bus_addr[1] >> 32);
-    }
-    else
-    {
-        // TODO Implement PRP list handling
-    }
-
-    return 0;
-}
-
-
-extern "C" __host__ __device__
-void cmd_dptr_prp(struct command* cmd, page_t* data)
-{
-    cmd->dword[0] &= ~( (0x03 << 14) | (0x03 << 8) );
-    cmd->dword[6] = (uint32_t) data->bus_addr;
-    cmd->dword[7] = (uint32_t) (data->bus_addr >> 32);
-    cmd->dword[8] = 0;
-    cmd->dword[9] = 0;
-}
-
-
-extern "C" __host__ __device__
-void cmd_header(struct command* cmd, uint8_t opcode, uint32_t ns_id)
-{
-    cmd->dword[0] &= 0xffff0000;
-    cmd->dword[0] |= (0x00 << 14) | (0x00 << 8) | (opcode & 0x7f);
-    cmd->dword[1] = ns_id;
-}
-
-
-extern "C" __host__ __device__
 struct command* sq_enqueue(nvm_queue_t* sq)
 {
     // Check the capacity
@@ -98,7 +46,7 @@ struct completion* cq_poll(const nvm_queue_t* cq)
         (struct completion*) (((unsigned char*) cq->virt_addr) + cq->entry_size * cq->head);
 
     // Check if new completion is ready by checking the phase tag
-    if (PHASE(ptr) != cq->phase)
+    if (!!PHASE(ptr) != cq->phase)
     {
         return NULL;
     }

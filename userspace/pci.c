@@ -13,17 +13,17 @@
 #define BUS_MASTER          0x02    // Offset to the BusMaster bit in COMMAND register
 
 
-static void read_register(FILE* fptr, size_t offset, size_t size, void* ptr)
+static ssize_t read_register(FILE* fptr, size_t offset, size_t size, void* ptr)
 {
     fseek(fptr, offset, SEEK_SET);
-    fread(ptr, 1, size, fptr);
+    return fread(ptr, 1, size, fptr);
 }
 
 
-static void write_register(FILE* fptr, size_t offset, size_t size, void* ptr)
+static ssize_t write_register(FILE* fptr, size_t offset, size_t size, void* ptr)
 {
     fseek(fptr, offset, SEEK_SET);
-    fwrite(ptr, 1, size, fptr);
+    return fwrite(ptr, 1, size, fptr);
 }
 
 

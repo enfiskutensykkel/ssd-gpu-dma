@@ -164,12 +164,12 @@ static void configure_admin_queues(nvm_ctrl_t* controller)
     sq->virt_addr = controller->admin_sq_page.virt_addr;
     sq->bus_addr = controller->admin_sq_page.bus_addr;
     sq->max_entries = controller->admin_sq_page.page_size / controller->sq_entry_size;
-    memset(ctrl->admin_sq_page.virt_addr, 0, ctrl->admin_sq_page.page_size);
+    memset(controller->admin_sq_page.virt_addr, 0, controller->admin_sq_page.page_size);
 
     cq->virt_addr = controller->admin_cq_page.virt_addr;
     cq->bus_addr = controller->admin_cq_page.bus_addr;
-    sq->max_entries = controller->admin_cq_page.page_size / controller->cq_entry_size;
-    memset(ctrl->admin_cq_page.virt_addr, 0, ctrl->admin_cq_page.page_size);
+    cq->max_entries = controller->admin_cq_page.page_size / controller->cq_entry_size;
+    memset(controller->admin_cq_page.virt_addr, 0, controller->admin_cq_page.page_size);
 
     volatile uint32_t* aqa = AQA(controller->reg_ptr);
     *aqa = AQA$AQS(sq->max_entries - 1) | AQA$AQC(cq->max_entries - 1);
@@ -191,7 +191,7 @@ static int identify_controller(nvm_ctrl_t* controller)
     }
 
     cmd_header(identify, ADMIN_IDENTIFY_CONTROLLER, 0);
-    cmd_dptr_prp(identify, &controller->identify);
+    cmd_data_ptr(identify, controller->identify.bus_addr, 0);
     identify->dword[10] = (0 << 16) | 0x01;
 
     struct command* get_features = sq_enqueue(&controller->admin_sq);
@@ -274,7 +274,7 @@ static int set_num_queues(nvm_ctrl_t* controller)
 
 
 /* Helper function to clear state in a queue handle */
-static void clear_queue(nvm_queue_t* queue, nvm_ctrl_t* ctrl, uint16_t no, int is_sq)
+static void clear_queue(nvm_queue_t* queue, nvm_ctrl_t* ctrl, uint16_t no, int is_sq, volatile void* reg_ptr)
 {
     queue->no = no;
     queue->max_entries = 0;
@@ -284,7 +284,7 @@ static void clear_queue(nvm_queue_t* queue, nvm_ctrl_t* ctrl, uint16_t no, int i
     queue->phase = 1;
     queue->virt_addr = NULL;
     queue->bus_addr = 0;
-    queue->db = is_sq ? SQ_DBL(ctrl->reg_ptr, queue->no, ctrl->dstrd) : CQ_DBL(ctrl->reg_ptr, queue->no, ctrl->dstrd);
+    queue->db = is_sq ? SQ_DBL(reg_ptr, queue->no, ctrl->dstrd) : CQ_DBL(reg_ptr, queue->no, ctrl->dstrd);
 }
 
 
@@ -335,9 +335,9 @@ int nvm_init(nvm_ctrl_t* ctrl, int fd, volatile void* register_ptr)
     ctrl->reg_ptr = register_ptr;
     ctrl->n_ns = 0;
 
-    clear_queue(&ctrl->admin_cq, ctrl, 0, 0);
+    clear_queue(&ctrl->admin_cq, ctrl, 0, 0, ctrl->reg_ptr);
     clear_page(&ctrl->admin_cq_page);
-    clear_queue(&ctrl->admin_sq, ctrl, 0, 1);
+    clear_queue(&ctrl->admin_sq, ctrl, 0, 1, ctrl->reg_ptr);
     clear_page(&ctrl->admin_sq_page);
     clear_page(&ctrl->identify);
 
@@ -413,68 +413,86 @@ void nvm_free(nvm_ctrl_t* ctrl, int ioctl_fd)
 }
 
 
-//static int create_cq(nvm_controller_t ctrl, nvm_queue_t queue)
-//{
-//    struct command* cmd = sq_enqueue(ctrl->queues[0]);
-//    if (cmd == NULL)
-//    {
-//        return EAGAIN;
-//    }
-//
-//    queue->max_entries = _MIN(ctrl->max_entries, queue->page.page_size / queue->entry_size);
-//
-//    cmd_header(cmd, ADMIN_CREATE_COMPLETION_QUEUE, 0);
-//
-//    cmd->dword[6] = (uint32_t) queue->page.bus_addr;
-//    cmd->dword[7] = (uint32_t) (queue->page.bus_addr >> 32);
-//    cmd->dword[8] = 0;
-//    cmd->dword[9] = 0;
-//
-//    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
-//    cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
-//
-//    sq_submit(ctrl->queues[0]);
-//
-//    struct completion* cpl = cq_dequeue_block(ctrl->queues[1], ctrl);
-//    if (cpl == NULL)
-//    {
-//        return ETIME;
-//    }
-//
-//    // TODO check status code
-//    return 0;
-//}
-//
-//
-//static int create_sq(nvm_controller_t ctrl, nvm_queue_t queue)
-//{
-//    struct command* cmd = sq_enqueue(ctrl->queues[0]);
-//    if (cmd == NULL)
-//    {
-//        return EAGAIN;
-//    }
-//
-//    queue->max_entries = _MIN(ctrl->max_entries, queue->page.page_size / queue->entry_size);
-//
-//    cmd_header(cmd, ADMIN_CREATE_SUBMISSION_QUEUE, 0);
-//
-//    cmd->dword[6] = (uint32_t) queue->page.bus_addr;
-//    cmd->dword[7] = (uint32_t) (queue->page.bus_addr >> 32);
-//    cmd->dword[8] = 0;
-//    cmd->dword[9] = 0;
-//    
-//    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
-//    cmd->dword[11] = (((uint32_t) queue->no) << 16) | (0x00 << 1) | 0x01;
-//
-//    sq_submit(ctrl->queues[0]);
-//
-//    struct completion* cpl = cq_dequeue_block(ctrl->queues[1], ctrl);
-//    if (cpl == NULL)
-//    {
-//        return ETIME;
-//    }
-//
-//    // TODO Check status code
-//    return 0;
-//}
-//
+int nvm_create_cq(nvm_queue_t* queue, uint16_t no, nvm_ctrl_t* ctrl, void* vaddr, uint64_t paddr, void* regptr)
+{
+    if (!(0 < no && no <= ctrl->max_queues))
+    {
+        return EINVAL;
+    }
+
+    struct command* cmd = sq_enqueue(&ctrl->admin_sq);
+    if (cmd == NULL)
+    {
+        return EAGAIN;
+    }
+
+    clear_queue(queue, ctrl, no, 0, regptr);
+    queue->virt_addr = vaddr;
+    queue->bus_addr = paddr;
+
+    // Queues can never exceed one controller memory page size
+    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
+
+    // Create completion queue command
+    cmd_header(cmd, ADMIN_CREATE_COMPLETION_QUEUE, 0);
+    cmd_data_ptr(cmd, queue->bus_addr, 0);
+
+    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
+    cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
+
+    sq_submit(&ctrl->admin_sq);
+
+    struct completion* cpl = cq_dequeue_block(&ctrl->admin_cq, ctrl->timeout);
+    if (cpl == NULL)
+    {
+        return ETIME;
+    }
+
+    sq_update(&ctrl->admin_sq, cpl);
+    cq_update(&ctrl->admin_cq);
+
+    return 0;
+}
+
+
+int nvm_create_sq(nvm_queue_t* queue, uint16_t no, nvm_ctrl_t* ctrl, void* vaddr, uint64_t paddr, void* regptr)
+{
+    if (!(0 < no && no <= ctrl->max_queues))
+    {
+        return EINVAL;
+    }
+
+    struct command* cmd = sq_enqueue(&ctrl->admin_sq);
+    if (cmd == NULL)
+    {
+        return EAGAIN;
+    }
+
+    clear_queue(queue, ctrl, no, 1, regptr);
+    queue->virt_addr = vaddr;
+    queue->bus_addr = paddr;
+
+    // Queues can never exceed one controller memory page size
+    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
+
+    // Create completion queue command
+    cmd_header(cmd, ADMIN_CREATE_SUBMISSION_QUEUE, 0);
+    cmd_data_ptr(cmd, queue->bus_addr, 0);
+
+    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
+    cmd->dword[11] = (((uint32_t) queue->no) << 16) | (0x00 << 1) | 0x01;
+
+    sq_submit(&ctrl->admin_sq);
+
+    struct completion* cpl = cq_dequeue_block(&ctrl->admin_cq, ctrl->timeout);
+    if (cpl == NULL)
+    {
+        return ETIME;
+    }
+
+    sq_update(&ctrl->admin_sq, cpl);
+    cq_update(&ctrl->admin_cq);
+
+    return 0;
+}
+

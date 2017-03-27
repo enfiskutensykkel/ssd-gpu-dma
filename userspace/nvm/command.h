@@ -8,7 +8,6 @@ extern "C" {
 #include "util.h"
 #include <stdint.h>
 #include <stddef.h>
-#include "memory.h"
 
 #ifndef __CUDACC__
 #define __host__
@@ -56,25 +55,31 @@ enum nvm_command_set
 };
 
 
+/* Build a PRP list consisting of PRP entries 
+ *
+ * page_size    - the controllers memory page size (MPS)
+ * prp_list     - pointer to contiguous virtual memory where the PRP lists reside
+ * list_addrs   - array of bus addresses to prp_list's physical MPS-sized pages
+ * prp_addrs    - array of n_prps elements containing bus address to describe PRPs
+ *
+ * Returns the bus address of the start of the PRP list
+ */
+__host__ __device__
+uint64_t build_prp_list(size_t page_size, void* prp_list, size_t n_prps, const uint64_t* list_addrs, const uint64_t* prp_addrs);
+
+
+
 /* Set command's DWORD0 and DWORD1 */
 __host__ __device__
 void cmd_header(struct command* cmd, uint8_t opcode, uint32_t ns_id);
 
 
 /* 
- * Set up PRP list pointers in command's DPTR field.
- * The caller must ensure himself that the memory region pointed to
- * by prps has at least n_prps pages.
+ * Set command's DPTR field (DWORD6-9)
  */
 __host__ __device__
-int cmd_dptr_prps(struct command* cmd, page_t* prp_list, buffer_t* prps, size_t n_prps);
+void cmd_data_ptr(struct command* cmd, uint64_t prp1, uint64_t prp2);
 
-
-/*
- * Set up PRP pointer in command's DPTR field.
- */
-__host__ __device__
-void cmd_dptr_prp(struct command* cmd, page_t* data);
 
 #ifdef __cplusplus
 }

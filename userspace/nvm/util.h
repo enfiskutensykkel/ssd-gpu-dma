@@ -12,8 +12,8 @@
 #define _MIN(a, b) ( (a) <= (b) ? (a) : (b) )
 
 /* Convenience function for creating a bit mask */
-__host__ __device__
-inline uint64_t bitmask(int hi, int lo)
+__host__ __device__ inline 
+uint64_t bitmask(int hi, int lo)
 {
     uint64_t mask = 0;
 
@@ -39,6 +39,14 @@ inline uint64_t bitmask(int hi, int lo)
 /* Offset to a register */
 #define _REG(p, offs, bits) \
     ((volatile uint##bits##_t *) (((volatile unsigned char*) ((volatile void*) (p))) + (offs)))
+
+
+/* 
+ * Convenience function for calculating offsets within a page larger than MPS,
+ * for example when using GPU pages of 64 KB and MPS of 4 KB.
+ */
+#define bus_addr_mps(offset, page_size, bus_addrs)   \
+    ( (bus_addrs)[ (offset) / (page_size) ] + ((offset) % (page_size)) )
 
 
 #endif
