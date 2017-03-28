@@ -151,7 +151,7 @@ static int enable_controller(volatile void* register_ptr, uint8_t encoded_page_s
 static void configure_entry_sizes(const nvm_ctrl_t* controller)
 {
     volatile uint32_t* cc = CC(controller->reg_ptr);
-    *cc |= CC$IOCQES(controller->cq_entry_size) | CC$IOSQES(controller->sq_entry_size);
+    *cc |= CC$IOCQES((uint32_t) controller->cq_entry_size) | CC$IOSQES((uint32_t) controller->sq_entry_size);
 }
 
 
@@ -172,7 +172,7 @@ static void configure_admin_queues(nvm_ctrl_t* controller)
     memset(controller->admin_cq_page.virt_addr, 0, controller->admin_cq_page.page_size);
 
     volatile uint32_t* aqa = AQA(controller->reg_ptr);
-    *aqa = AQA$AQS(sq->max_entries - 1) | AQA$AQC(cq->max_entries - 1);
+    *aqa = AQA$AQS((uint32_t) sq->max_entries - 1) | AQA$AQC((uint32_t) cq->max_entries - 1);
 
     volatile uint64_t* asq = ASQ(controller->reg_ptr);
     *asq = sq->bus_addr;
@@ -257,7 +257,7 @@ static int set_num_queues(nvm_ctrl_t* controller)
     cmd_header(cmd, ADMIN_SET_FEATURES, 0);
 
     cmd->dword[10] = (1 << 31) | 0x07;
-    cmd->dword[11] = (controller->max_queues << 16) | controller->max_queues;
+    cmd->dword[11] = ((uint32_t) controller->max_queues << 16) | controller->max_queues;
 
     sq_submit(&controller->admin_sq);
 
@@ -438,7 +438,7 @@ int nvm_create_cq(nvm_ctrl_t* ctrl, nvm_queue_t* queue, uint16_t no, void* vaddr
     cmd_header(cmd, ADMIN_CREATE_COMPLETION_QUEUE, 0);
     cmd_data_ptr(cmd, queue->bus_addr, 0);
 
-    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
+    cmd->dword[10] = (((uint32_t) queue->max_entries - 1) << 16) | queue->no;
     cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
 
     sq_submit(&ctrl->admin_sq);
@@ -488,7 +488,7 @@ int nvm_create_sq(nvm_ctrl_t* ctrl, const nvm_queue_t* cq, nvm_queue_t* queue, u
     cmd_header(cmd, ADMIN_CREATE_SUBMISSION_QUEUE, 0);
     cmd_data_ptr(cmd, queue->bus_addr, 0);
 
-    cmd->dword[10] = ((queue->max_entries - 1) << 16) | queue->no;
+    cmd->dword[10] = (((uint32_t) queue->max_entries - 1) << 16) | queue->no;
     cmd->dword[11] = (((uint32_t) cq->no) << 16) | (0x00 << 1) | 0x01;
 
     sq_submit(&ctrl->admin_sq);

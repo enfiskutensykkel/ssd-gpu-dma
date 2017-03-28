@@ -137,6 +137,7 @@ int main(int argc, char** argv)
                 break;
 
             case 'g': // set CUDA device
+                // use cudaDeviceGetByPCIBusId(int* device, const char* pciBusId)
                 break;
 
         }
