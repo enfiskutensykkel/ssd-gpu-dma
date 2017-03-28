@@ -26,6 +26,22 @@ uint64_t bitmask(int hi, int lo)
 }
 
 
+/* Convenience function for getting the base 2 logarithm of a number */
+__host__ __device__ inline
+uint32_t b2log(uint32_t n)
+{
+    uint32_t count = 0;
+
+    while (n > 0)
+    {
+        ++count;
+        n >>= 1;
+    }
+
+    return count - 1;
+}
+
+
 /* Extract specific bits */
 #define _RB(v, hi, lo)   \
     ( ( (v) & bitmask((hi), (lo)) ) >> (lo) )

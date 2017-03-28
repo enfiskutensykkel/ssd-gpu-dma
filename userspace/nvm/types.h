@@ -30,8 +30,8 @@ extern "C" {
 struct nvm_queue 
 {
     uint16_t            no;             // Queue number (must be unique per SQ/CQ pair)
-    uint16_t            max_entries;    // Maximum number of queue entries supported
-    uint16_t            entry_size;     // The size of a queue entry
+    size_t              max_entries;    // Maximum number of queue entries supported
+    size_t              entry_size;     // The size of a queue entry
     uint32_t            head;           // Head pointer
     uint32_t            tail;           // Tail pointer
     int16_t             phase;          // Current phase bit

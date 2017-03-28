@@ -59,20 +59,9 @@ enum admin_command_set
 };
 
 
-/* Encode page size to a the format required by the controller */
-static uint8_t encode_page_size(size_t page_size)
-{
-    page_size >>= 12;
-    size_t count = 0;
+#define encode_page_size(page_size) b2log((page_size) >> 12)
 
-    while (page_size > 0)
-    {
-        ++count;
-        page_size >>= 1;
-    }
-
-    return count - 1;
-}
+#define encode_entry_size(entry_size) b2log(entry_size)
 
 
 /* Delay execution by 1 millisecond */
@@ -151,7 +140,11 @@ static int enable_controller(volatile void* register_ptr, uint8_t encoded_page_s
 static void configure_entry_sizes(const nvm_ctrl_t* controller)
 {
     volatile uint32_t* cc = CC(controller->reg_ptr);
-    *cc |= CC$IOCQES((uint32_t) controller->cq_entry_size) | CC$IOSQES((uint32_t) controller->sq_entry_size);
+
+    uint32_t cqes = encode_entry_size(controller->cq_entry_size);
+    uint32_t sqes = encode_entry_size(controller->sq_entry_size);
+
+    *cc |= CC$IOCQES(cqes) | CC$IOSQES(sqes);
 }
 
 
@@ -237,8 +230,8 @@ static int identify_controller(nvm_ctrl_t* controller)
     // Extract information from identify structure
     unsigned char* bytes = controller->identify.virt_addr;
     controller->max_data_size = bytes[77] * (1 << (12 + CAP$MPSMIN(controller->reg_ptr)));
-    controller->sq_entry_size = _RB(bytes[512], 3, 0);
-    controller->cq_entry_size = _RB(bytes[513], 3, 0);
+    controller->sq_entry_size = 1 << _RB(bytes[512], 3, 0);
+    controller->cq_entry_size = 1 << _RB(bytes[513], 3, 0);
     controller->max_out_cmds = *((uint16_t*) (bytes + 514));
     controller->n_ns = *((uint32_t*) (bytes + 516));
 

@@ -92,7 +92,7 @@ void work_kernel(nvm_queue_t* queues, buffer_t* data_ptr, size_t blk_size, size_
     int thread = blockDim.x * threadIdx.y + threadIdx.x;
     int id = blockDim.x * blockDim.y * block + thread;
 
-    struct command cmd;
+    struct command* cmd;
 
     nvm_queue_t* sq = &queues[id + 1];
 
@@ -101,16 +101,9 @@ void work_kernel(nvm_queue_t* queues, buffer_t* data_ptr, size_t blk_size, size_
 
     for (size_t i = 0; i < n_cmds; ++i)
     {
-        struct command* cmd_addr;
-        
-        while ((cmd_addr = sq_enqueue(sq)) == NULL);
+        while ((cmd = sq_enqueue(sq)) == NULL);
 
-        prepare_read_cmd(&cmd, blk_size, page_size, ns_id, 0, 1, NULL, NULL, &bus_addr);;
-
-        for (int j = 0; j < 16; ++j)
-        {
-            cmd_addr->dword[j] = cmd.dword[j];
-        }
+        prepare_read_cmd(cmd, blk_size, page_size, ns_id, 0, 1, NULL, NULL, &bus_addr);;
     }
 
     sq_submit(sq);
