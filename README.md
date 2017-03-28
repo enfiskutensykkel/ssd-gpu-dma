@@ -14,8 +14,9 @@ Requirements
 ---------------------------------
  * x86\_64 architecture with page size set to 4096 bytes.
 
- * Linux kernel (preferrably version 4.4.21 or 4.4.57, since they're 
-   the ones I've used). You might need to change the call to 
+ * Linux kernel (preferrably version 
+   4.4.21, 4.4.0.57, 4.4.0.66, 4.4.0.67, or 4.4.0.70, 
+   since they're the ones I've used). You might need to change the call to 
    `get_user_pages()` if you use a different kernel version.
 
  * A NVM Express compatible disk. 
