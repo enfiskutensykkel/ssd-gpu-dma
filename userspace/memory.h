@@ -12,7 +12,9 @@ extern "C" {
  * Memory range handle
  *
  * Describes an arbitrarily large memory buffer. Contains the bus/physical 
- * addresses to the page-locked memory page units used by the buffer.
+ * addresses to the page-locked memory "units" used by the buffer.
+ *
+ * Note: A "unit" corresponds to NVM Memory Page Size (MPS)
  */
 struct mem_buffer
 {
@@ -20,9 +22,10 @@ struct mem_buffer
     int             device;         // CUDA device (-1 if no device)
     void*           virt_addr;      // Pointer to virtual memory (may be device memory)
     size_t          range_size;     // Total memory range size
-    size_t          page_size;      // Size of a page unit
-    size_t          n_addrs;        // Number of bus addresses
-    uint64_t        bus_addr[0];    // Bus/physical addresses to memory
+    size_t          page_size;      // Size of a physical page
+    size_t          unit_size;      // Size of a logical memory unit
+    size_t          n_addrs;        // Number of memory units
+    uint64_t        bus_addr[0];    // Bus/physical addresses to memory units
 };
 
 
@@ -33,7 +36,8 @@ typedef struct mem_buffer buffer_t;
 /*
  * Page handle
  *
- * Descriptor to a single page of memory.
+ * Descriptor to a page of memory. Contains the bus/physical address
+ * to the page-locked page.
  */
 struct mem_page
 {
@@ -59,7 +63,7 @@ typedef struct mem_page page_t;
  *
  * Returns a handle on success or NULL on failure.
  */
-buffer_t* get_buffer(int ioctl_fd, int device, size_t size);
+buffer_t* get_buffer(int ioctl_fd, int device, size_t buffer_size, size_t mem_unit_size);
 
 
 /* Release memory buffer

@@ -85,26 +85,24 @@ void poll_kernel(nvm_queue_t* queues, size_t n_cmds)
 
 
 __global__ 
-void work_kernel(nvm_queue_t* queues, buffer_t* data_ptr, size_t blk_size, size_t page_size, uint32_t ns_id, size_t n_cmds)
+void work_kernel(nvm_queue_t* queues, buffer_t* data_ptr, size_t blk_size, size_t page_size, uint32_t ns_id)
 {
-    //int num = gridDim.x * gridDim.y * blockDim.x * blockDim.y;
+    int num = gridDim.x * gridDim.y * blockDim.x * blockDim.y;
     int block = gridDim.x * blockIdx.y + blockIdx.x;
     int thread = blockDim.x * threadIdx.y + threadIdx.x;
     int id = blockDim.x * blockDim.y * block + thread;
 
-    struct command* cmd;
-
     nvm_queue_t* sq = &queues[id + 1];
+
+//    size_t vaddr_offset = id * (data_ptr->range_size / num);
 
     //uint64_t virt_addr = ((uint64_t) data_ptr->virt_addr) + page_size * id;
     uint64_t bus_addr = bus_addr_mps(page_size * id, page_size, data_ptr->bus_addr);
 
-    for (size_t i = 0; i < n_cmds; ++i)
-    {
-        while ((cmd = sq_enqueue(sq)) == NULL);
+    struct command* cmd;
+    while ((cmd = sq_enqueue(sq)) == NULL);
 
-        prepare_read_cmd(cmd, blk_size, page_size, ns_id, 0, 1, NULL, NULL, &bus_addr);;
-    }
+    prepare_read_cmd(cmd, blk_size, page_size, ns_id, 0, 1, NULL, NULL, &bus_addr);
 
     sq_submit(sq);
 }
@@ -165,11 +163,11 @@ int launch_kernel(const nvm_ctrl_t* ctrl, nvm_queue_t* queues, buffer_t* data, i
     // TODO: Use MSI-X interrupts to do something meaningful
 
     // Start kernels
-    poll_kernel<<<1, 1>>>(dev_queues, /*n_threads*/ 1); 
+    poll_kernel<<<1, 1>>>(dev_queues, n_threads); 
 
     // TODO: record event before and after
 
-    work_kernel<<<1, n_threads, 0, stream>>>(dev_queues, dev_data, 512, ctrl->page_size, ns_id, 2);
+    work_kernel<<<1, n_threads, 0, stream>>>(dev_queues, dev_data, 512, ctrl->page_size, ns_id);
 
     err = cudaStreamSynchronize(stream);
     if (err != cudaSuccess)
@@ -228,7 +226,7 @@ int create_submission_queues(nvm_ctrl_t* ctrl, buffer_t* queue_mem, nvm_queue_t*
 extern "C" __host__
 int cuda_workload(int ioctl_fd, nvm_ctrl_t* ctrl, int dev, uint32_t ns_id, void* io_mem, size_t io_size)
 {
-    int n_threads = 2;
+    int n_threads = 4;
     int status;
     buffer_t* queue_memory = NULL;
     buffer_t* data_buffer = NULL;
@@ -263,7 +261,7 @@ int cuda_workload(int ioctl_fd, nvm_ctrl_t* ctrl, int dev, uint32_t ns_id, void*
     }
 
     // Allocate queue memory
-    queue_memory = get_buffer(ioctl_fd, dev, ctrl->page_size * (n_threads + 1));
+    queue_memory = get_buffer(ioctl_fd, dev, ctrl->page_size * (n_threads + 1), ctrl->page_size);
     if (queue_memory == NULL)
     {
         status = ENOMEM;
@@ -289,7 +287,7 @@ int cuda_workload(int ioctl_fd, nvm_ctrl_t* ctrl, int dev, uint32_t ns_id, void*
     }
 
     // Allocate data buffer
-    data_buffer = get_buffer(ioctl_fd, dev, 0x1000 * n_threads);
+    data_buffer = get_buffer(ioctl_fd, dev, 0x20000, ctrl->page_size);
     if (data_buffer == NULL)
     {
         fprintf(stderr, "Failed to allocate data buffer\n");

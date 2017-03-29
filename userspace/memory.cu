@@ -15,11 +15,13 @@
 #define GPU_PAGE_SIZE   (1L << 16) // GPU bound pointers needs to be aligned to 64 KB
 
 
-static int pin_memory(int fd, buffer_t* handle, int reqno)
+static int pin_memory(int fd, buffer_t* handle, size_t num_phys_pages)   
 {
     struct cunvme_pin* request;
+    int reqno = handle->device >= 0 ? CUNVME_PIN_GPU : CUNVME_PIN_RAM;
+    size_t i;
    
-    request = (struct cunvme_pin*) malloc(sizeof(struct cunvme_pin) + sizeof(uint64_t) * handle->n_addrs);
+    request = (struct cunvme_pin*) malloc(sizeof(struct cunvme_pin) + sizeof(uint64_t) * num_phys_pages);
     if (request == NULL)
     {
         fprintf(stderr, "Failed to allocate ioctl request: %s\n", strerror(errno));
@@ -28,7 +30,7 @@ static int pin_memory(int fd, buffer_t* handle, int reqno)
 
     request->handle = CUNVME_NO_HANDLE;
     request->virt_addr = (unsigned long long) handle->virt_addr;
-    request->num_pages = handle->n_addrs;
+    request->num_pages = num_phys_pages;
 
     int err = ioctl(fd, reqno, request);
     if (err < 0)
@@ -39,11 +41,23 @@ static int pin_memory(int fd, buffer_t* handle, int reqno)
     }
 
     handle->kernel_handle = request->handle;
-    handle->n_addrs = request->num_pages;
-    for (long i = 0; i < request->num_pages; ++i)
+
+    // Calculate logical bus addresses
+    for (i = 0; i < handle->n_addrs; ++i)
     {
-        handle->bus_addr[i] = request->bus_addr[i];
+        size_t phys_page_idx = (i * handle->unit_size) / handle->page_size;
+        size_t offset_within_page = (i * handle->unit_size) % handle->page_size;
+
+        if (phys_page_idx >= ((size_t) request->num_pages))
+        {
+            break;
+        }
+
+        uint64_t logical_bus_addr = request->bus_addr[phys_page_idx] + offset_within_page;
+        handle->bus_addr[i] = logical_bus_addr;
     }
+
+    handle->n_addrs = i;
 
     free(request);
     return 0;
@@ -119,7 +133,7 @@ static int get_cuda_buffer(buffer_t* handle)
 
 
 extern "C"
-buffer_t* get_buffer(int fd, int dev, size_t size)
+buffer_t* get_buffer(int fd, int dev, size_t buffer_size, size_t nvm_page_size)
 {
     int err;
 
@@ -129,10 +143,11 @@ buffer_t* get_buffer(int fd, int dev, size_t size)
         return NULL;
     }
 
-    size_t range_size = (size + page_size - 1) & ~(page_size - 1);
+    size_t range_size = (buffer_size + page_size - 1) & ~(page_size - 1);
     size_t pages = range_size / page_size;
+    size_t nvm_pages = range_size / nvm_page_size;
 
-    buffer_t* handle = (buffer_t*) malloc(sizeof(buffer_t) + sizeof(uint64_t) * pages);
+    buffer_t* handle = (buffer_t*) malloc(sizeof(buffer_t) + sizeof(uint64_t) * nvm_pages);
     if (handle == NULL)
     {
         fprintf(stderr, "Failed to allocate memory handle: %s\n", strerror(errno));
@@ -144,7 +159,8 @@ buffer_t* get_buffer(int fd, int dev, size_t size)
     handle->virt_addr = NULL;
     handle->range_size = range_size;
     handle->page_size = page_size;
-    handle->n_addrs = pages;
+    handle->unit_size = nvm_page_size;
+    handle->n_addrs = nvm_pages;
 
     if (handle->device >= 0)
     {
@@ -162,7 +178,7 @@ buffer_t* get_buffer(int fd, int dev, size_t size)
         return NULL;
     }
 
-    err = pin_memory(fd, handle, handle->device >= 0 ? CUNVME_PIN_GPU : CUNVME_PIN_RAM);
+    err = pin_memory(fd, handle, pages);
     if (err != 0)
     {
         if (handle->device >= 0)
@@ -192,7 +208,7 @@ int get_page(int fd, int dev, page_t* page)
         return EIO;
     }
 
-    buffer_t* handle = get_buffer(fd, dev, page_size);
+    buffer_t* handle = get_buffer(fd, dev, page_size, page_size);
     if (handle == NULL)
     {
         fprintf(stderr, "Failed to allocate and pin page\n");
