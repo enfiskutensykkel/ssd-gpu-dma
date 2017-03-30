@@ -16,7 +16,7 @@ extern "C" __host__ __device__
 struct command* sq_enqueue(nvm_queue_t* sq)
 {
     // Check the capacity
-    if (sq->tail - sq->head >= sq->max_entries)
+    if ((sq->tail - sq->head) % sq->max_entries == sq->max_entries - 1)
     {
         return NULL;
     }
