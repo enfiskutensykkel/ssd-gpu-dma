@@ -8,6 +8,10 @@ extern "C" {
 #include <stdint.h>
 #include "memory.h"
 
+#ifndef __CUDACC__
+#define __align__(x)
+#endif
+
 
 /* SQ doorbell register offset */
 #define SQ_DBL(p, y, dstrd)    \
@@ -27,7 +31,7 @@ extern "C" {
  * Note: the queue handle does not "own" the memory buffer it points to.
  * Memory management must be handled elsewhere.
  */
-struct nvm_queue 
+struct __align__(64) nvm_queue 
 {
     uint16_t            no;             // Queue number (must be unique per SQ/CQ pair)
     size_t              max_entries;    // Maximum number of queue entries supported
@@ -38,7 +42,7 @@ struct nvm_queue
     void*               virt_addr;      // Virtual address of the queue (may be device memory)
     uint64_t            bus_addr;       // Physical/bus address of the queue (only 1 page per queue supported)
     volatile uint32_t*  db;             // Pointer to doorbell register (write only)
-};
+} __attribute__((aligned (64)));
 
 
 /* Convenience type for queue handle */

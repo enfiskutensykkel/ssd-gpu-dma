@@ -5,6 +5,7 @@
 #include "nvm/command.h"
 #include "nvm/util.h"
 #include "nvm/ctrl.h"
+#include <pthread.h>
 #include <cstdio>
 #include <cstddef>
 #include <cstring>
@@ -13,7 +14,51 @@
 #include <errno.h>
 
 
-__host__ __device__ static 
+struct consumer_data
+{
+    nvm_queue_t*        queues;
+    size_t*             n_reqs;
+    bool                all_complete;
+};
+
+
+
+/* Dequeue completions from completion queue,
+ * update submission queues and number of requests.
+ */
+__host__ static
+void* consumer(struct consumer_data* data)
+{
+    struct completion* cpl;
+    nvm_queue_t* cq = &data->queues[0];
+
+    // Run until all streams are completed
+    while (!data->all_complete)
+    {
+        // Consume completions
+        while ((cpl = cq_dequeue(cq)) != NULL)
+        {
+            uint16_t sq_id = *CPL_SQID(cpl);
+            uint16_t sq_hd = *CPL_SQHD(cpl);
+
+            nvm_queue_t* sq = &data->queues[sq_id];
+            sq->head = sq_hd;
+
+            data->n_reqs[0]++;
+            data->n_reqs[sq_id]++;
+
+            if (data->n_reqs[sq_id] % sq->max_entries == sq_hd)
+            {
+                cq_update(cq);
+            }
+        }
+    }
+
+    return NULL;
+}
+
+
+__device__ static 
 int prepare_read_cmd(struct command* cmd, uint32_t blk_size, uint32_t page_size, uint32_t ns_id, uint64_t start_lba, uint16_t n_blks, void* list_virt, const uint64_t* list, const uint64_t* data)
 {
     size_t blks_per_page = page_size / blk_size;
@@ -55,182 +100,230 @@ int prepare_read_cmd(struct command* cmd, uint32_t blk_size, uint32_t page_size,
 }
 
 
-__global__ 
-void poll_kernel(nvm_queue_t* queues, size_t n_cmds)
+__global__ static
+void work_kernel(buffer_t* buffer, nvm_queue_t* queues, size_t blk_size, size_t page_size, uint32_t ns_id)
 {
-    nvm_queue_t* cq = &queues[0];
-    struct completion* cpl;
-
-    while (n_cmds > 0)
-    {
-        while ((cpl = cq_poll(cq)) == NULL);
-
-        while ((cpl = cq_dequeue(cq)) != NULL)
-        {
-            // Retrieve SQ information from completion
-            uint16_t sq_id = *CPL_SQID(cpl);
-            uint16_t sq_hd = *CPL_SQHD(cpl);
-
-            // Update submission queue
-            nvm_queue_t* sq = &queues[sq_id];
-            sq->head = sq_hd;
-
-            --n_cmds;
-        }
-
-        // Update CQ head pointer to indicate that we're done processing the completion
-        cq_update(cq);
-    }
-}
-
-
-__global__ 
-void work_kernel(nvm_queue_t* queues, buffer_t* data_ptr, size_t blk_size, size_t page_size, uint32_t ns_id)
-{
-    int num = gridDim.x * gridDim.y * blockDim.x * blockDim.y;
+    // Find position of thread in grid
     int block = gridDim.x * blockIdx.y + blockIdx.x;
     int thread = blockDim.x * threadIdx.y + threadIdx.x;
-    int id = blockDim.x * blockDim.y * block + thread;
+    int id = blockDim.x * blockDim.y * block + thread;  // maybe this is wrong?
 
-    nvm_queue_t* sq = &queues[id + 1];
+    nvm_queue_t* sq = &queues[id];  // convenience pointer
 
-//    size_t vaddr_offset = id * (data_ptr->range_size / num);
+    bool prepared = false;
 
-    //uint64_t virt_addr = ((uint64_t) data_ptr->virt_addr) + page_size * id;
-    uint64_t bus_addr = bus_addr_mps(page_size * id, page_size, data_ptr->bus_addr);
-
+    // Enqueue commands
     struct command* cmd;
-    while ((cmd = sq_enqueue(sq)) == NULL);
+    while ((cmd = sq_enqueue(sq)) != NULL)
+    {
+        if (prepare_read_cmd(cmd, blk_size, page_size, ns_id, 0, 1, NULL, NULL, buffer->bus_addr) == 0)
+        {
+            prepared = true;
+        }
+    }
 
-    prepare_read_cmd(cmd, blk_size, page_size, ns_id, 0, 1, NULL, NULL, &bus_addr);
-
-    sq_submit(sq);
+    if (prepared)
+    {
+        sq_submit(sq);
+    }
 }
 
 
 __host__ static
-int launch_kernel(const nvm_ctrl_t* ctrl, nvm_queue_t* queues, buffer_t* data, int n_threads, uint32_t ns_id)
+int launch_kernel(const nvm_ctrl_t* ctrl, nvm_queue_t* queues, cudaStream_t* streams, size_t n_tasks, buffer_t* buffer, uint32_t ns_id, size_t cmds_per_task)
 {
     cudaError_t err;
+    nvm_queue_t* dev_queues = NULL;
+    size_t* n_reqs = NULL;
+    buffer_t* dev_buffer = NULL;
+    int status = 0;
+    pthread_t thread;
+    struct consumer_data consumer_data;
 
-    cudaStream_t stream;
-    err = cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+    err = cudaMalloc(&dev_queues, sizeof(nvm_queue_t) * n_tasks);
     if (err != cudaSuccess)
     {
-        fprintf(stderr, "Failed to create CUDA stream: %s\n", cudaGetErrorString(err));
-        return ENOSPC;
+        fprintf(stderr, "Failed to allocate descriptor memory on device: %s\n", cudaGetErrorString(err));
+        status = ENOMEM;
+        goto exit;
     }
 
-    nvm_queue_t* dev_queues;
-    err = cudaMalloc(&dev_queues, sizeof(nvm_queue_t) * (n_threads + 1));
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to allocate device memory: %s\n", cudaGetErrorString(err));
-        cudaStreamDestroy(stream);
-        return ENOMEM;
-    }
-
-    buffer_t* dev_data;
-    err = cudaMalloc(&dev_data, sizeof(buffer_t) + sizeof(uint64_t) * data->n_addrs);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to allocate device memory: %s\n", cudaGetErrorString(err));
-        cudaStreamDestroy(stream);
-        cudaFree(dev_queues);
-        return ENOMEM;
-    }
-
-    err = cudaMemcpy(dev_data, data, sizeof(buffer_t) + sizeof(uint64_t) * data->n_addrs, cudaMemcpyHostToDevice);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to copy descriptor to device: %s\n", cudaGetErrorString(err));
-        cudaStreamDestroy(stream);
-        cudaFree(dev_queues);
-        cudaFree(dev_data);
-        return EIO;
-    }
-
-    err = cudaMemcpy(dev_queues, queues, sizeof(nvm_queue_t) * (n_threads + 1), cudaMemcpyHostToDevice);
+    err = cudaMemcpy(dev_queues, &queues[1], sizeof(nvm_queue_t) * n_tasks, cudaMemcpyHostToDevice);
     if (err != cudaSuccess)
     {
         fprintf(stderr, "Failed to copy queue descriptors to device: %s\n", cudaGetErrorString(err));
-        cudaStreamDestroy(stream);
-        cudaFree(dev_queues);
-        cudaFree(dev_data);
-        return EIO;
+        status = EIO;
+        goto exit;
     }
 
-    // TODO: Use MSI-X interrupts to do something meaningful
-
-    // Start kernels
-    poll_kernel<<<1, 1>>>(dev_queues, n_threads); 
-
-    // TODO: record event before and after
-
-    work_kernel<<<1, n_threads, 0, stream>>>(dev_queues, dev_data, 512, ctrl->page_size, ns_id);
-
-    err = cudaStreamSynchronize(stream);
+    err = cudaHostAlloc(&n_reqs, sizeof(size_t) * (n_tasks + 1), cudaHostAllocDefault);
     if (err != cudaSuccess)
     {
-        fprintf(stderr, "Failed to synchronize CUDA stream: %s\n", cudaGetErrorString(err));
+        fprintf(stderr, "Failed to allocate request counter: %s\n", cudaGetErrorString(err));
+        status = ENOMEM;
+        goto exit;
+    }
+    memset(n_reqs, 0, sizeof(size_t) * (n_tasks + 1));
+
+    err = cudaMalloc(&dev_buffer, sizeof(buffer_t) + sizeof(uint64_t) * buffer->n_addrs);
+    if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to allocate descriptor memory on device: %s\n", cudaGetErrorString(err));
+        status = ENOMEM;
+        goto exit;
     }
 
+    // Start dequeuer thread
+    consumer_data.queues = queues;
+    consumer_data.n_reqs = n_reqs;
+    consumer_data.all_complete = false;
+
+    status = pthread_create(&thread, NULL, (void* (*)(void*)) consumer, &consumer_data);
+    if (status != 0)
+    {
+        fprintf(stderr, "Failed to create thread: %s\n", strerror(status));
+        goto exit;
+    }
+
+    // Queue kernels on their respective streams
+    fprintf(stderr, "Running %zu kernel streams each sending %zu commands...\n", n_tasks, cmds_per_task);
+    while (!consumer_data.all_complete)
+    {
+        bool all_complete = true;
+
+        for (size_t task = 0; task < n_tasks; ++task)
+        {
+            nvm_queue_t* host_queue = &queues[task + 1];
+            unsigned char* dev_queue = (unsigned char*) &dev_queues[task];
+            cudaStream_t stream = streams[task];
+            size_t* requests = &n_reqs[task + 1];
+
+            // Check if stream is complete
+            if (*requests >= cmds_per_task)
+            {
+                continue;
+            }
+
+            all_complete = false;
+
+            // Update the queue descriptor for the GPU thread so it is able to enqueue more commands
+            uint32_t head = host_queue->head;
+            err = cudaMemcpyAsync(dev_queue + offsetof(nvm_queue_t, head), &head, sizeof(uint32_t), cudaMemcpyHostToDevice, stream);
+            if (err != cudaSuccess)
+            {
+                fprintf(stderr, "Failed to copy head pointer (%zu): %s\n", task, cudaGetErrorString(err));
+                all_complete = true;
+                break;
+            }
+
+            // Start a kernel on the stream
+            work_kernel<<<1, n_tasks, 0, stream>>>(dev_buffer, dev_queues, 512, ctrl->page_size, ns_id);
+
+            // Read tail pointer and update queue descriptor for the CPU thread
+            uint32_t tail;
+            err = cudaMemcpyAsync(&tail, dev_queue + offsetof(nvm_queue_t, tail), sizeof(uint32_t), cudaMemcpyDeviceToHost, stream);
+            if (err != cudaSuccess)
+            {
+                fprintf(stderr, "Failed to copy tail pointer (%zu): %s\n", task, cudaGetErrorString(err));
+                all_complete = true;
+                break;
+            }
+            host_queue->tail = tail;
+        }
+
+        consumer_data.all_complete = all_complete;
+    }
+
+    // Wait for streams to finish
+    fprintf(stderr, "Waiting for kernels...\n");
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess)
     {
         fprintf(stderr, "Failed to synchronize device: %s\n", cudaGetErrorString(err));
     }
 
-    uint32_t result = 0xcafebabe;
-    cudaMemcpy(&result, data->virt_addr, sizeof(uint32_t), cudaMemcpyDeviceToHost);
-    fprintf(stderr, "%x\n", result);
+    // Wait for completion consumer to finish
+    status = pthread_join(thread, NULL);
+    if (status != 0)
+    {
+        fprintf(stderr, "Failed to join thread: %s\n", strerror(status));
+    }
 
-    cudaStreamDestroy(stream);
+    fprintf(stderr, "%zu kernels sent %zu commands\n", n_tasks, n_reqs[0]);
+
+exit:
+    //cudaFree(queue_heads);
+    cudaFreeHost(n_reqs);
     cudaFree(dev_queues);
-    cudaFree(dev_data);
+    cudaFree(dev_buffer);
+    return status;
+}
 
-    return 0;
+
+__host__ static
+void remove_tasks(nvm_queue_t* queues, cudaStream_t* streams, size_t n_tasks)
+{
+    cudaError_t err;
+
+    for (size_t task = 0; task < n_tasks; ++task)
+    {
+        err = cudaStreamDestroy(streams[task]);
+        if (err != cudaSuccess)
+        {
+            fprintf(stderr, "Failed to destroy stream: %s\n", cudaGetErrorString(err));
+        }
+
+        // TODO: Submit delete submission queue
+    }
 }
 
 
 __host__ static 
-int create_submission_queues(nvm_ctrl_t* ctrl, buffer_t* queue_mem, nvm_queue_t* queue_descs, int n_threads, void* reg_ptr)
+size_t create_tasks(nvm_ctrl_t* ctrl, buffer_t* queue_memory, nvm_queue_t* queues, cudaStream_t* streams, size_t n_tasks, void* reg_ptr)
 {
-    uint64_t virt_addr;
-    uint64_t bus_addr;
-    int err;
-    int i;
+    cudaError_t err;
+    size_t task;
 
-    const nvm_queue_t* cq = &queue_descs[0];
-
-    // Create submission queues
-    for (i = 1; i <= n_threads; ++i)
+    const nvm_queue_t* cq = &queues[0];
+    for (task = 0; task < n_tasks; ++task)
     {
-        nvm_queue_t* sq = &queue_descs[i];
+        cudaStream_t* stream = &streams[task];
+        nvm_queue_t* sq = &queues[task + 1];
 
-        bus_addr = bus_addr_mps(ctrl->page_size * i, queue_mem->page_size, queue_mem->bus_addr);
-        virt_addr = ((uint64_t) queue_mem->virt_addr) + ctrl->page_size * i;
-
-        err = nvm_create_sq(ctrl, cq, sq, i, (void*) virt_addr, bus_addr, reg_ptr);
-        if (err != 0)
+        err = cudaStreamCreateWithFlags(stream, cudaStreamNonBlocking);
+        if (err != cudaSuccess)
         {
-            fprintf(stderr, "Failed to create submission queue %d of %d: %s\n", i + 1, n_threads, strerror(err));
-            return i - 1;
+            fprintf(stderr, "Failed to create stream: %s\n", cudaGetErrorString(err));
+            return task - 1;
+        }
+
+        uint64_t bus_addr = queue_memory->bus_addr[task]; // FIXME: use same calculation as in pin_memory()
+        uint64_t virt_addr = ((uint64_t) queue_memory->virt_addr) + ctrl->page_size * task;
+
+        int status = nvm_create_sq(ctrl, cq, sq, task + 1, (void*) virt_addr, bus_addr, reg_ptr);
+        if (status != 0)
+        {
+            fprintf(stderr, "Failed to create submission queue %zu of %zu: %s\n", task + 1, n_tasks, strerror(status));
+            cudaStreamDestroy(*stream);
+            return task - 1;
         }
     }
 
-    return i - 1;
+    return task;
 }
 
 
 extern "C" __host__
-int cuda_workload(int ioctl_fd, nvm_ctrl_t* ctrl, int dev, uint32_t ns_id, void* io_mem, size_t io_size)
+int cuda_workload(int ioctl_fd, nvm_ctrl_t* ctrl, int dev, uint32_t ns_id, void* io_mem, size_t io_size, size_t n_tasks, size_t n_cmds)
 {
-    int n_threads = 4;
+    size_t created;
     int status;
     buffer_t* queue_memory = NULL;
+    buffer_t* cq_memory = NULL;
     buffer_t* data_buffer = NULL;
-    nvm_queue_t* queue_descriptors = NULL;
+    nvm_queue_t* queues = NULL;
+    void* reg_ptr = NULL;
+    cudaStream_t* streams = NULL;
 
     // Set CUDA device
     cudaError_t err = cudaSetDevice(dev);
@@ -251,7 +344,6 @@ int cuda_workload(int ioctl_fd, nvm_ctrl_t* ctrl, int dev, uint32_t ns_id, void*
     }
 
     // Get device pointer to mapped IO memory
-    void* reg_ptr;
     err = cudaHostGetDevicePointer(&reg_ptr, io_mem, 0);
     if (err != cudaSuccess)
     {
@@ -261,71 +353,89 @@ int cuda_workload(int ioctl_fd, nvm_ctrl_t* ctrl, int dev, uint32_t ns_id, void*
     }
 
     // Allocate queue memory
-    queue_memory = get_buffer(ioctl_fd, dev, ctrl->page_size * (n_threads + 1), ctrl->page_size);
+    queue_memory = get_buffer(ioctl_fd, dev, ctrl->page_size * n_tasks, ctrl->page_size);
     if (queue_memory == NULL)
     {
         status = ENOMEM;
         goto unregister;
     }
-    
+
+    cq_memory = get_buffer(ioctl_fd, -1, ctrl->page_size, ctrl->page_size);
+    if (cq_memory == NULL)
+    {
+        status = ENOMEM;
+        goto free_memory;
+    }
+    memset(cq_memory->virt_addr, 0, cq_memory->range_size);
+
     // Zero out queue memory
     err = cudaMemset(queue_memory->virt_addr, 0, queue_memory->range_size);
     if (err != cudaSuccess)
     {
         fprintf(stderr, "Failed to set device memory: %s\n", cudaGetErrorString(err));
         status = EIO;
-        goto free_queue_memory;
+        goto free_memory;
+    }
+
+    // Allocate task memory
+    err = cudaHostAlloc(&streams, sizeof(cudaStream_t) * n_tasks, cudaHostAllocDefault);
+    if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to allocate stream descriptors: %s\n", cudaGetErrorString(err));
+        status = ENOMEM;
+        goto free_memory;
     }
 
     // Allocate submission queue descriptors
-    err = cudaHostAlloc(&queue_descriptors, sizeof(nvm_queue_t) * (n_threads + 1), cudaHostAllocDefault);
+    err = cudaHostAlloc(&queues, sizeof(nvm_queue_t) * (n_tasks + 1), cudaHostAllocDefault);
     if (err != cudaSuccess)
     {
         fprintf(stderr, "Failed to allocate handle memory: %s\n", cudaGetErrorString(err));
         status = ENOMEM;
-        goto free_queue_memory;
+        goto free_memory;
     }
 
     // Allocate data buffer
-    data_buffer = get_buffer(ioctl_fd, dev, 0x20000, ctrl->page_size);
+    data_buffer = get_buffer(ioctl_fd, dev, ctrl->page_size, ctrl->page_size); 
     if (data_buffer == NULL)
     {
         fprintf(stderr, "Failed to allocate data buffer\n");
         status = ENOMEM;
-        goto free_descriptors;
+        goto free_memory;
     }
 
-    status = nvm_create_cq(ctrl, queue_descriptors, 1, queue_memory->virt_addr, queue_memory->bus_addr[0], reg_ptr);
+    //cudaMemAdvice(data_buffer->virt_addr, dat_buffer->range_size, cuda
+
+    // Create completion queue
+    status = nvm_create_cq(ctrl, queues, 1, cq_memory->virt_addr, cq_memory->bus_addr[0], ctrl->reg_ptr);
     if (status != 0)
     {
         fprintf(stderr, "Failed to create IO completion queue: %s\n", strerror(status));
-        goto free_descriptors;
+        goto free_memory;
     }
 
-    // Create IO queue pairs
-    if (create_submission_queues(ctrl, queue_memory, queue_descriptors, n_threads, reg_ptr) != n_threads)
+    // Create tasks
+    created = create_tasks(ctrl, queue_memory, queues, streams, n_tasks, reg_ptr);
+    if (created != n_tasks)
     {
-        fprintf(stderr, "Failed to create IO submission queues\n");
-        status = ENOMEM;
-        goto free_data_buffer;
+        fprintf(stderr, "Failed to create tasks\n");
+        status = EIO;
+        goto free_tasks;
     }
 
     // Do some work
-    status = launch_kernel(ctrl, queue_descriptors, data_buffer, n_threads, ns_id);
+    status = launch_kernel(ctrl, queues, streams, n_tasks, data_buffer, ns_id, n_cmds);
 
-    // Clean up and exit
+    // TODO: send abort command
 
-    // TODO delete_sqs:
-    // TODO delete_cq
+free_tasks:
+    remove_tasks(queues, streams, created);
 
-free_data_buffer:
+free_memory:
     put_buffer(ioctl_fd, data_buffer);
-
-free_descriptors:
-    cudaFreeHost(queue_descriptors);
-
-free_queue_memory:
+    cudaFreeHost(queues);
     put_buffer(ioctl_fd, queue_memory);
+    put_buffer(ioctl_fd, cq_memory);
 
 unregister:
     cudaHostUnregister(io_mem);

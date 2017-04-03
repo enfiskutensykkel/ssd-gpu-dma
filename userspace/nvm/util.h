@@ -57,12 +57,4 @@ uint32_t b2log(uint32_t n)
     ((volatile uint##bits##_t *) (((volatile unsigned char*) ((volatile void*) (p))) + (offs)))
 
 
-/* 
- * Convenience function for calculating offsets within a page larger than MPS,
- * for example when using GPU pages of 64 KB and MPS of 4 KB.
- */
-#define bus_addr_mps(offset, page_size, bus_addrs)   \
-    ( (bus_addrs)[ (offset) / (page_size) ] + ((offset) % (page_size)) )
-
-
 #endif
