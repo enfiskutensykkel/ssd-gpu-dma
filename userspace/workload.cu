@@ -101,14 +101,9 @@ int prepare_read_cmd(struct command* cmd, uint32_t blk_size, uint32_t page_size,
 
 
 __global__ static
-void work_kernel(buffer_t* buffer, nvm_queue_t* queues, size_t blk_size, size_t page_size, uint32_t ns_id)
+void work_kernel(size_t task_id, buffer_t* buffer, nvm_queue_t* queues, size_t blk_size, size_t page_size, uint32_t ns_id)
 {
-    // Find position of thread in grid
-    int block = gridDim.x * blockIdx.y + blockIdx.x;
-    int thread = blockDim.x * threadIdx.y + threadIdx.x;
-    int id = blockDim.x * blockDim.y * block + thread;  // maybe this is wrong?
-
-    nvm_queue_t* sq = &queues[id];  // convenience pointer
+    nvm_queue_t* sq = &queues[task_id]; 
 
     bool prepared = false;
 
@@ -186,7 +181,7 @@ int launch_kernel(const nvm_ctrl_t* ctrl, nvm_queue_t* queues, cudaStream_t* str
     }
 
     // Queue kernels on their respective streams
-    fprintf(stderr, "Running %zu kernel streams each sending %zu commands...\n", n_tasks, cmds_per_task);
+    fprintf(stderr, "Running %zu kernels each sending %zu commands...\n", n_tasks, cmds_per_task);
     while (!consumer_data.all_complete)
     {
         bool all_complete = true;
@@ -217,18 +212,7 @@ int launch_kernel(const nvm_ctrl_t* ctrl, nvm_queue_t* queues, cudaStream_t* str
             }
 
             // Start a kernel on the stream
-            work_kernel<<<1, n_tasks, 0, stream>>>(dev_buffer, dev_queues, 512, ctrl->page_size, ns_id);
-
-            // Read tail pointer and update queue descriptor for the CPU thread
-            uint32_t tail;
-            err = cudaMemcpyAsync(&tail, dev_queue + offsetof(nvm_queue_t, tail), sizeof(uint32_t), cudaMemcpyDeviceToHost, stream);
-            if (err != cudaSuccess)
-            {
-                fprintf(stderr, "Failed to copy tail pointer (%zu): %s\n", task, cudaGetErrorString(err));
-                all_complete = true;
-                break;
-            }
-            host_queue->tail = tail;
+            work_kernel<<<1, 1, 0, stream>>>(task, dev_buffer, dev_queues, 512, ctrl->page_size, ns_id);
         }
 
         consumer_data.all_complete = all_complete;
