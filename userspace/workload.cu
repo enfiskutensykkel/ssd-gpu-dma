@@ -55,30 +55,39 @@ int prepare_read_cmd(struct command* cmd, uint32_t blk_size, uint32_t page_size,
 }
 
 
-__global__ 
-void work_kernel(buffer_t* buffer, nvm_queue_t* queues, size_t blk_size, size_t page_size, uint32_t ns_id, size_t n_cmds)
+__device__ inline
+unsigned thread_pos()
 {
     //int n_threads = gridDim.x * gridDim.y * blockDim.x * blockDim.y;
-    int block_id = gridDim.x * blockIdx.y + blockIdx.x;
-    int thread_id = blockDim.x * threadIdx.y + threadIdx.x;
-    int thread_pos = blockDim.x * blockDim.y * block_id + thread_id;
+    unsigned block_id = gridDim.x * blockIdx.y + blockIdx.x;
+    unsigned thread_id = blockDim.x * threadIdx.y + threadIdx.x;
+    unsigned thread_pos = blockDim.x * blockDim.y * block_id + thread_id;
 
-    nvm_queue_t* sq = &queues[2 * thread_pos + 1]; 
-    nvm_queue_t* cq = &queues[2 * thread_pos];
-    size_t cpld_cmds = 0;
+    return thread_pos;
+}
 
-    size_t transfer_pages = 1;
-    uint64_t* bus_addr = &buffer->bus_addr[thread_pos * transfer_pages];
+
+__global__ 
+void produce_kernel(buffer_t* buffer, nvm_queue_t* queues, size_t blk_size, size_t page_size, uint32_t ns_id, unsigned n_cmds)
+{
+    unsigned thread_id = thread_pos();
+
+    nvm_queue_t* sq = &queues[2 * thread_id + 1]; 
+    unsigned enqueued_cmds = 0;
+
+    uint32_t transfer_pages = 1;
+    uint64_t* bus_addr = &buffer->bus_addr[thread_id * transfer_pages];
     
-    while (cpld_cmds < n_cmds)
+    // Produce commands
+    while (enqueued_cmds < n_cmds)
     {
-        // Produce commands
         bool prepared = false;
         struct command* cmd;
         while ((cmd = sq_enqueue(sq)) != NULL)
         {
-            if (prepare_read_cmd(cmd, blk_size, page_size, ns_id, 0, 1, NULL, NULL, bus_addr) == 0)
+            if (prepare_read_cmd(cmd, blk_size, page_size, ns_id, 0, 2, NULL, NULL, bus_addr) == 0)
             {
+                ++enqueued_cmds;
                 prepared = true;
             }
         }
@@ -88,18 +97,32 @@ void work_kernel(buffer_t* buffer, nvm_queue_t* queues, size_t blk_size, size_t 
         {
             sq_submit(sq);
         }
+    }
+}
 
-        // Consume completions
+
+__global__
+void consume_kernel(nvm_queue_t* queues, unsigned n_cpls)
+{
+    unsigned thread_id = thread_pos();
+
+    nvm_queue_t* cq = &queues[2 * thread_id];
+    nvm_queue_t* sq = &queues[2 * thread_id + 1]; 
+    unsigned dequeued_cpls = 0;
+
+    // Consume completions
+    while (dequeued_cpls < n_cpls)
+    {
         struct completion* cpl;
         while ((cpl = cq_dequeue(cq)) != NULL)
         {
             uint16_t sq_hd = *CPL_SQHD(cpl);
 
             sq->head = sq_hd;
-            ++cpld_cmds;
+            ++dequeued_cpls;
 
             // Only update doorbell if head changes
-            if (cpld_cmds % sq->max_entries == sq_hd)
+            if (dequeued_cpls % sq->max_entries == sq_hd)
             {
                 cq_update(cq);
             }
@@ -108,12 +131,15 @@ void work_kernel(buffer_t* buffer, nvm_queue_t* queues, size_t blk_size, size_t 
 }
 
 
+
 __host__ 
-int launch_kernel(const nvm_ctrl_t* ctrl, nvm_queue_t* queues, size_t n_tasks, buffer_t* buffer, uint32_t ns_id, size_t cmds_per_task)
+int launch_kernel(const nvm_ctrl_t* ctrl, nvm_queue_t* queues, size_t n_tasks, buffer_t* buffer, uint32_t ns_id, unsigned cmds_per_task)
 {
     cudaError_t err;
     nvm_queue_t* dev_queues = NULL;
     buffer_t* dev_buffer = NULL;
+    cudaStream_t producer_stream;
+    cudaStream_t consumer_stream;
     int status = 0;
 
     err = cudaMalloc(&dev_queues, sizeof(nvm_queue_t) * n_tasks * 2);
@@ -148,9 +174,28 @@ int launch_kernel(const nvm_ctrl_t* ctrl, nvm_queue_t* queues, size_t n_tasks, b
         goto exit;
     }
 
+    err = cudaStreamCreateWithFlags(&producer_stream, cudaStreamNonBlocking);
+    if (err != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to create stream: %s\n", cudaGetErrorString(err));
+        status = EIO;
+        goto exit;
+    }
+
+    err = cudaStreamCreateWithFlags(&consumer_stream, cudaStreamNonBlocking);
+    if (err != cudaSuccess)
+    {
+        cudaStreamDestroy(producer_stream);
+        fprintf(stderr, "Failed to create stream: %s\n", cudaGetErrorString(err));
+        status = EIO;
+        goto exit;
+    }
+
     // Run GPU threads
-    fprintf(stderr, "Running %zu threads each sending %zu commands...\n", n_tasks, cmds_per_task);
-    work_kernel<<<1, n_tasks>>>(dev_buffer, dev_queues, 512, ctrl->page_size, ns_id, cmds_per_task);
+    consume_kernel<<<1, n_tasks, 0, consumer_stream>>>(dev_queues, cmds_per_task);
+
+    fprintf(stderr, "Running %zu threads each sending %u commands...\n", n_tasks, cmds_per_task);
+    produce_kernel<<<1, n_tasks, 0, producer_stream>>>(dev_buffer, dev_queues, 512, ctrl->page_size, ns_id, cmds_per_task);
 
     // Wait for streams to finish
     fprintf(stderr, "Waiting for kernel completion...\n");
@@ -159,6 +204,9 @@ int launch_kernel(const nvm_ctrl_t* ctrl, nvm_queue_t* queues, size_t n_tasks, b
     {
         fprintf(stderr, "Failed to synchronize device: %s\n", cudaGetErrorString(err));
     }
+
+    cudaStreamDestroy(producer_stream);
+    cudaStreamDestroy(consumer_stream);
 
     fprintf(stderr, "Done\n");
 
@@ -218,7 +266,7 @@ size_t create_tasks(nvm_ctrl_t* ctrl, buffer_t* queue_memory, nvm_queue_t* queue
 
 
 extern "C" __host__
-int cuda_workload(int ioctl_fd, nvm_ctrl_t* ctrl, int dev, uint32_t ns_id, void* io_mem, size_t io_size, size_t n_tasks, size_t n_cmds)
+int cuda_workload(int ioctl_fd, nvm_ctrl_t* ctrl, int dev, uint32_t ns_id, void* io_mem, size_t io_size, size_t n_tasks, unsigned n_cmds)
 {
     size_t created;
     int status;
@@ -320,7 +368,7 @@ unregister:
     cudaHostUnregister(io_mem);
 
 exit:
-    cudaDeviceReset();
+    //cudaDeviceReset();
     return status;
 }
 
