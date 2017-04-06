@@ -214,7 +214,7 @@ int main(int argc, char** argv)
     }
 
     // Do CUDA workload to demonstrate queues hosted on GPU memory
-    cuda_workload(ioctl_fd, &ctrl, cuda_device, 1, (void*) reg_ptr, 0x2000, ctrl.max_queues, 0x8000);
+    cuda_workload(ioctl_fd, &ctrl, cuda_device, 1, (void*) reg_ptr, 0x2000, 16, 2048);
 
     // Clean up resources
     nvm_free(&ctrl, ioctl_fd);

@@ -58,6 +58,7 @@ userspace/%.c.o: userspace/%.c $(HDR_FILES)
 userspace/%.cu.o: userspace/%.cu $(HDR_FILES)
 	$(CC) -std=c++11 -ccbin $(CCBIN) -Xcompiler "$(CFLAGS) $(DEFINES)" $(INCLUDE) -o $@ $< -c -O2 -dc --gpu-architecture=compute_50 --gpu-code=compute_50,sm_50 
 
+
 # Hack to mix userspace and kernel module stuff together in same makefile
 %:
 	$(MAKE) -C $(KDIR) M=$(PWD) $@
