@@ -11,6 +11,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <getopt.h>
+#include <sisci_types.h>
+#include <sisci_api.h>
 
 
 //extern int cuda_workload(int ioctl_fd, const nvm_ctrl_t* ctrl, int dev, uint32_t ns, void* reg_ptr, size_t reg_len, size_t n_threads, unsigned n_cmds);
@@ -100,10 +102,10 @@ int main(int argc, char** argv)
     int opt;
     int idx;
     int err;
+    sci_error_t scierr;
 
     int identify = 0;
     uint64_t bdf = 0;
-    int cuda_device = 0;
 
     while ((opt = getopt_long(argc, argv, ":hc:g:i", opts, &idx)) != -1)
     {
@@ -155,55 +157,40 @@ int main(int argc, char** argv)
         return 'c';
     }
 
-    // Set up controller's config space as necessary
-    err = pci_set_config(domain, bus, slot, fun);
-    if (err != 0)
+    int magic = 0xdeadbeef;
+
+    SCIInitialize(0, &scierr);
+
+    sci_desc_t sd;
+    SCIOpen(&sd, 0, &scierr);
+
+    sci_remote_segment_t segment;
+
+    SCIConnectDeviceBar(sd, &segment, magic, 0, 0, 0, &scierr);
+    if (scierr != SCI_ERR_OK)
     {
-        fprintf(stderr, "Failed to access device config space %04x:%02x:%02x.%x\n",
-                domain, bus, slot, fun);
-        return 2;
+        fprintf(stderr, "Failed to connect to device BAR\n");
+        return 3;
     }
 
-    // Open communication channel with kernel module
-    int ioctl_fd = open(CUNVME_PATH, O_SYNC | O_RDONLY);
-    if (ioctl_fd < 0)
+    sci_map_t map;
+    volatile void* reg_ptr = SCIMapRemoteSegment(segment, &map, 0, 0x2000, NULL, 0, &scierr);
+    if (err != SCI_ERR_OK)
     {
-        fprintf(stderr, "Failed to open ioctl file: %s\n", strerror(errno));
-        return 1;
+        fprintf(stderr, "Failed to map BAR segment\n");
+        return 3;
     }
-
-    // Get descriptor to device's BAR0
-    int reg_fd = pci_open_bar(domain, bus, slot, fun, 0);
-    if (reg_fd < 0)
-    {
-        fprintf(stderr, "Failed to access device BAR resource file\n");
-        close(ioctl_fd);
-        return 2;
-    }
-
-    // Memory map device's BAR0
-    volatile void* reg_ptr = mmap(NULL, 0x2000, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FILE, reg_fd, 0);
-    if (reg_ptr == NULL)
-    {
-        fprintf(stderr, "Failed to mmap BAR resource file: %s\n", strerror(errno));
-        close(reg_fd);
-        close(ioctl_fd);
-        return 2;
-    }
-
-    nvm_ctrl_t ctrl;
 
     // Reset and initialize controller
+    nvm_ctrl_t ctrl;
+
     fprintf(stderr, "Resetting controller %04x:%02x:%02x.%x...\n",
             domain, bus, slot, fun);
 
-    err = nvm_init(&ctrl, ioctl_fd, reg_ptr);
+    err = nvm_init(&ctrl, -1, reg_ptr);
     if (err != 0)
     {
         fprintf(stderr, "Failed to reset and initialize device: %s\n", strerror(err));
-        munmap((void*) reg_ptr, 0x2000);
-        close(reg_fd);
-        close(ioctl_fd);
         return 2;
     }
     fprintf(stderr, "Controller initialized.\n");
@@ -217,10 +204,7 @@ int main(int argc, char** argv)
     //cuda_workload(ioctl_fd, &ctrl, cuda_device, 1, (void*) reg_ptr, 0x2000, 16, 1);
 
     // Clean up resources
-    nvm_free(&ctrl, ioctl_fd);
-    munmap((void*) reg_ptr, 0x2000);
-    close(reg_fd);
-    close(ioctl_fd);
+    nvm_free(&ctrl, -1);
 
     return 0;
 }
