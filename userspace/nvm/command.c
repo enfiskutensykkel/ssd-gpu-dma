@@ -1,13 +1,11 @@
-#include <cuda.h>
 #include "command.h"
 #include "util.h"
 #include "memory.h"
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 #include <errno.h>
 
 
-extern "C" __host__ __device__
 uint64_t build_prp_list(size_t page_size, void* prp_list, size_t n_prps, const uint64_t* list_addrs, const uint64_t* prp_addrs)
 {
     uint64_t* prp_list_ptr = (uint64_t*) prp_list;
@@ -39,7 +37,6 @@ uint64_t build_prp_list(size_t page_size, void* prp_list, size_t n_prps, const u
 }
 
 
-extern "C" __host__ __device__
 void cmd_data_ptr(struct command* cmd, uint64_t prp1, uint64_t prp2)
 {
     cmd->dword[0] &= ~( (0x03 << 14) | (0x03 << 8) );
@@ -51,7 +48,6 @@ void cmd_data_ptr(struct command* cmd, uint64_t prp1, uint64_t prp2)
 }
 
 
-extern "C" __host__ __device__
 void cmd_header(struct command* cmd, uint8_t opcode, uint32_t ns_id)
 {
     cmd->dword[0] &= 0xffff0000;

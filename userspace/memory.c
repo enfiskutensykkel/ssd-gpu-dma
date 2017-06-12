@@ -1,4 +1,3 @@
-#include <cuda.h>
 #include <cunvme_ioctl.h>
 #include "memory.h"
 #include <stddef.h>
@@ -105,34 +104,10 @@ static long get_page_size(int dev)
 
 static int get_cuda_buffer(buffer_t* handle)
 {
-    cudaError_t err;
-
-    err = cudaSetDevice(handle->device);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to set CUDA device: %s\n", cudaGetErrorString(err));
-        return EINVAL;
-    }
-
-    err = cudaMalloc(&handle->virt_addr, handle->range_size);
-    if (err != cudaSuccess)
-    {
-        fprintf(stderr, "Failed to allocate device memory: %s\n", cudaGetErrorString(err));
-        return ENOMEM;
-    }
-
-    unsigned int flag = 1;
-    CUresult result = cuPointerSetAttribute(&flag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, (CUdeviceptr) handle->virt_addr);
-    if (result != CUDA_SUCCESS)
-    {
-        fprintf(stderr, "Failed to set memory synchronization option\n");
-    }
-
-    return 0;
+    return ENOMEM;
 }
 
 
-extern "C"
 buffer_t* get_buffer(int fd, int dev, size_t buffer_size, size_t nvm_page_size)
 {
     int err;
@@ -183,7 +158,6 @@ buffer_t* get_buffer(int fd, int dev, size_t buffer_size, size_t nvm_page_size)
     {
         if (handle->device >= 0)
         {
-            cudaFree(handle->virt_addr);
         }
         else
         {
@@ -199,7 +173,6 @@ buffer_t* get_buffer(int fd, int dev, size_t buffer_size, size_t nvm_page_size)
 }
 
 
-extern "C"
 int get_page(int fd, int dev, page_t* page)
 {
     long page_size = get_page_size(dev);
@@ -226,7 +199,6 @@ int get_page(int fd, int dev, page_t* page)
 }
 
 
-extern "C"
 void put_buffer(int fd, buffer_t* handle)
 {
     if (handle != NULL)
@@ -235,7 +207,6 @@ void put_buffer(int fd, buffer_t* handle)
         
         if (handle->device >= 0)
         {
-            cudaFree(handle->virt_addr);
         }
         else
         {
@@ -247,7 +218,6 @@ void put_buffer(int fd, buffer_t* handle)
 }
 
 
-extern "C"
 void put_page(int fd, page_t* page)
 {
     if (page != NULL)
@@ -257,7 +227,6 @@ void put_page(int fd, page_t* page)
 
         if (page->device >= 0)
         {
-            cudaFree(page->virt_addr);
         }
         else
         {

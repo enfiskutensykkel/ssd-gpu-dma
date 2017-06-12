@@ -1,18 +1,16 @@
-#include <cuda.h>
 #include "types.h"
 #include "queue.h"
 #include "command.h"
 #include "util.h"
-#include <cstddef>
-#include <cstdint>
-#include <ctime>
+#include <stddef.h>
+#include <stdint.h>
+#include <time.h>
 #include <errno.h>
 
 
 #define PHASE(p)    _RB(*CPL_STATUS(p),  0,  0) // Offset to phase tag bit
 
 
-extern "C" __host__ __device__
 struct command* sq_enqueue(nvm_queue_t* sq)
 {
     // Check the capacity
@@ -39,7 +37,6 @@ struct command* sq_enqueue(nvm_queue_t* sq)
 }
 
 
-extern "C" __host__ __device__
 struct completion* cq_poll(const nvm_queue_t* cq)
 {
     struct completion* ptr = 
@@ -55,7 +52,6 @@ struct completion* cq_poll(const nvm_queue_t* cq)
 }
 
 
-extern "C" __host__ __device__
 struct completion* cq_dequeue(nvm_queue_t* cq)
 {
     struct completion* ptr = cq_poll(cq);
@@ -75,25 +71,23 @@ struct completion* cq_dequeue(nvm_queue_t* cq)
 
 
 /* Delay execution by one millisecond */
-__host__
-static inline void delay(uint64_t& remaining_nsecs)
+static inline void delay(uint64_t* remaining_nsecs)
 {
-    if (remaining_nsecs == 0)
+    if (*remaining_nsecs == 0)
     {
         return;
     }
 
-    timespec ts;
+    struct timespec ts;
     ts.tv_sec = 0;
-    ts.tv_nsec = _MIN(1000000UL, remaining_nsecs);
+    ts.tv_nsec = _MIN(1000000UL, *remaining_nsecs);
 
     clock_nanosleep(CLOCK_REALTIME, 0, &ts, NULL);
 
-    remaining_nsecs -= _MIN(1000000UL, remaining_nsecs);
+    *remaining_nsecs -= _MIN(1000000UL, *remaining_nsecs);
 }
 
 
-extern "C" __host__ 
 struct completion* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout)
 {
     uint64_t nsecs = timeout * 1000000UL;
@@ -101,7 +95,7 @@ struct completion* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout)
 
     while (cpl == NULL && nsecs > 0)
     {
-        delay(nsecs);
+        delay(&nsecs);
         cpl = cq_dequeue(cq);
     }
 
@@ -109,21 +103,18 @@ struct completion* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout)
 }
 
 
-extern "C" __host__ __device__
 void sq_submit(const nvm_queue_t* sq)
 {
     *((volatile uint32_t*) sq->db) = sq->tail;
 }
 
 
-extern "C" __host__ __device__
 void cq_update(const nvm_queue_t* cq)
 {
     *((volatile uint32_t*) cq->db) = cq->head;
 }
 
 
-extern "C" __host__ __device__
 int sq_update(nvm_queue_t* sq, const struct completion* cpl)
 {
     if (cpl == NULL)
