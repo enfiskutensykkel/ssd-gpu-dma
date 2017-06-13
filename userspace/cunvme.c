@@ -15,7 +15,7 @@
 #include <sisci_api.h>
 
 
-//extern int cuda_workload(int ioctl_fd, const nvm_ctrl_t* ctrl, int dev, uint32_t ns, void* reg_ptr, size_t reg_len, size_t n_threads, unsigned n_cmds);
+int workload(nvm_ctrl_t* ctrl, uint32_t ns, void* reg_ptr, size_t reg_len);
 
 
 static struct option opts[] = {
@@ -200,8 +200,11 @@ int main(int argc, char** argv)
         print_controller_info(&ctrl);
     }
 
-    // Do CUDA workload to demonstrate queues hosted on GPU memory
-    //cuda_workload(ioctl_fd, &ctrl, cuda_device, 1, (void*) reg_ptr, 0x2000, 16, 1);
+    err = workload(&ctrl, 1, (void*) reg_ptr, 0x2000);
+    if (err != 0)
+    {
+        fprintf(stderr, "Workload failed: %s\n", strerror(err));
+    }
 
     // Clean up resources
     nvm_free(&ctrl);
@@ -213,6 +216,13 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    do
+    {
+        SCIDisconnectSegment(segment, 0, &scierr);
+    }
+    while (scierr == SCI_ERR_BUSY);
+
+    SCIClose(sd, 0, &scierr);
     return 0;
 }
 
