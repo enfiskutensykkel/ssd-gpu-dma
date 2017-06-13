@@ -285,7 +285,8 @@ static void clear_queue(nvm_queue_t* queue, nvm_ctrl_t* ctrl, uint16_t no, int i
 /* Helper function to clear queue's page struct */
 static void clear_page(page_t* page)
 {
-    page->kernel_handle = -1;
+    page->id = -1;
+    page->bus_handle = 0;
     page->device = -1;
     page->virt_addr = NULL;
     page->page_size = 0;
@@ -293,7 +294,7 @@ static void clear_page(page_t* page)
 }
 
 
-int nvm_init(nvm_ctrl_t* ctrl, int fd, volatile void* register_ptr)
+int nvm_init(nvm_ctrl_t* ctrl, uint64_t dev_id, volatile void* register_ptr)
 {
     int err;
 
@@ -317,6 +318,7 @@ int nvm_init(nvm_ctrl_t* ctrl, int fd, volatile void* register_ptr)
     }
 
     // Set controller properties
+    ctrl->device_id = dev_id;
     ctrl->page_size = page_size;
     ctrl->dstrd = CAP$DSTRD(register_ptr);
     ctrl->timeout = CAP$TO(register_ptr) * 500UL;
@@ -336,28 +338,28 @@ int nvm_init(nvm_ctrl_t* ctrl, int fd, volatile void* register_ptr)
     clear_page(&ctrl->identify);
 
     // Create admin submission/completion queue pair
-    err = get_page(fd, -1, &ctrl->admin_cq_page);
+    err = get_page(-1, 10, &ctrl->admin_cq_page, dev_id);
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate queue memory: %s\n", strerror(err));
-        nvm_free(ctrl, fd);
+        nvm_free(ctrl);
         return err;
     }
 
-    err = get_page(fd, -1, &ctrl->admin_sq_page);
+    err = get_page(-1, 11, &ctrl->admin_sq_page, dev_id);
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate queue memory: %s\n", strerror(err));
-        nvm_free(ctrl, fd);
+        nvm_free(ctrl);
         return err;
     }
 
     // Allocate buffer for controller data
-    err = get_page(fd, -1, &ctrl->identify);
+    err = get_page(-1, 100, &ctrl->identify, dev_id);
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate controller identify memory: %s\n", strerror(err));
-        nvm_free(ctrl, fd);
+        nvm_free(ctrl);
         return err;
     }
 
@@ -375,7 +377,7 @@ int nvm_init(nvm_ctrl_t* ctrl, int fd, volatile void* register_ptr)
     if (err != 0)
     {
         fprintf(stderr, "Failed to submit command: %s\n", strerror(err));
-        nvm_free(ctrl, fd);
+        nvm_free(ctrl);
         return err;
     }
 
@@ -387,7 +389,7 @@ int nvm_init(nvm_ctrl_t* ctrl, int fd, volatile void* register_ptr)
     if (err != 0)
     {
         fprintf(stderr, "Failed to submit command: %s\n", strerror(err));
-        nvm_free(ctrl, fd);
+        nvm_free(ctrl);
         return err;
     }
 
@@ -395,14 +397,14 @@ int nvm_init(nvm_ctrl_t* ctrl, int fd, volatile void* register_ptr)
 }
 
 
-void nvm_free(nvm_ctrl_t* ctrl, int ioctl_fd)
+void nvm_free(nvm_ctrl_t* ctrl)
 {
     if (ctrl != NULL)
     {
         // TODO: send abort and prepare reset commands
-        put_page(ioctl_fd, &ctrl->identify);
-        put_page(ioctl_fd, &ctrl->admin_cq_page);
-        put_page(ioctl_fd, &ctrl->admin_sq_page);
+        put_page(&ctrl->identify);
+        put_page(&ctrl->admin_cq_page);
+        put_page(&ctrl->admin_sq_page);
     }
 }
 

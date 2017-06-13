@@ -157,8 +157,6 @@ int main(int argc, char** argv)
         return 'c';
     }
 
-    int magic = 0xdeadbeef;
-
     SCIInitialize(0, &scierr);
 
     sci_desc_t sd;
@@ -166,11 +164,13 @@ int main(int argc, char** argv)
 
     sci_remote_segment_t segment;
 
-    SCIConnectDeviceBar(sd, &segment, magic, 0, 0, 0, &scierr);
+    uint64_t device_id = 1ULL << 32;
+
+    SCIConnectDeviceBar(sd, &segment, device_id, 0, 0, 0, &scierr);
     if (scierr != SCI_ERR_OK)
     {
-        fprintf(stderr, "Failed to connect to device BAR\n");
-        return 3;
+        fprintf(stderr, "Failed to connect to device BAR: %x\n", scierr);
+        return 1;
     }
 
     sci_map_t map;
@@ -178,7 +178,7 @@ int main(int argc, char** argv)
     if (err != SCI_ERR_OK)
     {
         fprintf(stderr, "Failed to map BAR segment\n");
-        return 3;
+        return 1;
     }
 
     // Reset and initialize controller
@@ -187,7 +187,7 @@ int main(int argc, char** argv)
     fprintf(stderr, "Resetting controller %04x:%02x:%02x.%x...\n",
             domain, bus, slot, fun);
 
-    err = nvm_init(&ctrl, -1, reg_ptr);
+    err = nvm_init(&ctrl, device_id, reg_ptr);
     if (err != 0)
     {
         fprintf(stderr, "Failed to reset and initialize device: %s\n", strerror(err));
@@ -204,7 +204,14 @@ int main(int argc, char** argv)
     //cuda_workload(ioctl_fd, &ctrl, cuda_device, 1, (void*) reg_ptr, 0x2000, 16, 1);
 
     // Clean up resources
-    nvm_free(&ctrl, -1);
+    nvm_free(&ctrl);
+
+    SCIUnmapSegment(map, 0, &scierr);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to unmap BAR segment\n");
+        return 1;
+    }
 
     return 0;
 }

@@ -24,13 +24,13 @@ extern "C" {
  * Returns 0 on success, or an error code on failure.
  *
  */
-int nvm_init(nvm_ctrl_t* ctrl, int ioctl_fd, volatile void* register_ptr);
+int nvm_init(nvm_ctrl_t* ctrl, uint64_t device_id, volatile void* register_ptr);
 
 
 /*
  * Free allocated resources.
  */
-void nvm_free(nvm_ctrl_t* ctrl, int ioctl_fd);
+void nvm_free(nvm_ctrl_t* ctrl);
 
 
 /*

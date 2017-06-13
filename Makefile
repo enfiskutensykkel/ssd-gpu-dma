@@ -1,10 +1,10 @@
 PROJECT 		:= cunvme
-DEFINES			:= -DMAX_RAM_PAGES=64 -DMAX_GPU_PAGES=8
+DEFINES			:= 
 
 # If we're building userspace, use these variables:
 CC		:= /usr/bin/gcc
 CFLAGS		:= -Wall -Wextra -Werror=implicit-function-declaration -O2
-INCLUDE		:= -I$(CUDA_PATH)/include -Iinclude  -Iuserspace -I/opt/DIS/include -I/opt/DIS/include/dis
+INCLUDE		:= -Iinclude  -Iuserspace -I/opt/DIS/include -I/opt/DIS/include/dis
 DEFINES		+= -DCUNVME_PATH='"/proc/$(PROJECT)"'
 LDLIBS		:= -lsisci
 LDFLAGS		:= -L/opt/DIS/lib64

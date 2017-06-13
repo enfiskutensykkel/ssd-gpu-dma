@@ -56,6 +56,7 @@ typedef struct nvm_queue nvm_queue_t;
  */
 struct nvm_controller
 {
+    uint64_t        device_id;
     size_t          page_size;      // Memory page size (MPS) used by the controller
     uint8_t         dstrd;          // Doorbell stride (in encoded form)
     uint64_t        timeout;        // Controller timeout in milliseconds

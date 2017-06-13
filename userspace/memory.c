@@ -1,11 +1,10 @@
-#include <cunvme_ioctl.h>
 #include "memory.h"
+#include <sisci_types.h>
+#include <sisci_api.h>
+#include <unistd.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#include <fcntl.h>
 #include <string.h>
 #include <errno.h>
 #include <stdio.h>
@@ -14,32 +13,18 @@
 #define GPU_PAGE_SIZE   (1L << 16) // GPU bound pointers needs to be aligned to 64 KB
 
 
-static int pin_memory(int fd, buffer_t* handle, size_t num_phys_pages)   
+static sci_error_t create_dma_window(buffer_t* handle)
 {
-    struct cunvme_pin* request;
-    int reqno = handle->device >= 0 ? CUNVME_PIN_GPU : CUNVME_PIN_RAM;
     size_t i;
-   
-    request = (struct cunvme_pin*) malloc(sizeof(struct cunvme_pin) + sizeof(uint64_t) * num_phys_pages);
-    if (request == NULL)
+    sci_error_t err;
+    sci_ioaddr_t addr;
+
+    SCIMapSegmentForDevice(handle->segment, handle->bus_handle, &addr, 0, &err);
+    if (err != SCI_ERR_OK)
     {
-        fprintf(stderr, "Failed to allocate ioctl request: %s\n", strerror(errno));
-        return errno;
+        fprintf(stderr, "Failed to map for device: %x\n", err);
+        return err;
     }
-
-    request->handle = CUNVME_NO_HANDLE;
-    request->virt_addr = (unsigned long long) handle->virt_addr;
-    request->num_pages = num_phys_pages;
-
-    int err = ioctl(fd, reqno, request);
-    if (err < 0)
-    {
-        free(request);
-        fprintf(stderr, "ioctl to kernel failed: %s\n", strerror(-err));
-        return errno;
-    }
-
-    handle->kernel_handle = request->handle;
 
     // Calculate logical bus addresses
     for (i = 0; i < handle->n_addrs; ++i)
@@ -47,40 +32,13 @@ static int pin_memory(int fd, buffer_t* handle, size_t num_phys_pages)
         size_t phys_page_idx = (i * handle->unit_size) / handle->page_size;
         size_t offset_within_page = (i * handle->unit_size) % handle->page_size;
 
-        if (phys_page_idx >= ((size_t) request->num_pages))
-        {
-            break;
-        }
-
-        uint64_t logical_bus_addr = request->bus_addr[phys_page_idx] + offset_within_page;
+        uint64_t logical_bus_addr = addr + (phys_page_idx * handle->page_size) + offset_within_page;
         handle->bus_addr[i] = logical_bus_addr;
     }
 
     handle->n_addrs = i;
 
-    free(request);
-    return 0;
-}
-
-
-static int unpin_memory(int fd, long kernel_handle)
-{
-    if (kernel_handle == CUNVME_NO_HANDLE)
-    {
-        return EINVAL;
-    }
-
-    struct cunvme_unpin request;
-    request.handle = kernel_handle;
-
-    int err = ioctl(fd, CUNVME_UNPIN, &request);
-    if (err < 0)
-    {
-        fprintf(stderr, "ioctl to kernel failed: %s\n", strerror(-err));
-        return errno;
-    }
-
-    return 0;
+    return err;
 }
 
 
@@ -102,15 +60,9 @@ static long get_page_size(int dev)
 }
 
 
-static int get_cuda_buffer(buffer_t* handle)
+buffer_t* get_buffer(int dev, int id, size_t buffer_size, size_t nvm_page_size, uint64_t device_id)
 {
-    return ENOMEM;
-}
-
-
-buffer_t* get_buffer(int fd, int dev, size_t buffer_size, size_t nvm_page_size)
-{
-    int err;
+    sci_error_t err;
 
     long page_size = get_page_size(dev);
     if (page_size == -1)
@@ -119,61 +71,101 @@ buffer_t* get_buffer(int fd, int dev, size_t buffer_size, size_t nvm_page_size)
     }
 
     size_t range_size = (buffer_size + page_size - 1) & ~(page_size - 1);
-    size_t pages = range_size / page_size;
     size_t nvm_pages = range_size / nvm_page_size;
 
     buffer_t* handle = (buffer_t*) malloc(sizeof(buffer_t) + sizeof(uint64_t) * nvm_pages);
     if (handle == NULL)
     {
         fprintf(stderr, "Failed to allocate memory handle: %s\n", strerror(errno));
-        return NULL;
+        goto exit;
     }
 
-    handle->kernel_handle = CUNVME_NO_HANDLE;
+    SCIOpen(&handle->sd, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to open SISCI descriptor\n");
+        goto exit;
+    }
+
+    SCICreateSegment(handle->sd, &handle->segment, id, buffer_size, NULL, NULL, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to create segment\n");
+        goto close;
+    }
+
+    handle->id = id;
     handle->device = dev;
     handle->virt_addr = NULL;
     handle->range_size = range_size;
     handle->page_size = page_size;
     handle->unit_size = nvm_page_size;
+    handle->bus_handle = device_id;
     handle->n_addrs = nvm_pages;
 
     if (handle->device >= 0)
     {
-        err = get_cuda_buffer(handle);
+        fprintf(stderr, "CUDA not supported yet\n");
+        goto remove;
     }
     else
     {
-        err = posix_memalign(&handle->virt_addr, handle->page_size, handle->range_size);
     }
 
-    if (err != 0)
+    SCIPrepareSegment(handle->segment, 0, 0, &err);
+    if (err != SCI_ERR_OK)
     {
-        free(handle);
-        fprintf(stderr, "Failed to allocate page-aligned memory buffer: %s\n", strerror(err));
-        return NULL;
+        fprintf(stderr, "Failed to prepare segment\n");
+        goto remove;
     }
 
-    err = pin_memory(fd, handle, pages);
-    if (err != 0)
+    SCISetSegmentAvailable(handle->segment, 0, 0, &err);
+    if (err != SCI_ERR_OK)
     {
-        if (handle->device >= 0)
-        {
-        }
-        else
-        {
-            free(handle->virt_addr);
-        }
-        free(handle);
+        fprintf(stderr, "Failed to set segment available\n");
+        goto remove;
+    }
 
-        fprintf(stderr, "Failed to page-lock buffer pages: %s\n", strerror(err));
-        return NULL;
+    err = create_dma_window(handle); 
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to create DMA window\n");
+        goto remove;
+    }
+
+    handle->virt_addr = SCIMapLocalSegment(handle->segment, &handle->mapping, 0, handle->range_size, NULL, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to memory map segment\n");
+        goto remove;
     }
 
     return handle;
+
+unmap:
+    do
+    {
+        SCIUnmapSegment(handle->mapping, 0, &err);
+    }
+    while (err == SCI_ERR_BUSY);
+
+remove:
+    do
+    {
+        SCIRemoveSegment(handle->segment, 0, &err);
+    }
+    while (err == SCI_ERR_BUSY);
+
+close:
+    SCIClose(handle->sd, 0, &err);
+
+exit:
+    free(handle);
+    return NULL;
 }
 
 
-int get_page(int fd, int dev, page_t* page)
+int get_page(int dev, int id, page_t* page, uint64_t bus_handle)
 {
     long page_size = get_page_size(dev);
     if (page_size == -1)
@@ -181,17 +173,21 @@ int get_page(int fd, int dev, page_t* page)
         return EIO;
     }
 
-    buffer_t* handle = get_buffer(fd, dev, page_size, page_size);
+    buffer_t* handle = get_buffer(dev, id, page_size, page_size, bus_handle);
     if (handle == NULL)
     {
         fprintf(stderr, "Failed to allocate and pin page\n");
         return ENOMEM;
     }
 
-    page->kernel_handle = handle->kernel_handle;
+    page->sd = handle->sd;
+    page->segment = handle->segment;
+    page->mapping = handle->mapping;
+    page->id = handle->id;
     page->device = handle->device;
     page->virt_addr = handle->virt_addr;
     page->page_size = handle->page_size;
+    page->bus_handle = handle->bus_handle;
     page->bus_addr = handle->bus_addr[0];
 
     free(handle);
@@ -199,18 +195,17 @@ int get_page(int fd, int dev, page_t* page)
 }
 
 
-void put_buffer(int fd, buffer_t* handle)
+void put_buffer(buffer_t* handle)
 {
     if (handle != NULL)
     {
-        unpin_memory(fd, handle->kernel_handle);
-        
         if (handle->device >= 0)
         {
+            fprintf(stderr, "CUDA not supported yet\n");
         }
         else
         {
-            free(handle->virt_addr);
+            //free(handle->virt_addr);
         }
 
         free(handle);
@@ -218,19 +213,17 @@ void put_buffer(int fd, buffer_t* handle)
 }
 
 
-void put_page(int fd, page_t* page)
+void put_page(page_t* page)
 {
     if (page != NULL)
     {
-        unpin_memory(fd, page->kernel_handle);
-        page->kernel_handle = CUNVME_NO_HANDLE;
-
         if (page->device >= 0)
         {
+            fprintf(stderr, "CUDA not supported yet\n");
         }
         else
         {
-            free(page->virt_addr);
+            //free(page->virt_addr);
         }
         page->virt_addr = NULL;
     }
