@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 
 static int prepare_io(
@@ -41,6 +43,7 @@ static int prepare_io(
     }
 
     fprintf(stderr, "ns_id=%u start_lba=%lu n_blks=%u\n", ns_id, start_lba, n_blks);
+    fprintf(stderr, "prp1=%lx prp2=%lx\n", prp1, prp2);
 
     cmd_header(cmd, id, ns_id);
     cmd_data_ptr(cmd, prp1, prp2);
@@ -48,7 +51,7 @@ static int prepare_io(
     cmd->dword[10] = (uint32_t) start_lba;
     cmd->dword[11] = (uint32_t) (start_lba >> 32);
 
-    cmd->dword[12] = (0x00 << 31) | (0x00 < 30) | (0x00 << 26) | n_blks;
+    cmd->dword[12] = (0x00 << 31) | (0x00 < 30) | (0x00 << 26) | (n_blks - 1);
 
     cmd->dword[13] = 0;
     cmd->dword[14] = 0;
@@ -60,10 +63,11 @@ static int prepare_io(
 
 static int run_workload(nvm_queue_t* cq, nvm_queue_t* sq, buffer_t* prp_list, buffer_t* data, uint32_t ns_id, size_t page_size, uint32_t blk_size)
 {
-    uint32_t* p = data->virt_addr;
-    for (size_t i = 0; i < data->range_size / sizeof(uint32_t); ++i)
+    uint16_t* p = data->virt_addr;
+    p[0] = rand() % 0xff;
+    for (size_t i = 1; i < data->range_size / sizeof(uint16_t); ++i)
     {
-        p[i] = i;
+        p[i] = p[i - 1] + 1;
     }
 
     struct command* cmd = sq_enqueue(sq);
@@ -101,13 +105,13 @@ static int run_workload(nvm_queue_t* cq, nvm_queue_t* sq, buffer_t* prp_list, bu
 
     size_t corrects = 0;
     size_t faults = 0;
-    for (size_t i = 1; i < data->range_size / sizeof(uint32_t); ++i)
+    for (size_t i = 1; i < data->range_size / sizeof(uint16_t); ++i)
     {
         corrects += (p[i] - 1 == p[i - 1]);
         faults += (p[i] - 1 != p[i - 1]);
     }
 
-    fprintf(stdout, "corrects=%zu faults=%zu total=%zu\n", corrects, faults, data->range_size / sizeof(uint32_t));
+    fprintf(stdout, "corrects=%zu faults=%zu total=%zu\n", corrects, faults, data->range_size / sizeof(uint16_t));
     return 0;
 }
 
@@ -123,6 +127,8 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
     size_t prps_per_page = ctrl->page_size / sizeof(uint64_t);
     size_t prp_list_size;
     size_t data_size = _MIN(ctrl->max_data_size, 0x1000 * 512);
+
+    srand(time(NULL));
 
     sq_memory = get_buffer(-1, ('s' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device_id);
     if (sq_memory == NULL)
