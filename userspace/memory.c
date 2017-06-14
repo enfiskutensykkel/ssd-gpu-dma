@@ -19,7 +19,7 @@ static sci_error_t create_dma_window(buffer_t* handle)
     sci_error_t err;
     sci_ioaddr_t addr;
 
-    SCIMapSegmentForDevice(handle->segment, handle->bus_handle, &addr, 0, &err);
+    SCIMapSegmentForDevice(handle->segment, handle->bus_handle, 0, &addr, 0, &err);
     if (err != SCI_ERR_OK)
     {
         fprintf(stderr, "Failed to map for device: %x\n", err);
@@ -200,6 +200,7 @@ void put_buffer(buffer_t* handle)
         }
         else
         {
+            SCIUnmapSegmentForDevice(handle->segment, handle->bus_handle, 0, 0, &err);
             do
             {
                 SCISetSegmentUnavailable(handle->segment, 0, 0, &err);
@@ -238,6 +239,7 @@ void put_page(page_t* page)
         }
         else
         {
+            SCIUnmapSegmentForDevice(page->segment, page->bus_handle, 0, 0, &err);
             do
             {
                 SCISetSegmentUnavailable(page->segment, 0, 0, &err);
