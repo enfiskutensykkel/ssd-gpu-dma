@@ -1,4 +1,3 @@
-#include "pci.h"
 #include "nvm/types.h"
 #include "nvm/ctrl.h"
 #include <stddef.h>

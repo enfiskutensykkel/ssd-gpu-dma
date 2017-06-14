@@ -142,13 +142,6 @@ buffer_t* get_buffer(int dev, int id, size_t buffer_size, size_t nvm_page_size, 
 
     return handle;
 
-unmap:
-    do
-    {
-        SCIUnmapSegment(handle->mapping, 0, &err);
-    }
-    while (err == SCI_ERR_BUSY);
-
 remove:
     do
     {
@@ -197,6 +190,8 @@ int get_page(int dev, int id, page_t* page, uint64_t bus_handle)
 
 void put_buffer(buffer_t* handle)
 {
+    sci_error_t err;
+
     if (handle != NULL)
     {
         if (handle->device >= 0)
@@ -205,7 +200,25 @@ void put_buffer(buffer_t* handle)
         }
         else
         {
-            //free(handle->virt_addr);
+            do
+            {
+                SCISetSegmentUnavailable(handle->segment, 0, 0, &err);
+            }
+            while (err == SCI_ERR_BUSY);
+
+            do
+            {
+                SCIUnmapSegment(handle->mapping, 0, &err);
+            }
+            while (err == SCI_ERR_BUSY);
+
+            do
+            {
+                SCIRemoveSegment(handle->segment, 0, &err);
+            }
+            while (err == SCI_ERR_BUSY);
+
+            SCIClose(handle->sd, 0, &err);
         }
 
         free(handle);
@@ -215,6 +228,8 @@ void put_buffer(buffer_t* handle)
 
 void put_page(page_t* page)
 {
+    sci_error_t err;
+
     if (page != NULL)
     {
         if (page->device >= 0)
@@ -223,7 +238,25 @@ void put_page(page_t* page)
         }
         else
         {
-            //free(page->virt_addr);
+            do
+            {
+                SCISetSegmentUnavailable(page->segment, 0, 0, &err);
+            }
+            while (err == SCI_ERR_BUSY);
+
+            do
+            {
+                SCIUnmapSegment(page->mapping, 0, &err);
+            }
+            while (err == SCI_ERR_BUSY);
+
+            do
+            {
+                SCIRemoveSegment(page->segment, 0, &err);
+            }
+            while (err == SCI_ERR_BUSY);
+
+            SCIClose(page->sd, 0, &err);
         }
         page->virt_addr = NULL;
     }

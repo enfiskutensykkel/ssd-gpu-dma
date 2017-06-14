@@ -220,7 +220,7 @@ static int identify_controller(nvm_ctrl_t* controller)
 
         if (*CPL_CID(cpl) == expected_id)
         {
-            uint16_t max_queues = _MIN(cpl->dword[0] >> 16, cpl->dword[0] & 0xffff);
+            uint16_t max_queues = _MIN((cpl->dword[0] >> 16) + 1, (cpl->dword[0] & 0xffff) + 1);
             controller->max_queues = max_queues;
         }
     }
