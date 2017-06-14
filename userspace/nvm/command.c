@@ -1,6 +1,5 @@
 #include "command.h"
 #include "util.h"
-#include "memory.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <errno.h>
@@ -8,28 +7,19 @@
 
 uint64_t build_prp_list(size_t page_size, void* prp_list, size_t n_prps, const uint64_t* list_addrs, const uint64_t* prp_addrs)
 {
-    uint64_t* prp_list_ptr = (uint64_t*) prp_list;
+    uint64_t* list_ptr = (uint64_t*) prp_list;
     size_t list_pos = 0;
     size_t i_prp = 0;
-    size_t i_list = 1;
+    size_t next_list = 1;
     size_t n_offs = page_size / sizeof(uint64_t);
 
     while (i_prp < n_prps)
     {
-        size_t i_offs;
+        list_ptr[list_pos++] = prp_addrs[i_prp++];
 
-        for (i_offs = 0; i_offs < n_offs - 1; ++i_offs)
+        if (list_pos == n_offs)
         {
-            prp_list_ptr[list_pos++] = prp_addrs[i_prp++];
-        }
-
-        if (n_prps - i_prp > 1)
-        {
-            prp_list_ptr[list_pos++] = list_addrs[i_list++];
-        }
-        else
-        {
-            prp_list_ptr[list_pos++] = prp_addrs[i_prp++];
+            list_ptr[list_pos++] = list_addrs[next_list++];
         }
     }
 

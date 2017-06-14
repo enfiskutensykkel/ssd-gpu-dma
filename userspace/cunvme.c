@@ -165,6 +165,13 @@ int main(int argc, char** argv)
 
     uint64_t device_id = 1ULL << 32;
 
+    SCIBorrowDevice(sd, device_id, 0, &scierr);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to borrow device: %x\n", scierr);
+        return 1;
+    }
+
     SCIConnectDeviceBar(sd, &segment, device_id, 0, 0, 0, &scierr);
     if (scierr != SCI_ERR_OK)
     {
@@ -173,7 +180,7 @@ int main(int argc, char** argv)
     }
 
     sci_map_t map;
-    volatile void* reg_ptr = SCIMapRemoteSegment(segment, &map, 0, 0x2000, NULL, 0, &scierr);
+    volatile void* reg_ptr = SCIMapRemoteSegment(segment, &map, 0, 0x2000, NULL, SCI_FLAG_IO_MAP_IOSPACE, &scierr);
     if (err != SCI_ERR_OK)
     {
         fprintf(stderr, "Failed to map BAR segment\n");
@@ -220,6 +227,8 @@ int main(int argc, char** argv)
         SCIDisconnectSegment(segment, 0, &scierr);
     }
     while (scierr == SCI_ERR_BUSY);
+
+    SCIReturnDevice(sd, device_id, 0, &scierr);
 
     SCIClose(sd, 0, &scierr);
     return 0;

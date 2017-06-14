@@ -90,7 +90,7 @@ buffer_t* get_buffer(int dev, int id, size_t buffer_size, size_t nvm_page_size, 
     SCICreateSegment(handle->sd, &handle->segment, id, buffer_size, NULL, NULL, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        fprintf(stderr, "Failed to create segment\n");
+        fprintf(stderr, "Failed to create segment %x: %x\n", id, err);
         goto close;
     }
 

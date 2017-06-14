@@ -12,7 +12,8 @@
 #include <stdio.h>
 
 
-static int prepare_write(
+static int prepare_io(
+        enum nvm_command_set id,
         struct command* cmd, 
         uint32_t blk_size, 
         uint32_t page_size, 
@@ -34,16 +35,14 @@ static int prepare_write(
     uint64_t prp1 = dest->bus_addr[0];
     uint64_t prp2 = 0;
 
-    if (1 < n_prps && n_prps <= 2)
-    {
-        prp2 = dest->bus_addr[1];
-    }
-    else if (n_prps > 2)
+    if (n_prps > 1)
     {
         prp2 = build_prp_list(page_size, prp_list->virt_addr, n_prps - 1, &prp_list->bus_addr[0], &dest->bus_addr[1]);
     }
 
-    cmd_header(cmd, NVM_WRITE, ns_id);
+    fprintf(stderr, "ns_id=%u start_lba=%lu n_blks=%u\n", ns_id, start_lba, n_blks);
+
+    cmd_header(cmd, id, ns_id);
     cmd_data_ptr(cmd, prp1, prp2);
 
     cmd->dword[10] = (uint32_t) start_lba;
@@ -59,33 +58,56 @@ static int prepare_write(
 }
 
 
-
 static int run_workload(nvm_queue_t* cq, nvm_queue_t* sq, buffer_t* prp_list, buffer_t* data, uint32_t ns_id, size_t page_size, uint32_t blk_size)
 {
     uint32_t* p = data->virt_addr;
     for (size_t i = 0; i < data->range_size / sizeof(uint32_t); ++i)
     {
-        p[i] = 0xcafebabe;
+        p[i] = i;
     }
 
     struct command* cmd = sq_enqueue(sq);
-    if (cmd == NULL)
-    {
-        fprintf(stderr, "Failed to enqueue command\n");
-        return EAGAIN;
-    }
-
-    prepare_write(cmd, blk_size, page_size, ns_id, 0, data->range_size / blk_size, prp_list, data);
-
+    prepare_io(NVM_WRITE, cmd, blk_size, page_size, ns_id, 0, data->range_size / blk_size, prp_list, data);
     sq_submit(sq);
+
+    cmd = sq_enqueue(sq);
+    prepare_io(NVM_READ, cmd, blk_size, page_size, ns_id, 0, data->range_size / blk_size, prp_list, data);
 
     struct completion* cpl = cq_dequeue_block(cq, 5000);
     if (cpl == NULL)
     {
         fprintf(stderr, "Waiting for completion timed out\n");
-        return ETIMEDOUT;
+        return ETIME;
+    }
+    sq_update(sq, cpl);
+
+    printf("cid=%u sqhd=%u sqid=%u sct=%u sc=%u\n", 
+            *CPL_CID(cpl), *CPL_SQHD(cpl), *CPL_SQID(cpl), SCT(cpl), SC(cpl));
+
+    memset(data->virt_addr, 0, data->range_size);
+
+    sq_submit(sq);
+    cpl = cq_dequeue_block(cq, 5000);
+    if (cpl == NULL)
+    {
+        fprintf(stderr, "Waiting for completion timed out\n");
+        return ETIME;
+    }
+    sq_update(sq, cpl);
+    cq_update(cq);
+
+    printf("cid=%u sqhd=%u sqid=%u sct=%u sc=%u\n", 
+            *CPL_CID(cpl), *CPL_SQHD(cpl), *CPL_SQID(cpl), SCT(cpl), SC(cpl));
+
+    size_t corrects = 0;
+    size_t faults = 0;
+    for (size_t i = 1; i < data->range_size / sizeof(uint32_t); ++i)
+    {
+        corrects += (p[i] - 1 == p[i - 1]);
+        faults += (p[i] - 1 != p[i - 1]);
     }
 
+    fprintf(stdout, "corrects=%zu faults=%zu total=%zu\n", corrects, faults, data->range_size / sizeof(uint32_t));
     return 0;
 }
 
@@ -98,6 +120,9 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
     buffer_t* data = NULL;
     buffer_t* prp_list = NULL;
     nvm_queue_t q[2];
+    size_t prps_per_page = ctrl->page_size / sizeof(uint64_t);
+    size_t prp_list_size;
+    size_t data_size = _MIN(ctrl->max_data_size, 0x1000 * 512);
 
     sq_memory = get_buffer(-1, ('s' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device_id);
     if (sq_memory == NULL)
@@ -113,20 +138,24 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
         goto exit;
     }
 
-    data = get_buffer(-1, 'd', 0x100000, ctrl->page_size, ctrl->device_id);
+    fprintf(stdout, "MDTS = %zu\n", ctrl->max_data_size);
+    data = get_buffer(-1, 'd', data_size, ctrl->page_size, ctrl->device_id);
     if (data == NULL)
     {
+        fprintf(stderr, "Failed to allocate data buffer\n");
         err = ENOMEM;
         goto exit;
     }
 
-    prp_list = get_buffer(-1, ('p' << 16) | ('r' << 8) | 'p', 0x2000, ctrl->page_size, ctrl->device_id);
+    prp_list_size = data->range_size / ctrl->page_size / prps_per_page + 1;
+    fprintf(stdout, "PRP list size = %zu\n", prp_list_size);
+
+    prp_list = get_buffer(-1, ('p' << 16) | ('r' << 8) | 'p', prp_list_size * ctrl->page_size, ctrl->page_size, ctrl->device_id);
     if (prp_list == NULL)
     {
         err = ENOMEM;
         goto exit;
     }
-
 
     memset(cq_memory->virt_addr, 0, cq_memory->range_size);
     err = nvm_create_cq(ctrl, &q[0], 1, cq_memory->virt_addr, cq_memory->bus_addr[0], io_mem);

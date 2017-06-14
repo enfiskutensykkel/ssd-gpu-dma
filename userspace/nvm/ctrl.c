@@ -355,7 +355,7 @@ int nvm_init(nvm_ctrl_t* ctrl, uint64_t dev_id, volatile void* register_ptr)
     }
 
     // Allocate buffer for controller data
-    err = get_page(-1, 100, &ctrl->identify, dev_id);
+    err = get_page(-1, 12, &ctrl->identify, dev_id);
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate controller identify memory: %s\n", strerror(err));
