@@ -6,6 +6,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sisci_types.h>
 #include "memory.h"
 
 #ifndef __CUDACC__
@@ -56,7 +57,7 @@ typedef struct nvm_queue nvm_queue_t;
  */
 struct nvm_controller
 {
-    uint64_t        device_id;
+    sci_device_t    device;
     size_t          page_size;      // Memory page size (MPS) used by the controller
     uint8_t         dstrd;          // Doorbell stride (in encoded form)
     uint64_t        timeout;        // Controller timeout in milliseconds

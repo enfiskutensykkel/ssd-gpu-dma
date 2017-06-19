@@ -286,7 +286,7 @@ static void clear_queue(nvm_queue_t* queue, nvm_ctrl_t* ctrl, uint16_t no, int i
 static void clear_page(page_t* page)
 {
     page->id = -1;
-    page->bus_handle = 0;
+    page->device_handle = 0;
     page->device = -1;
     page->virt_addr = NULL;
     page->page_size = 0;
@@ -294,7 +294,7 @@ static void clear_page(page_t* page)
 }
 
 
-int nvm_init(nvm_ctrl_t* ctrl, uint64_t dev_id, volatile void* register_ptr)
+int nvm_init(nvm_ctrl_t* ctrl, sci_device_t device, volatile void* register_ptr)
 {
     int err;
 
@@ -318,7 +318,7 @@ int nvm_init(nvm_ctrl_t* ctrl, uint64_t dev_id, volatile void* register_ptr)
     }
 
     // Set controller properties
-    ctrl->device_id = dev_id;
+    ctrl->device = device;
     ctrl->page_size = page_size;
     ctrl->dstrd = CAP$DSTRD(register_ptr);
     ctrl->timeout = CAP$TO(register_ptr) * 500UL;
@@ -338,7 +338,7 @@ int nvm_init(nvm_ctrl_t* ctrl, uint64_t dev_id, volatile void* register_ptr)
     clear_page(&ctrl->identify);
 
     // Create admin submission/completion queue pair
-    err = get_page(-1, 10, &ctrl->admin_cq_page, dev_id);
+    err = get_page(-1, 10, &ctrl->admin_cq_page, device);
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate queue memory: %s\n", strerror(err));
@@ -346,7 +346,7 @@ int nvm_init(nvm_ctrl_t* ctrl, uint64_t dev_id, volatile void* register_ptr)
         return err;
     }
 
-    err = get_page(-1, 11, &ctrl->admin_sq_page, dev_id);
+    err = get_page(-1, 11, &ctrl->admin_sq_page, device);
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate queue memory: %s\n", strerror(err));
@@ -355,7 +355,7 @@ int nvm_init(nvm_ctrl_t* ctrl, uint64_t dev_id, volatile void* register_ptr)
     }
 
     // Allocate buffer for controller data
-    err = get_page(-1, 12, &ctrl->identify, dev_id);
+    err = get_page(-1, 12, &ctrl->identify, device);
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate controller identify memory: %s\n", strerror(err));

@@ -19,11 +19,11 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns, void* reg_ptr, size_t reg_len);
 
 static struct option opts[] = {
     { "help", no_argument, NULL, 'h' },
-    { "controller", required_argument, NULL, 'c' },
-    { "cuda-device", required_argument, NULL, 'g' },
     { "identify", no_argument, NULL, 'i' },
+    { "device", 1, NULL, 'd' },
     { NULL, 0, NULL, 0 }
 };
+
 
 static void print_controller_info(nvm_ctrl_t* controller)
 {
@@ -48,52 +48,41 @@ static void print_controller_info(nvm_ctrl_t* controller)
 
 static void give_usage(const char* program_name)
 {
-    fprintf(stderr, "Usage: %s --controller=<pci bdf> [options...]\n", program_name);
+    fprintf(stderr, "Usage: %s --device=<dev id> [options...]\n"
+                    "   or: %s --remote=<node id> [options...\n", 
+                    program_name,
+                    program_name);
 }
 
 static void show_help(const char* program_name)
 {
     give_usage(program_name);
-    fprintf(stderr,
-            "\n"
-            "    This program is intended to demonstrate how NVM submission and completion\n"
-            "    queues can be hosted in memory on an Nvidia GPU. Note that this program\n"
-            "    will do read and writes to blocks on the specified SSD disk and may ruin\n"
-            "    any data stored there.\n"
-            "\n"
-            "  --controller=<pci bdf>      Specify the PCI BDF of the SSD disk to use.\n"
-            "                              A BDF is on the format [xxxx:]xx:xx.x\n"
-            "                              Use lspci -tv to find a suitable NVM controller.\n\n"
-            "  --cuda-device=<device>      Specify CUDA device to use.\n"
-            "                              Use nvidia-smi to identify available devices.\n\n"
-           );
 }
 
-
-static int parse_bdf(const char* str, size_t len, uint64_t* bdf)
-{
-    char buffer[len + 1];
-    strcpy(buffer, str);
-
-    char* endptr;
-    const char* sep = ":.";
-
-    *bdf = 0UL;
-    for (char* ptr = strtok(buffer, sep); ptr != NULL; ptr = strtok(NULL, sep))
-    {
-        uint32_t i = strtoul(ptr, &endptr, 16);
-        
-        if (endptr == NULL || *endptr != '\0' || i > 0xff)
-        {
-            return 1;
-        }
-
-        *bdf <<= 8UL;
-        *bdf |= i;
-    }
-
-    return !(0UL < *bdf && *bdf <= 0xffffff1f07UL); // 0000:00:00.0 < bdf <= ffff:ff:1f.7
-}
+//static int parse_bdf(const char* str, size_t len, uint64_t* bdf)
+//{
+//    char buffer[len + 1];
+//    strcpy(buffer, str);
+//
+//    char* endptr;
+//    const char* sep = ":.";
+//
+//    *bdf = 0UL;
+//    for (char* ptr = strtok(buffer, sep); ptr != NULL; ptr = strtok(NULL, sep))
+//    {
+//        uint32_t i = strtoul(ptr, &endptr, 16);
+//        
+//        if (endptr == NULL || *endptr != '\0' || i > 0xff)
+//        {
+//            return 1;
+//        }
+//
+//        *bdf <<= 8UL;
+//        *bdf |= i;
+//    }
+//
+//    return !(0UL < *bdf && *bdf <= 0xffffff1f07UL); // 0000:00:00.0 < bdf <= ffff:ff:1f.7
+//}
 
 
 int main(int argc, char** argv)
@@ -102,11 +91,13 @@ int main(int argc, char** argv)
     int idx;
     int err;
     sci_error_t scierr;
+    char* endptr;
 
     int identify = 0;
-    uint64_t bdf = 0;
+    uint32_t remote_node = 0;
+    uint64_t device_id = 0;
 
-    while ((opt = getopt_long(argc, argv, ":hc:g:i", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, ":hid:r:", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -124,36 +115,34 @@ int main(int argc, char** argv)
                 show_help(argv[0]);
                 return 0;
 
-            case 'c': // set controller
-                err = parse_bdf(optarg, strlen(optarg), &bdf);
-                if (err != 0)
-                {
-                    fprintf(stderr, "Invalid PCI BDF string: %s\n", optarg);
-                    return 'c';
-                }
-                break;
-
             case 'i': // identify controller
                 identify = 1;
                 break;
 
-            case 'g': // set CUDA device
-                // use cudaDeviceGetByPCIBusId(int* device, const char* pciBusId)
+            case 'r': // connect to remote host
+                endptr = NULL;
+                remote_node = strtoul(optarg, &endptr, 0);
+
+                if (endptr == NULL || *endptr != '\0')
+                {
+                    fprintf(stderr, "Not a valid node id: %s\n", optarg);
+                    give_usage(argv[0]);
+                    return 'r';
+                }
                 break;
 
+            case 'd': // specify device
+                endptr = NULL;
+                device_id = strtoul(optarg, &endptr, 0);
+
+                if (endptr == NULL || *endptr != '\0')
+                {
+                    fprintf(stderr, "Not a valid device id: %s\n", optarg);
+                    give_usage(argv[0]);
+                    return 'd';
+                }
+                break;
         }
-    }
-
-    int domain = (int) (bdf >> 24) & 0xffff;
-    int bus = (int) (bdf >> 16) & 0xff;
-    int slot = (int) (bdf >> 8) & 0x1f;
-    int fun = (int) (bdf & 0x7);
-
-    if (bus == 0 && slot == 0)
-    {
-        fprintf(stderr, "No NVM controller specified\n");
-        give_usage(argv[0]);
-        return 'c';
     }
 
     SCIInitialize(0, &scierr);
@@ -161,18 +150,16 @@ int main(int argc, char** argv)
     sci_desc_t sd;
     SCIOpen(&sd, 0, &scierr);
 
-    sci_remote_segment_t segment;
-
-    uint64_t device_id = 1ULL << 32;
-
-    SCIBorrowDevice(sd, device_id, 0, &scierr);
-    if (err != SCI_ERR_OK)
+    sci_device_t device;
+    SCIBorrowDevice(sd, &device, device_id, 0, &scierr);
+    if (scierr != SCI_ERR_OK)
     {
         fprintf(stderr, "Failed to borrow device: %x\n", scierr);
         return 1;
     }
 
-    SCIConnectDeviceBar(sd, &segment, device_id, 0, 0, 0, &scierr);
+    sci_remote_segment_t segment;
+    SCIConnectDeviceMemory(sd, &segment, device, 0, 0, 0, 0, &scierr);
     if (scierr != SCI_ERR_OK)
     {
         fprintf(stderr, "Failed to connect to device BAR: %x\n", scierr);
@@ -181,7 +168,7 @@ int main(int argc, char** argv)
 
     sci_map_t map;
     volatile void* reg_ptr = SCIMapRemoteSegment(segment, &map, 0, 0x2000, NULL, SCI_FLAG_IO_MAP_IOSPACE, &scierr);
-    if (err != SCI_ERR_OK)
+    if (scierr != SCI_ERR_OK)
     {
         fprintf(stderr, "Failed to map BAR segment\n");
         return 1;
@@ -190,10 +177,9 @@ int main(int argc, char** argv)
     // Reset and initialize controller
     nvm_ctrl_t ctrl;
 
-    fprintf(stderr, "Resetting controller %04x:%02x:%02x.%x...\n",
-            domain, bus, slot, fun);
+    fprintf(stderr, "Resetting controller...\n");
 
-    err = nvm_init(&ctrl, device_id, reg_ptr);
+    err = nvm_init(&ctrl, device, reg_ptr);
     if (err != 0)
     {
         fprintf(stderr, "Failed to reset and initialize device: %s\n", strerror(err));
@@ -216,7 +202,7 @@ int main(int argc, char** argv)
     nvm_free(&ctrl);
 
     SCIUnmapSegment(map, 0, &scierr);
-    if (err != SCI_ERR_OK)
+    if (scierr != SCI_ERR_OK)
     {
         fprintf(stderr, "Failed to unmap BAR segment\n");
         return 1;
@@ -228,7 +214,7 @@ int main(int argc, char** argv)
     }
     while (scierr == SCI_ERR_BUSY);
 
-    SCIReturnDevice(sd, device_id, 0, &scierr);
+    SCIReturnDevice(device, 0, &scierr);
 
     SCIClose(sd, 0, &scierr);
     return 0;

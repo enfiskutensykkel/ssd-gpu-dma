@@ -22,7 +22,7 @@ struct mem_buffer
     sci_desc_t          sd;
     sci_local_segment_t segment;
     sci_map_t           mapping;
-    uint64_t            device_handle;  
+    sci_device_t        device_handle;  
     int                 id;             // buffer id
     int                 device;         // CUDA device (-1 if no device)
     void*               virt_addr;      // Pointer to virtual memory (may be device memory)
@@ -50,11 +50,11 @@ struct mem_page
     sci_desc_t          sd;
     sci_local_segment_t segment;
     sci_map_t           mapping;
+    sci_device_t        device_handle;
     int                 id;             // buffer id
     int                 device;         // CUDA device (-1 if no device)
     void*               virt_addr;      // Pointer to memory (may be device memory)
     size_t              page_size;      // Size of a page unit
-    uint64_t            bus_handle;
     uint64_t            bus_addr;       // Bus/physical address to page
 };
 
@@ -73,7 +73,7 @@ typedef struct mem_page page_t;
  *
  * Returns a handle on success or NULL on failure.
  */
-buffer_t* get_buffer(int device, int id, size_t buffer_size, size_t mem_unit_size, uint64_t bus_handle);
+buffer_t* get_buffer(int device, int id, size_t buffer_size, size_t mem_unit_size, sci_device_t device_handle);
 
 
 /* Release memory buffer
@@ -89,7 +89,7 @@ void put_buffer(buffer_t* buffer_handle);
  * Returns 0 on success and sets the page handle, or an errno
  * on failure.
  */
-int get_page(int device, int id, page_t* page_handle, uint64_t bus_handle);
+int get_page(int device, int id, page_t* page_handle, sci_device_t device_handle);
 
 
 /* Release allocated page */

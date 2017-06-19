@@ -4,6 +4,7 @@
 extern "C" {
 #endif
 
+#include <sisci_types.h>
 #include "types.h"
 #include "memory.h"
 #include <stddef.h>
@@ -24,7 +25,7 @@ extern "C" {
  * Returns 0 on success, or an error code on failure.
  *
  */
-int nvm_init(nvm_ctrl_t* ctrl, uint64_t device_id, volatile void* register_ptr);
+int nvm_init(nvm_ctrl_t* ctrl, sci_device_t device, volatile void* register_ptr);
 
 
 /*

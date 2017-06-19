@@ -130,14 +130,14 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
 
     srand(time(NULL));
 
-    sq_memory = get_buffer(-1, ('s' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device_id);
+    sq_memory = get_buffer(-1, ('s' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device);
     if (sq_memory == NULL)
     {
         err = ENOMEM;
         goto exit;
     }
 
-    cq_memory = get_buffer(-1, ('c' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device_id);
+    cq_memory = get_buffer(-1, ('c' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device);
     if (cq_memory == NULL)
     {
         err = ENOMEM;
@@ -145,7 +145,7 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
     }
 
     fprintf(stdout, "MDTS = %zu\n", ctrl->max_data_size);
-    data = get_buffer(-1, 'd', data_size, ctrl->page_size, ctrl->device_id);
+    data = get_buffer(-1, 'd', data_size, ctrl->page_size, ctrl->device);
     if (data == NULL)
     {
         fprintf(stderr, "Failed to allocate data buffer\n");
@@ -156,7 +156,7 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
     prp_list_size = data->range_size / ctrl->page_size / prps_per_page + 1;
     fprintf(stdout, "PRP list size = %zu\n", prp_list_size);
 
-    prp_list = get_buffer(-1, ('p' << 16) | ('r' << 8) | 'p', prp_list_size * ctrl->page_size, ctrl->page_size, ctrl->device_id);
+    prp_list = get_buffer(-1, ('p' << 16) | ('r' << 8) | 'p', prp_list_size * ctrl->page_size, ctrl->page_size, ctrl->device);
     if (prp_list == NULL)
     {
         err = ENOMEM;

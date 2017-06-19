@@ -19,7 +19,7 @@ static sci_error_t create_dma_window(buffer_t* handle)
     sci_error_t err;
     sci_ioaddr_t addr;
 
-    SCIMapSegmentForDevice(handle->segment, handle->bus_handle, 0, &addr, 0, &err);
+    SCIMapSegmentForDevice(handle->segment, handle->device_handle, 0, &addr, 0, &err);
     if (err != SCI_ERR_OK)
     {
         fprintf(stderr, "Failed to map for device: %x\n", err);
@@ -60,7 +60,7 @@ static long get_page_size(int dev)
 }
 
 
-buffer_t* get_buffer(int dev, int id, size_t buffer_size, size_t nvm_page_size, uint64_t device_id)
+buffer_t* get_buffer(int dev, int id, size_t buffer_size, size_t nvm_page_size, sci_device_t dev_handle)
 {
     sci_error_t err;
 
@@ -100,7 +100,7 @@ buffer_t* get_buffer(int dev, int id, size_t buffer_size, size_t nvm_page_size, 
     handle->range_size = range_size;
     handle->page_size = page_size;
     handle->unit_size = nvm_page_size;
-    handle->bus_handle = device_id;
+    handle->device_handle = dev_handle;
     handle->n_addrs = nvm_pages;
 
     if (handle->device >= 0)
@@ -158,7 +158,7 @@ exit:
 }
 
 
-int get_page(int dev, int id, page_t* page, uint64_t bus_handle)
+int get_page(int dev, int id, page_t* page, sci_device_t dev_handle)
 {
     long page_size = get_page_size(dev);
     if (page_size == -1)
@@ -166,7 +166,7 @@ int get_page(int dev, int id, page_t* page, uint64_t bus_handle)
         return EIO;
     }
 
-    buffer_t* handle = get_buffer(dev, id, page_size, page_size, bus_handle);
+    buffer_t* handle = get_buffer(dev, id, page_size, page_size, dev_handle);
     if (handle == NULL)
     {
         fprintf(stderr, "Failed to allocate and pin page\n");
@@ -176,11 +176,11 @@ int get_page(int dev, int id, page_t* page, uint64_t bus_handle)
     page->sd = handle->sd;
     page->segment = handle->segment;
     page->mapping = handle->mapping;
+    page->device_handle = dev_handle;
     page->id = handle->id;
     page->device = handle->device;
     page->virt_addr = handle->virt_addr;
     page->page_size = handle->page_size;
-    page->bus_handle = handle->bus_handle;
     page->bus_addr = handle->bus_addr[0];
 
     free(handle);
@@ -200,7 +200,7 @@ void put_buffer(buffer_t* handle)
         }
         else
         {
-            SCIUnmapSegmentForDevice(handle->segment, handle->bus_handle, 0, 0, &err);
+            SCIUnmapSegmentForDevice(handle->segment, handle->device_handle, 0, 0, &err);
             do
             {
                 SCISetSegmentUnavailable(handle->segment, 0, 0, &err);
@@ -239,7 +239,7 @@ void put_page(page_t* page)
         }
         else
         {
-            SCIUnmapSegmentForDevice(page->segment, page->bus_handle, 0, 0, &err);
+            SCIUnmapSegmentForDevice(page->segment, page->device_handle, 0, 0, &err);
             do
             {
                 SCISetSegmentUnavailable(page->segment, 0, 0, &err);
