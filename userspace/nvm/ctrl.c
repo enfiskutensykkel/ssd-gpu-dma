@@ -172,6 +172,8 @@ static void configure_admin_queues(nvm_ctrl_t* controller)
 
     volatile uint64_t* acq = ACQ(controller->reg_ptr);
     *acq = cq->bus_addr;
+
+    fprintf(stderr, "asq:%lx acq:%lx\n", sq->bus_addr, cq->bus_addr);
 }
 
 
@@ -364,6 +366,7 @@ int nvm_init(nvm_ctrl_t* ctrl, sci_device_t device, volatile void* register_ptr)
     }
 
     // Reset controller
+    fprintf(stderr, "Resetting controller...\n");
     reset_controller(ctrl);
 
     // Set admin CQ and SQ
@@ -371,12 +374,13 @@ int nvm_init(nvm_ctrl_t* ctrl, sci_device_t device, volatile void* register_ptr)
 
     // Bring controller back up
     enable_controller(register_ptr, host_page_size, ctrl->timeout);
+    fprintf(stderr, "Controller online\n");
 
     // Submit identify controller command
     err = identify_controller(ctrl);
     if (err != 0)
     {
-        fprintf(stderr, "Failed to submit command: %s\n", strerror(err));
+        fprintf(stderr, "Failed to identify controller: %s\n", strerror(err));
         nvm_free(ctrl);
         return err;
     }

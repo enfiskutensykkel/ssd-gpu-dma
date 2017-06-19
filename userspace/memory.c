@@ -26,6 +26,8 @@ static sci_error_t create_dma_window(buffer_t* handle)
         return err;
     }
 
+    fprintf(stderr, "ioaddr=%llx\n", addr);
+
     // Calculate logical bus addresses
     for (i = 0; i < handle->n_addrs; ++i)
     {

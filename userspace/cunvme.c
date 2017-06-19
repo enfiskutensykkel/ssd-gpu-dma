@@ -177,8 +177,6 @@ int main(int argc, char** argv)
     // Reset and initialize controller
     nvm_ctrl_t ctrl;
 
-    fprintf(stderr, "Resetting controller...\n");
-
     err = nvm_init(&ctrl, device, reg_ptr);
     if (err != 0)
     {
