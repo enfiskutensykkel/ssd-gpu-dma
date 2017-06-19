@@ -172,8 +172,6 @@ static void configure_admin_queues(nvm_ctrl_t* controller)
 
     volatile uint64_t* acq = ACQ(controller->reg_ptr);
     *acq = cq->bus_addr;
-
-    fprintf(stderr, "asq:%lx acq:%lx\n", sq->bus_addr, cq->bus_addr);
 }
 
 
