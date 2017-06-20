@@ -121,6 +121,8 @@ static void print_controller_info(nvm_ctrl_t* controller)
     fprintf(stdout, "Model Number            : %s\n", model);
     fprintf(stdout, "Number of namespaces    : %u\n", controller->n_ns);
     fprintf(stdout, "Maximum number of queues: %u\n", controller->max_queues);
+    
+    fprintf(stdout, "dstrd: %u\n", controller->dstrd);
 }
 
 
