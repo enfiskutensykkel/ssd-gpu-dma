@@ -172,16 +172,16 @@ int workload(sci_device_t device, uint32_t node_id, uint32_t intno, uint32_t ns_
         goto exit;
     }
 
-//    memset(sq_memory->virt_addr, 0, sq_memory->range_size);
-//    err = nvm_create_sq(ctrl, &q[0], &q[1], 1, sq_memory->virt_addr, sq_memory->bus_addr[0], io_mem);
-//    if (err != 0)
-//    {
-//        fprintf(stderr, "Failed to create submission queue: %s\n", strerror(err));
-//        err = EIO;
-//        goto exit;
-//    }
+    memset(sq_memory->virt_addr, 0, sq_memory->range_size);
+    err = nvm_create_sq(node_id, intno, &q[0], &q[1], 1, sq_memory->virt_addr, sq_memory->bus_addr[0], io_mem);
+    if (err != 0)
+    {
+        fprintf(stderr, "Failed to create submission queue: %s\n", strerror(err));
+        err = EIO;
+        goto exit;
+    }
 
-    //err = run_workload(&q[0], &q[1], prp_list, data, ns_id, ctrl->page_size, 512);
+    err = run_workload(&q[0], &q[1], prp_list, data, ns_id, ctrl_page_size, 512);
 
 exit:
     put_buffer(data);
