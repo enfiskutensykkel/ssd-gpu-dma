@@ -5,8 +5,8 @@ DEFINES			:=
 CC		:= /usr/bin/gcc
 CFLAGS		:= -Wall -Wextra -Werror=implicit-function-declaration -O2
 INCLUDE		:= -Iinclude  -Iuserspace -I/opt/DIS/include -I/opt/DIS/include/dis
-DEFINES		+= -DCUNVME_PATH='"/proc/$(PROJECT)"'
-LDLIBS		:= -lsisci
+DEFINES		+= -DCUNVME_PATH='"/proc/$(PROJECT)"' -D_REENTRANT
+LDLIBS		:= -lsisci -lpthread
 LDFLAGS		:= -L/opt/DIS/lib64
 SOURCE_FILES	:= $(shell find userspace/ -type f -name "*.cu") $(shell find userspace/ -type f -name "*.c")
 HEADER_FILES	:= $(shell find userspace/ -type f -name "*.h")

@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <time.h>
 #include <stdio.h>
+#include "message.h" // FIXME
 
 
 /* Controller registers */
@@ -411,46 +412,149 @@ void nvm_free(nvm_ctrl_t* ctrl)
 }
 
 
-int nvm_create_cq(nvm_ctrl_t* ctrl, nvm_queue_t* queue, uint16_t no, void* vaddr, uint64_t paddr, volatile void* regptr)
+//int nvm_create_cq(nvm_ctrl_t* ctrl, nvm_queue_t* queue, uint16_t no, void* vaddr, uint64_t paddr, volatile void* regptr)
+//{
+//    if (!(0 < no && no <= ctrl->max_queues))
+//    {
+//        return EINVAL;
+//    }
+//
+//    struct command* cmd = sq_enqueue(&ctrl->admin_sq);
+//    if (cmd == NULL)
+//    {
+//        return EAGAIN;
+//    }
+//
+//    clear_queue(queue, ctrl, no, 0, regptr);
+//    queue->virt_addr = vaddr;
+//    queue->bus_addr = paddr;
+//
+//    // Queues can never exceed one controller memory page size
+//    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
+//
+//    // Create completion queue command
+//    cmd_header(cmd, ADMIN_CREATE_COMPLETION_QUEUE, 0);
+//    cmd_data_ptr(cmd, queue->bus_addr, 0);
+//
+//    cmd->dword[10] = (((uint32_t) queue->max_entries - 1) << 16) | queue->no;
+//    cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
+//
+//    sq_submit(&ctrl->admin_sq);
+//
+//    struct completion* cpl = cq_dequeue_block(&ctrl->admin_cq, ctrl->timeout);
+//    if (cpl == NULL)
+//    {
+//        return ETIME;
+//    }
+//
+//    uint8_t sct = SCT(cpl);
+//    uint8_t sc = SC(cpl);
+//
+//    sq_update(&ctrl->admin_sq, cpl);
+//    cq_update(&ctrl->admin_cq);
+//
+//    if (sct != 0 && sc != 0)
+//    {
+//        return -1; // FIXME: look up error code in specification
+//    }
+//
+//    return 0;
+//}
+//
+//
+//int nvm_create_sq(nvm_ctrl_t* ctrl, const nvm_queue_t* cq, nvm_queue_t* queue, uint16_t no, void* vaddr, uint64_t paddr, volatile void* regptr)
+//{
+//    if (!(0 < no && no <= ctrl->max_queues))
+//    {
+//        return EINVAL;
+//    }
+//
+//    struct command* cmd = sq_enqueue(&ctrl->admin_sq);
+//    if (cmd == NULL)
+//    {
+//        return EAGAIN;
+//    }
+//
+//    clear_queue(queue, ctrl, no, 1, regptr);
+//    queue->virt_addr = vaddr;
+//    queue->bus_addr = paddr;
+//
+//    // Queues can never exceed one controller memory page size
+//    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
+//
+//    // Create completion queue command
+//    cmd_header(cmd, ADMIN_CREATE_SUBMISSION_QUEUE, 0);
+//    cmd_data_ptr(cmd, queue->bus_addr, 0);
+//
+//    cmd->dword[10] = (((uint32_t) queue->max_entries - 1) << 16) | queue->no;
+//    cmd->dword[11] = (((uint32_t) cq->no) << 16) | (0x00 << 1) | 0x01;
+//
+//    sq_submit(&ctrl->admin_sq);
+//
+//    struct completion* cpl = cq_dequeue_block(&ctrl->admin_cq, ctrl->timeout);
+//    if (cpl == NULL)
+//    {
+//        return ETIME;
+//    }
+//
+//    uint8_t sct = SCT(cpl);
+//    uint8_t sc = SC(cpl);
+//
+//    sq_update(&ctrl->admin_sq, cpl);
+//    cq_update(&ctrl->admin_cq);
+//
+//    if (sct != 0 && sc != 0)
+//    {
+//        return -1; // FIXME: look up error code in specification
+//    }
+//
+//    return 0;
+//}
+
+
+static void _clear_queue(nvm_queue_t* queue, size_t entry_size, uint16_t no, volatile void* db)
 {
-    if (!(0 < no && no <= ctrl->max_queues))
-    {
-        return EINVAL;
-    }
+    queue->no = no;
+    queue->max_entries = 0;
+    queue->entry_size = entry_size;
+    queue->head = 0;
+    queue->tail = 0;
+    queue->phase = 1;
+    queue->virt_addr = NULL;
+    queue->bus_addr = 0;
+    //queue->host_db = is_sq ? SQ_DBL(ctrl->reg_ptr, queue->no, ctrl->dstrd) : CQ_DBL(ctrl->reg_ptr, queue->no, ctrl->dstrd);
+    //queue->db = is_sq ? SQ_DBL(reg_ptr, queue->no, ctrl->dstrd) : CQ_DBL(reg_ptr, queue->no, ctrl->dstrd);
+    queue->db = db;
+}
 
-    struct command* cmd = sq_enqueue(&ctrl->admin_sq);
-    if (cmd == NULL)
-    {
-        return EAGAIN;
-    }
+int nvm_create_cq(uint32_t node_id, uint32_t intno, nvm_queue_t* queue, uint16_t no, void* vaddr, uint64_t paddr, volatile void* regptr)
+{
+    struct command cmd;
 
-    clear_queue(queue, ctrl, no, 0, regptr);
+    //queue->db = is_sq ? SQ_DBL(reg_ptr, queue->no, ctrl->dstrd) : CQ_DBL(reg_ptr, queue->no, ctrl->dstrd);
+    _clear_queue(queue, sizeof(struct command), no, CQ_DBL(regptr, no, 0));
     queue->virt_addr = vaddr;
     queue->bus_addr = paddr;
 
     // Queues can never exceed one controller memory page size
-    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
+    queue->max_entries = 0x1000 / queue->entry_size;
 
     // Create completion queue command
-    cmd_header(cmd, ADMIN_CREATE_COMPLETION_QUEUE, 0);
-    cmd_data_ptr(cmd, queue->bus_addr, 0);
+    cmd_header(&cmd, ADMIN_CREATE_COMPLETION_QUEUE, 0);
+    cmd_data_ptr(&cmd, queue->bus_addr, 0);
 
-    cmd->dword[10] = (((uint32_t) queue->max_entries - 1) << 16) | queue->no;
-    cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
+    cmd.dword[10] = (((uint32_t) queue->max_entries - 1) << 16) | queue->no;
+    cmd.dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
 
-    sq_submit(&ctrl->admin_sq);
-
-    struct completion* cpl = cq_dequeue_block(&ctrl->admin_cq, ctrl->timeout);
-    if (cpl == NULL)
+    struct completion cpl;
+    if (remote_command(node_id, intno, &cmd, &cpl, 40000))
     {
+        fprintf(stderr, "gaaack\n");
         return ETIME;
     }
 
-    uint8_t sct = SCT(cpl);
-    uint8_t sc = SC(cpl);
-
-    sq_update(&ctrl->admin_sq, cpl);
-    cq_update(&ctrl->admin_cq);
+    uint8_t sct = SCT(&cpl);
+    uint8_t sc = SC(&cpl);
 
     if (sct != 0 && sc != 0)
     {
@@ -461,52 +565,51 @@ int nvm_create_cq(nvm_ctrl_t* ctrl, nvm_queue_t* queue, uint16_t no, void* vaddr
 }
 
 
-int nvm_create_sq(nvm_ctrl_t* ctrl, const nvm_queue_t* cq, nvm_queue_t* queue, uint16_t no, void* vaddr, uint64_t paddr, volatile void* regptr)
-{
-    if (!(0 < no && no <= ctrl->max_queues))
-    {
-        return EINVAL;
-    }
-
-    struct command* cmd = sq_enqueue(&ctrl->admin_sq);
-    if (cmd == NULL)
-    {
-        return EAGAIN;
-    }
-
-    clear_queue(queue, ctrl, no, 1, regptr);
-    queue->virt_addr = vaddr;
-    queue->bus_addr = paddr;
-
-    // Queues can never exceed one controller memory page size
-    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
-
-    // Create completion queue command
-    cmd_header(cmd, ADMIN_CREATE_SUBMISSION_QUEUE, 0);
-    cmd_data_ptr(cmd, queue->bus_addr, 0);
-
-    cmd->dword[10] = (((uint32_t) queue->max_entries - 1) << 16) | queue->no;
-    cmd->dword[11] = (((uint32_t) cq->no) << 16) | (0x00 << 1) | 0x01;
-
-    sq_submit(&ctrl->admin_sq);
-
-    struct completion* cpl = cq_dequeue_block(&ctrl->admin_cq, ctrl->timeout);
-    if (cpl == NULL)
-    {
-        return ETIME;
-    }
-
-    uint8_t sct = SCT(cpl);
-    uint8_t sc = SC(cpl);
-
-    sq_update(&ctrl->admin_sq, cpl);
-    cq_update(&ctrl->admin_cq);
-
-    if (sct != 0 && sc != 0)
-    {
-        return -1; // FIXME: look up error code in specification
-    }
-
-    return 0;
-}
-
+//int nvm_create_sq(uint32_t node_id, uint32_t intno, const nvm_queue_t* cq, nvm_queue_t* queue, uint16_t no, void* vaddr, uint64_t paddr, volatile void* regptr)
+//{
+//    if (!(0 < no && no <= ctrl->max_queues))
+//    {
+//        return EINVAL;
+//    }
+//
+//    struct command* cmd = sq_enqueue(&ctrl->admin_sq);
+//    if (cmd == NULL)
+//    {
+//        return EAGAIN;
+//    }
+//
+//    clear_queue(queue, ctrl, no, 1, regptr);
+//    queue->virt_addr = vaddr;
+//    queue->bus_addr = paddr;
+//
+//    // Queues can never exceed one controller memory page size
+//    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
+//
+//    // Create completion queue command
+//    cmd_header(cmd, ADMIN_CREATE_SUBMISSION_QUEUE, 0);
+//    cmd_data_ptr(cmd, queue->bus_addr, 0);
+//
+//    cmd->dword[10] = (((uint32_t) queue->max_entries - 1) << 16) | queue->no;
+//    cmd->dword[11] = (((uint32_t) cq->no) << 16) | (0x00 << 1) | 0x01;
+//
+//    sq_submit(&ctrl->admin_sq);
+//
+//    struct completion* cpl = cq_dequeue_block(&ctrl->admin_cq, ctrl->timeout);
+//    if (cpl == NULL)
+//    {
+//        return ETIME;
+//    }
+//
+//    uint8_t sct = SCT(cpl);
+//    uint8_t sc = SC(cpl);
+//
+//    sq_update(&ctrl->admin_sq, cpl);
+//    cq_update(&ctrl->admin_cq);
+//
+//    if (sct != 0 && sc != 0)
+//    {
+//        return -1; // FIXME: look up error code in specification
+//    }
+//
+//    return 0;
+//}

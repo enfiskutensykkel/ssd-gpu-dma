@@ -116,36 +116,37 @@ static int run_workload(nvm_queue_t* cq, nvm_queue_t* sq, buffer_t* prp_list, bu
 }
 
 
-int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
+int workload(sci_device_t device, uint32_t node_id, uint32_t intno, uint32_t ns_id, void* io_mem, size_t io_size)
 {
+    size_t ctrl_page_size = 0x1000;
+
     int err;
     buffer_t* sq_memory = NULL;
     buffer_t* cq_memory = NULL;
     buffer_t* data = NULL;
     buffer_t* prp_list = NULL;
     nvm_queue_t q[2];
-    size_t prps_per_page = ctrl->page_size / sizeof(uint64_t);
+    size_t prps_per_page = ctrl_page_size / sizeof(uint64_t);
     size_t prp_list_size;
-    size_t data_size = _MIN(ctrl->max_data_size, 0x1000 * 512);
+    size_t data_size = _MIN(40 * 512 /* FIXME: hack */, 0x1000 * 512);
 
     srand(time(NULL));
 
-    sq_memory = get_buffer(-1, ('s' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device);
+    sq_memory = get_buffer(-1, ('s' << 8) | 'q', ctrl_page_size, ctrl_page_size, device);
     if (sq_memory == NULL)
     {
         err = ENOMEM;
         goto exit;
     }
 
-    cq_memory = get_buffer(-1, ('c' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device);
+    cq_memory = get_buffer(-1, ('c' << 8) | 'q', ctrl_page_size, ctrl_page_size, device);
     if (cq_memory == NULL)
     {
         err = ENOMEM;
         goto exit;
     }
 
-    fprintf(stdout, "MDTS = %zu\n", ctrl->max_data_size);
-    data = get_buffer(-1, 'd', data_size, ctrl->page_size, ctrl->device);
+    data = get_buffer(-1, 'd', data_size, ctrl_page_size, device);
     if (data == NULL)
     {
         fprintf(stderr, "Failed to allocate data buffer\n");
@@ -153,10 +154,9 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
         goto exit;
     }
 
-    prp_list_size = data->range_size / ctrl->page_size / prps_per_page + 1;
-    fprintf(stdout, "PRP list size = %zu\n", prp_list_size);
+    prp_list_size = data->range_size / ctrl_page_size / prps_per_page + 1;
 
-    prp_list = get_buffer(-1, ('p' << 16) | ('r' << 8) | 'p', prp_list_size * ctrl->page_size, ctrl->page_size, ctrl->device);
+    prp_list = get_buffer(-1, ('p' << 16) | ('r' << 8) | 'p', prp_list_size * ctrl_page_size, ctrl_page_size, device);
     if (prp_list == NULL)
     {
         err = ENOMEM;
@@ -164,7 +164,7 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
     }
 
     memset(cq_memory->virt_addr, 0, cq_memory->range_size);
-    err = nvm_create_cq(ctrl, &q[0], 1, cq_memory->virt_addr, cq_memory->bus_addr[0], io_mem);
+    err = nvm_create_cq(node_id, intno, &q[0], 1, cq_memory->virt_addr, cq_memory->bus_addr[0], io_mem);
     if (err != 0)
     {
         fprintf(stderr, "Failed to create completion queue: %s\n", strerror(err));
@@ -172,16 +172,16 @@ int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
         goto exit;
     }
 
-    memset(sq_memory->virt_addr, 0, sq_memory->range_size);
-    err = nvm_create_sq(ctrl, &q[0], &q[1], 1, sq_memory->virt_addr, sq_memory->bus_addr[0], io_mem);
-    if (err != 0)
-    {
-        fprintf(stderr, "Failed to create submission queue: %s\n", strerror(err));
-        err = EIO;
-        goto exit;
-    }
+//    memset(sq_memory->virt_addr, 0, sq_memory->range_size);
+//    err = nvm_create_sq(ctrl, &q[0], &q[1], 1, sq_memory->virt_addr, sq_memory->bus_addr[0], io_mem);
+//    if (err != 0)
+//    {
+//        fprintf(stderr, "Failed to create submission queue: %s\n", strerror(err));
+//        err = EIO;
+//        goto exit;
+//    }
 
-    err = run_workload(&q[0], &q[1], prp_list, data, ns_id, ctrl->page_size, 512);
+    //err = run_workload(&q[0], &q[1], prp_list, data, ns_id, ctrl->page_size, 512);
 
 exit:
     put_buffer(data);
@@ -190,3 +190,78 @@ exit:
     put_buffer(cq_memory);
     return err;
 }
+
+//int workload(nvm_ctrl_t* ctrl, uint32_t ns_id, void* io_mem, size_t io_size)
+//{
+//    int err;
+//    buffer_t* sq_memory = NULL;
+//    buffer_t* cq_memory = NULL;
+//    buffer_t* data = NULL;
+//    buffer_t* prp_list = NULL;
+//    nvm_queue_t q[2];
+//    size_t prps_per_page = ctrl->page_size / sizeof(uint64_t);
+//    size_t prp_list_size;
+//    size_t data_size = _MIN(ctrl->max_data_size, 0x1000 * 512);
+//
+//    srand(time(NULL));
+//
+//    sq_memory = get_buffer(-1, ('s' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device);
+//    if (sq_memory == NULL)
+//    {
+//        err = ENOMEM;
+//        goto exit;
+//    }
+//
+//    cq_memory = get_buffer(-1, ('c' << 8) | 'q', ctrl->page_size, ctrl->page_size, ctrl->device);
+//    if (cq_memory == NULL)
+//    {
+//        err = ENOMEM;
+//        goto exit;
+//    }
+//
+//    fprintf(stdout, "MDTS = %zu\n", ctrl->max_data_size);
+//    data = get_buffer(-1, 'd', data_size, ctrl->page_size, ctrl->device);
+//    if (data == NULL)
+//    {
+//        fprintf(stderr, "Failed to allocate data buffer\n");
+//        err = ENOMEM;
+//        goto exit;
+//    }
+//
+//    prp_list_size = data->range_size / ctrl->page_size / prps_per_page + 1;
+//    fprintf(stdout, "PRP list size = %zu\n", prp_list_size);
+//
+//    prp_list = get_buffer(-1, ('p' << 16) | ('r' << 8) | 'p', prp_list_size * ctrl->page_size, ctrl->page_size, ctrl->device);
+//    if (prp_list == NULL)
+//    {
+//        err = ENOMEM;
+//        goto exit;
+//    }
+//
+//    memset(cq_memory->virt_addr, 0, cq_memory->range_size);
+//    err = nvm_create_cq(ctrl, &q[0], 1, cq_memory->virt_addr, cq_memory->bus_addr[0], io_mem);
+//    if (err != 0)
+//    {
+//        fprintf(stderr, "Failed to create completion queue: %s\n", strerror(err));
+//        err = EIO;
+//        goto exit;
+//    }
+//
+//    memset(sq_memory->virt_addr, 0, sq_memory->range_size);
+//    err = nvm_create_sq(ctrl, &q[0], &q[1], 1, sq_memory->virt_addr, sq_memory->bus_addr[0], io_mem);
+//    if (err != 0)
+//    {
+//        fprintf(stderr, "Failed to create submission queue: %s\n", strerror(err));
+//        err = EIO;
+//        goto exit;
+//    }
+//
+//    err = run_workload(&q[0], &q[1], prp_list, data, ns_id, ctrl->page_size, 512);
+//
+//exit:
+//    put_buffer(data);
+//    put_buffer(prp_list);
+//    put_buffer(sq_memory);
+//    put_buffer(cq_memory);
+//    return err;
+//}

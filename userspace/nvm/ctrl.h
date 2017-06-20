@@ -39,7 +39,8 @@ void nvm_free(nvm_ctrl_t* ctrl);
  *
  * At the moment, only page-sized queues are supported.
  */
-int nvm_create_cq(nvm_ctrl_t* ctrl, nvm_queue_t* cq, uint16_t no, void* virt_addr, uint64_t bus_addr, volatile void* reg_ptr);
+//int nvm_create_cq(nvm_ctrl_t* ctrl, nvm_queue_t* cq, uint16_t no, void* virt_addr, uint64_t bus_addr, volatile void* reg_ptr);
+int nvm_create_cq(uint32_t node_id, uint32_t intno, nvm_queue_t* cq, uint16_t no, void* virt_addr, uint64_t bus_addr, volatile void* reg_ptr);
 
 
 /* 
@@ -48,7 +49,8 @@ int nvm_create_cq(nvm_ctrl_t* ctrl, nvm_queue_t* cq, uint16_t no, void* virt_add
  * Corresponding CQ must have been created first.
  * At the moment, only page-sized queues are supported.
  */
-int nvm_create_sq(nvm_ctrl_t* ctrl, const nvm_queue_t* cq, nvm_queue_t* sq, uint16_t no, void* virt_addr, uint64_t bus_addr, volatile void* reg_ptr);
+//int nvm_create_sq(nvm_ctrl_t* ctrl, const nvm_queue_t* cq, nvm_queue_t* sq, uint16_t no, void* virt_addr, uint64_t bus_addr, volatile void* reg_ptr);
+int nvm_create_sq(uint32_t node_id, uint32_t intno, const nvm_queue_t* cq, nvm_queue_t* sq, uint16_t no, void* virt_addr, uint64_t bus_addr, volatile void* reg_ptr);
 
 
 #ifdef __cplusplus

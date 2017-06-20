@@ -1,5 +1,8 @@
 #include "nvm/types.h"
 #include "nvm/ctrl.h"
+#include "nvm/command.h"
+#include "nvm/queue.h"
+#include "message.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -12,17 +15,92 @@
 #include <getopt.h>
 #include <sisci_types.h>
 #include <sisci_api.h>
+#include <signal.h>
+#include <pthread.h>
 
 
-int workload(nvm_ctrl_t* ctrl, uint32_t ns, void* reg_ptr, size_t reg_len);
+extern int workload(sci_device_t dev, uint32_t node_id, uint32_t intno, uint32_t ns_id, void* io_mem, size_t io_size);
+
+
+static volatile int run_master = 1;
+
+//static pthread_cond_t run_master_cv = PTHREAD_COND_INITIALIZER;
 
 
 static struct option opts[] = {
     { "help", no_argument, NULL, 'h' },
-    { "identify", no_argument, NULL, 'i' },
-    { "device", 1, NULL, 'd' },
+    { "identify", no_argument, NULL, 'c' },
+    { "device", required_argument, NULL, 'd' },
+    { "master", required_argument, NULL, 'r' },
+    { "interrupt", required_argument, NULL, 'i' },
     { NULL, 0, NULL, 0 }
 };
+
+
+static void give_usage(const char* program_name)
+{
+    fprintf(stderr, "Usage: %s --device=<dev id> [--master=<node id>] [options...]\n", program_name);
+}
+
+
+static void show_help(const char* program_name)
+{
+    give_usage(program_name);
+}
+
+
+static void shutdown_master()
+{
+    run_master = 0;
+}
+
+
+static sci_callback_action_t handle_command(
+        nvm_ctrl_t* ctrl,
+        sci_local_data_interrupt_t intr, 
+        struct command* command,
+        unsigned length,
+        sci_error_t status)
+{
+    if (length != sizeof(struct command))
+    {
+        fprintf(stderr, "Received garbage from remote node\n");
+        return SCI_CALLBACK_CONTINUE;
+    }
+
+    uint32_t node_id = command->dword[14];
+    uint32_t intno = command->dword[15];
+
+    // Enqueue command 
+    command->dword[14] = command->dword[15] = 0;
+    struct command* in_queue = sq_enqueue(&ctrl->admin_sq);
+    if (in_queue == NULL)
+    {
+        fprintf(stderr, "Admin queue was full, discarding command from node %u\n", node_id);
+        send_completion(node_id, intno, NULL, 500);
+        return SCI_CALLBACK_CONTINUE;
+    }
+
+    // Submit command
+    memcpy(in_queue, command, sizeof(struct command));
+    sq_submit(&ctrl->admin_sq);
+
+    // Wait for completion
+    struct completion* cpl = cq_dequeue_block(&ctrl->admin_cq, ctrl->timeout);
+    if (cpl == NULL)
+    {
+        fprintf(stderr, "Timed out while waiting for completion for command from node %u\n", node_id);
+        send_completion(node_id, intno, NULL, 500);
+        return SCI_CALLBACK_CONTINUE;
+    }
+    sq_update(&ctrl->admin_sq, cpl);
+
+    // Send completion back
+    send_completion(node_id, intno, cpl, 500);
+    cq_update(&ctrl->admin_cq);
+
+    return SCI_CALLBACK_CONTINUE;
+}
 
 
 static void print_controller_info(nvm_ctrl_t* controller)
@@ -46,58 +124,19 @@ static void print_controller_info(nvm_ctrl_t* controller)
 }
 
 
-static void give_usage(const char* program_name)
-{
-    fprintf(stderr, "Usage: %s --device=<dev id> [options...]\n"
-                    "   or: %s --remote=<node id> [options...\n", 
-                    program_name,
-                    program_name);
-}
-
-static void show_help(const char* program_name)
-{
-    give_usage(program_name);
-}
-
-//static int parse_bdf(const char* str, size_t len, uint64_t* bdf)
-//{
-//    char buffer[len + 1];
-//    strcpy(buffer, str);
-//
-//    char* endptr;
-//    const char* sep = ":.";
-//
-//    *bdf = 0UL;
-//    for (char* ptr = strtok(buffer, sep); ptr != NULL; ptr = strtok(NULL, sep))
-//    {
-//        uint32_t i = strtoul(ptr, &endptr, 16);
-//        
-//        if (endptr == NULL || *endptr != '\0' || i > 0xff)
-//        {
-//            return 1;
-//        }
-//
-//        *bdf <<= 8UL;
-//        *bdf |= i;
-//    }
-//
-//    return !(0UL < *bdf && *bdf <= 0xffffff1f07UL); // 0000:00:00.0 < bdf <= ffff:ff:1f.7
-//}
-
-
 int main(int argc, char** argv)
 {
     int opt;
     int idx;
-    int err;
-    sci_error_t scierr;
+    sci_error_t err;
     char* endptr;
 
     int identify = 0;
-    uint32_t remote_node = 0;
+    uint32_t node_id = 0;
     uint64_t device_id = 0;
+    uint32_t intno = 0;
 
-    while ((opt = getopt_long(argc, argv, ":hid:r:", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, ":hci:d:r:", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -115,19 +154,32 @@ int main(int argc, char** argv)
                 show_help(argv[0]);
                 return 0;
 
-            case 'i': // identify controller
+            case 'c': // identify controller
                 identify = 1;
                 break;
 
             case 'r': // connect to remote host
+                run_master = 0;
                 endptr = NULL;
-                remote_node = strtoul(optarg, &endptr, 0);
+                node_id = strtoul(optarg, &endptr, 0);
 
                 if (endptr == NULL || *endptr != '\0')
                 {
                     fprintf(stderr, "Not a valid node id: %s\n", optarg);
                     give_usage(argv[0]);
                     return 'r';
+                }
+                break;
+
+            case 'i': // specify interrupt number
+                endptr = NULL;
+                intno = strtoul(optarg, &endptr, 0);
+
+                if (endptr == NULL || *endptr != '\0')
+                {
+                    fprintf(stderr, "Not a valid interrupt number: %s\n", optarg);
+                    give_usage(argv[0]);
+                    return 'i';
                 }
                 break;
 
@@ -145,76 +197,116 @@ int main(int argc, char** argv)
         }
     }
 
-    SCIInitialize(0, &scierr);
+    SCIInitialize(0, &err);
 
     sci_desc_t sd;
-    SCIOpen(&sd, 0, &scierr);
+    SCIOpen(&sd, 0, &err);
 
+    // Connect to device and get valid device handle to NVMe controller
     sci_device_t device;
-    SCIBorrowDevice(sd, &device, device_id, 0, &scierr);
-    if (scierr != SCI_ERR_OK)
+    SCIBorrowDevice(sd, &device, device_id, 0, &err);
+    if (err != SCI_ERR_OK)
     {
-        fprintf(stderr, "Failed to borrow device: %x\n", scierr);
+        fprintf(stderr, "Failed to borrow device: %x\n", err);
         return 1;
     }
 
     sci_remote_segment_t segment;
-    SCIConnectDeviceMemory(sd, &segment, device, 0, 0, 0, 0, &scierr);
-    if (scierr != SCI_ERR_OK)
+    SCIConnectDeviceMemory(sd, &segment, device, 0, 0, 0, 0, &err);
+    if (err != SCI_ERR_OK)
     {
-        fprintf(stderr, "Failed to connect to device BAR: %x\n", scierr);
+        fprintf(stderr, "Failed to connect to device BAR segment: %x\n", err);
         return 1;
     }
-
+    
+    // Map NVMe controller's BAR0
     sci_map_t map;
-    volatile void* reg_ptr = SCIMapRemoteSegment(segment, &map, 0, 0x2000, NULL, SCI_FLAG_IO_MAP_IOSPACE, &scierr);
-    if (scierr != SCI_ERR_OK)
+    volatile void* reg_ptr = SCIMapRemoteSegment(segment, &map, 0, 0x2000, NULL, SCI_FLAG_IO_MAP_IOSPACE, &err);
+    if (err != SCI_ERR_OK)
     {
-        fprintf(stderr, "Failed to map BAR segment\n");
+        fprintf(stderr, "Failed to map device BAR segment\n");
         return 1;
     }
 
-    // Reset and initialize controller
-    nvm_ctrl_t ctrl;
-
-    err = nvm_init(&ctrl, device, reg_ptr);
-    if (err != 0)
+    if (run_master)
     {
-        fprintf(stderr, "Failed to reset and initialize device: %s\n", strerror(err));
-        return 2;
+        // Run as master
+        nvm_ctrl_t ctrl;
+
+        int status = nvm_init(&ctrl, device, reg_ptr);
+        if (status != 0)
+        {
+            fprintf(stderr, "Failed to reset and initialize device: %s\n", strerror(status));
+            return 2;
+        }
+        fprintf(stderr, "Controller initialized.\n");
+
+        if (identify)
+        {
+            print_controller_info(&ctrl);
+        }
+
+        node_id = 0;
+        SCIGetLocalNodeId(0, &node_id, 0, &err);
+
+        sci_local_data_interrupt_t intr;
+        SCICreateDataInterrupt(sd, &intr, 0, &intno, (sci_cb_data_interrupt_t) handle_command, &ctrl, SCI_FLAG_USE_CALLBACK | SCI_FLAG_FIXED_INTNO , &err);
+        if (err != SCI_ERR_OK)
+        {
+            fprintf(stderr, "Failed to create data interrupt bla: %x\n", err);
+            return 2;
+        }
+        
+        fprintf(stderr, "Running master on node %u (interrupt %u)...\n", node_id, intno);
+
+        signal(SIGINT, (sig_t) shutdown_master);
+        signal(SIGTERM, (sig_t) shutdown_master);
+
+        while (run_master)
+        {
+            sleep(1);
+            // TODO: use condition variable instead
+        }
+
+        do
+        {
+            SCIRemoveDataInterrupt(intr, 0, &err);
+        }
+        while (err == SCI_ERR_BUSY);
+
+        // Clean up resources
+        nvm_free(&ctrl);
     }
-    fprintf(stderr, "Controller initialized.\n");
-
-    if (identify)
+    else
     {
-        print_controller_info(&ctrl);
+        // Run as slave
+        int status = workload(device, node_id, intno, 1, (void*) reg_ptr, 0x2000);
+        if (status != 0)
+        {
+            fprintf(stderr, "Workload failed\n");
+        }
     }
 
-    err = workload(&ctrl, 1, (void*) reg_ptr, 0x2000);
-    if (err != 0)
+    SCIUnmapSegment(map, 0, &err);
+    if (err != SCI_ERR_OK)
     {
-        fprintf(stderr, "Workload failed: %s\n", strerror(err));
-    }
-
-    // Clean up resources
-    nvm_free(&ctrl);
-
-    SCIUnmapSegment(map, 0, &scierr);
-    if (scierr != SCI_ERR_OK)
-    {
-        fprintf(stderr, "Failed to unmap BAR segment\n");
-        return 1;
+        fprintf(stderr, "Failed to unmap device BAR segment\n");
     }
 
     do
     {
-        SCIDisconnectSegment(segment, 0, &scierr);
+        SCIDisconnectSegment(segment, 0, &err);
     }
-    while (scierr == SCI_ERR_BUSY);
+    while (err == SCI_ERR_BUSY);
 
-    SCIReturnDevice(device, 0, &scierr);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to disconnect BAR segment");
+    }
 
-    SCIClose(sd, 0, &scierr);
+    SCIReturnDevice(device, 0, &err);
+
+    SCIClose(sd, 0, &err);
     return 0;
 }
 
