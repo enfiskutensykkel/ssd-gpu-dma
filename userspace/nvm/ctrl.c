@@ -533,7 +533,7 @@ int nvm_create_cq(uint32_t node_id, uint32_t intno, nvm_queue_t* queue, uint16_t
     memset(&cmd, 0, sizeof(cmd));
 
     //queue->db = is_sq ? SQ_DBL(reg_ptr, queue->no, ctrl->dstrd) : CQ_DBL(reg_ptr, queue->no, ctrl->dstrd);
-    _clear_queue(queue, sizeof(struct command), no, CQ_DBL(regptr, no, 0));
+    _clear_queue(queue, sizeof(struct completion), no, CQ_DBL(regptr, no, 0));
     queue->virt_addr = vaddr;
     queue->bus_addr = paddr;
 
@@ -571,7 +571,7 @@ int nvm_create_sq(uint32_t node_id, uint32_t intno, const nvm_queue_t* cq, nvm_q
     struct command cmd;
     memset(&cmd, 0, sizeof(cmd));
 
-    _clear_queue(queue, sizeof(struct completion), no, SQ_DBL(regptr, no, 0));
+    _clear_queue(queue, sizeof(struct command), no, SQ_DBL(regptr, no, 0));
     queue->virt_addr = vaddr;
     queue->bus_addr = paddr;
 
