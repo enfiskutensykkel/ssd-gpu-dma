@@ -3,16 +3,6 @@
 
 # Object files
 *.o
-*.ko
 
-# Intermediate files
-*.mod.c
-.*.cmd
-
-# Kernel symbols
-Module.symvers
-modules.order
-.tmp_versions/*
-
-# Userspace executable
-cunvme
+# Ignore build directories
+build/*

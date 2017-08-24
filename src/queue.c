@@ -1,7 +1,6 @@
-#include "types.h"
-#include "queue.h"
-#include "command.h"
-#include "util.h"
+#include <nvm_types.h>
+#include <nvm_queue.h>
+#include <nvm_util.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
@@ -11,7 +10,7 @@
 #define PHASE(p)    _RB(*CPL_STATUS(p),  0,  0) // Offset to phase tag bit
 
 
-struct command* sq_enqueue(nvm_queue_t* sq)
+nvm_cmd_t* sq_enqueue(nvm_queue_t* sq)
 {
     // Check the capacity
     if ((sq->tail - sq->head) % sq->max_entries == sq->max_entries - 1)
@@ -20,8 +19,7 @@ struct command* sq_enqueue(nvm_queue_t* sq)
     }
 
     // Get slot at end of queue
-    struct command* ptr = 
-        (struct command*) (((unsigned char*) sq->virt_addr) + sq->entry_size * sq->tail);
+    nvm_cmd_t* ptr = (nvm_cmd_t*) (((unsigned char*) sq->vaddr) + sq->entry_size * sq->tail);
 
     // Increase tail pointer and wrap around if necessary
     if (++sq->tail >= sq->max_entries)
@@ -37,10 +35,9 @@ struct command* sq_enqueue(nvm_queue_t* sq)
 }
 
 
-struct completion* cq_poll(const nvm_queue_t* cq)
+nvm_cpl_t* cq_poll(const nvm_queue_t* cq)
 {
-    struct completion* ptr = 
-        (struct completion*) (((unsigned char*) cq->virt_addr) + cq->entry_size * cq->head);
+    nvm_cpl_t* ptr = (nvm_cpl_t*) (((unsigned char*) cq->vaddr) + cq->entry_size * cq->head);
 
     // Check if new completion is ready by checking the phase tag
     if (!!PHASE(ptr) != cq->phase)
@@ -52,9 +49,9 @@ struct completion* cq_poll(const nvm_queue_t* cq)
 }
 
 
-struct completion* cq_dequeue(nvm_queue_t* cq)
+nvm_cpl_t* cq_dequeue(nvm_queue_t* cq)
 {
-    struct completion* ptr = cq_poll(cq);
+    nvm_cpl_t* ptr = cq_poll(cq);
 
     if (ptr != NULL)
     {
@@ -88,10 +85,10 @@ static inline void delay(uint64_t* remaining_nsecs)
 }
 
 
-struct completion* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout)
+nvm_cpl_t* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout)
 {
     uint64_t nsecs = timeout * 1000000UL;
-    struct completion* cpl = cq_dequeue(cq);
+    nvm_cpl_t* cpl = cq_dequeue(cq);
 
     while (cpl == NULL && nsecs > 0)
     {
@@ -111,11 +108,11 @@ void sq_submit(const nvm_queue_t* sq)
 
 void cq_update(const nvm_queue_t* cq)
 {
-    *((volatile uint32_t*) cq->db) = cq->head;
+    *((volatile uint32_t*) cq->db) = cq->head; // FIXME: Check that it only moves forward
 }
 
 
-int sq_update(nvm_queue_t* sq, const struct completion* cpl)
+int sq_update(nvm_queue_t* sq, const nvm_cpl_t* cpl)
 {
     if (cpl == NULL)
     {
@@ -125,7 +122,7 @@ int sq_update(nvm_queue_t* sq, const struct completion* cpl)
     if (sq->no == *CPL_SQID(cpl))
     {
         // Update head pointer of submission queue
-        sq->head = *CPL_SQHD(cpl);
+        sq->head = *CPL_SQHD(cpl); // FIXME: Check that it only moves forward
         return 0;
     }
 

@@ -1,19 +1,14 @@
-#ifndef __NVME_QUEUE_H__
-#define __NVME_QUEUE_H__
+#ifndef __DIS_NVM_QUEUE_H__
+#define __DIS_NVM_QUEUE_H__
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#ifndef __CUDACC__
-#define __host__
-#define __device__
-#endif
+#include <stdint.h>
 
-
-#include "types.h"
-
-struct completion;
-struct command;
+struct nvm_queue;
+struct nvm_command;
+struct nvm_completion;
 
 
 /* Enqueue a submission command
@@ -23,8 +18,7 @@ struct command;
  *
  * Returns a pointer to the queue entry. or NULL if the queue is full.
  */
-__host__ __device__
-struct command* sq_enqueue(nvm_queue_t* sq);
+struct nvm_command* sq_enqueue(struct nvm_queue* sq);
 
 
 /* Poll completion queue
@@ -35,8 +29,7 @@ struct command* sq_enqueue(nvm_queue_t* sq);
  * Returns a pointer to an unprocessed completion entry, or NULL if the queue
  * is empty.
  */
-__host__ __device__
-struct completion* cq_poll(const nvm_queue_t* cq);
+struct nvm_completion* cq_poll(const struct nvm_queue* cq);
 
 
 /* Dequeue completion queue entry
@@ -48,8 +41,7 @@ struct completion* cq_poll(const nvm_queue_t* cq);
  *
  * Returns a pointer to the completion entry, or NULL if the queue is empty.
  */
-__host__ __device__
-struct completion* cq_dequeue(nvm_queue_t* cq);
+struct nvm_completion* cq_dequeue(struct nvm_queue* cq);
 
 
 /* Dequeue completion queue entry
@@ -63,8 +55,7 @@ struct completion* cq_dequeue(nvm_queue_t* cq);
  * Note that this can only be called from the host, as it makes no sense to
  * block a CUDA kernel.
  */
-__host__
-struct completion* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout);
+struct nvm_completion* cq_dequeue_block(struct nvm_queue* cq, uint64_t timeout);
 
 
 /* Update SQ tail pointer
@@ -73,16 +64,14 @@ struct completion* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout);
  * The caller must make sure that all commands are prepared before calling
  * this.
  */
-__host__ __device__
-void sq_submit(const nvm_queue_t* sq);
+void sq_submit(const struct nvm_queue* sq);
 
 
 /* Update SQ head pointer
  *
  * Update SQ head pointer according to the head pointer field in a completion.
  */
-__host__ __device__
-int sq_update(nvm_queue_t* sq, const struct completion* cpl);
+int sq_update(struct nvm_queue* sq, const struct nvm_completion* cpl);
 
 
 /* Update controller's CQ head pointer
@@ -91,8 +80,7 @@ int sq_update(nvm_queue_t* sq, const struct completion* cpl);
  * All completion pointers acquired before this must be discarded after
  * calling this.
  */
-__host__  __device__
-void cq_update(const nvm_queue_t* cq); 
+void cq_update(const struct nvm_queue* cq); 
 
 
 #ifdef __cplusplus

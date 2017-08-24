@@ -1,11 +1,18 @@
-#include "command.h"
-#include "util.h"
+#include <nvm_util.h>
+#include <nvm_types.h>
+#include <nvm_command.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <errno.h>
 
 
-uint64_t build_prp_list(size_t page_size, void* prp_list, size_t n_prps, const uint64_t* list_addrs, const uint64_t* prp_addrs)
+const char* nvm_strerror(const nvm_cpl_t* cpl)
+{
+    return "OK";
+}
+
+
+uint64_t nvm_prp_list(void* prp_list, size_t page_size, size_t n_prps, const uint64_t* list_addrs, const uint64_t* prp_addrs)
 {
     uint64_t* list_ptr = (uint64_t*) prp_list;
     size_t list_pos = 0;
@@ -27,7 +34,7 @@ uint64_t build_prp_list(size_t page_size, void* prp_list, size_t n_prps, const u
 }
 
 
-void cmd_data_ptr(struct command* cmd, uint64_t prp1, uint64_t prp2)
+void nvm_cmd_data_ptr(nvm_cmd_t* cmd, uint64_t prp1, uint64_t prp2)
 {
     cmd->dword[0] &= ~( (0x03 << 14) | (0x03 << 8) );
 
@@ -38,7 +45,7 @@ void cmd_data_ptr(struct command* cmd, uint64_t prp1, uint64_t prp2)
 }
 
 
-void cmd_header(struct command* cmd, uint8_t opcode, uint32_t ns_id)
+void nvm_cmd_header(nvm_cmd_t* cmd, uint8_t opcode, uint32_t ns_id)
 {
     cmd->dword[0] &= 0xffff0000;
     cmd->dword[0] |= (0x00 << 14) | (0x00 << 8) | (opcode & 0x7f);
