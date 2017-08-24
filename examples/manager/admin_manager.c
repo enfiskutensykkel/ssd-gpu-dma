@@ -1,8 +1,6 @@
 #include <nvm_types.h>
 #include <nvm_ctrl.h>
 #include <nvm_manager.h>
-#include <nvm_command.h>
-#include <nvm_admin.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <getopt.h>
@@ -15,6 +13,60 @@
 #include <sisci_types.h>
 #include <sisci_api.h>
 #include <sisci_error.h>
+
+
+static bool interrupted = false;
+
+static pthread_cond_t wq = PTHREAD_COND_INITIALIZER;
+
+
+static void handle_signal()
+{
+    interrupted = true;
+    pthread_cond_broadcast(&wq);
+}
+
+
+int run_daemon()
+{
+    int err;
+    pthread_mutex_t wq_lock;
+    sig_t sigterm_handler;
+    sig_t sigint_handler;
+
+    err = pthread_mutex_init(&wq_lock, NULL);
+    if (err != 0)
+    {
+        return err;
+    }
+
+    err = pthread_mutex_lock(&wq_lock);
+    if (err != 0)
+    {
+        pthread_mutex_destroy(&wq_lock);
+        return err;
+    }
+
+    sigterm_handler = signal(SIGTERM, (sig_t) handle_signal);
+    sigint_handler = signal(SIGINT, (sig_t) handle_signal);
+
+    err = 0;
+    while (!interrupted)
+    {
+        err = pthread_cond_wait(&wq, &wq_lock);
+        if (err != 0)
+        {
+            goto out;
+        }
+    }
+
+out:
+    pthread_mutex_unlock(&wq_lock);
+    pthread_mutex_destroy(&wq_lock);
+    signal(SIGTERM, sigterm_handler);
+    signal(SIGINT, sigint_handler);
+    return err;
+}
 
 
 static int identify_controller(nvm_mngr_t manager, nvm_ctrl_info_t* features)
@@ -57,7 +109,6 @@ static void print_controller_info(nvm_ctrl_info_t* info)
 }
 
 
-
 static void give_usage(const char* program_name)
 {
     fprintf(stderr, "Usage: %s --ctrl=<dev id> [--intno=<intr no>] [--adapt=<adapter no>] [--identify]\n", program_name);
@@ -67,7 +118,7 @@ static void give_usage(const char* program_name)
 static void show_help(const char* program_name)
 {
     give_usage(program_name);
-    fprintf(stderr, "\nRun NVME admin queue manager service.\n\n"
+    fprintf(stderr, "\nRun NVME admin queue manager daemon.\n\n"
             "    --ctrl=<dev id>        Specify SmartIO device ID to NVME controller\n"
             "    --intno=<intr no>      Specify interrupt number to register\n"
             "    --adapt=<adapter no>   DIS adapter number\n"
@@ -88,8 +139,6 @@ int main(int argc, char** argv)
         { "show", no_argument, NULL, 's' },
         { "controller", required_argument, NULL, 'c' },
         { "ctrl", required_argument, NULL, 'c' },
-        { "device", required_argument, NULL, 'c' },
-        { "dev", required_argument, NULL, 'c' },
         { "interrupt", required_argument, NULL, 'i' },
         { "intr", required_argument, NULL, 'i' },
         { "intno", required_argument, NULL, 'i' },
@@ -232,14 +281,36 @@ int main(int argc, char** argv)
         fprintf(stdout, "SKIP\n");
     }
 
+    fprintf(stdout, "Exporting on adapter...........");
+    fflush(stdout);
+
+    err = nvm_mngr_export(manager, adapter, interrupt_no);
+    if (err != 0)
+    {
+        fprintf(stdout, "FAIL\n");
+        nvm_mngr_free(manager);
+        nvm_ctrl_free(&controller);
+        fprintf(stderr, "Failed to export manager: %s\n", strerror(err));
+        exit(1);
+    }
+    fprintf(stdout, "DONE\n");
+
+    fprintf(stdout, "Running NVME admin manager on node %u (interrupt %u)...\n", node_id, interrupt_no);
+
     if (identify)
     {
         print_controller_info(&features);
     }
 
-    fprintf(stdout, "Running NVME admin manager on node %u (interrupt %u)...\n", node_id, interrupt_no);
-
-
+    err = run_daemon();
+    if (err != 0)
+    {
+        fprintf(stderr, "Unexpected error: %s\n", strerror(err));
+        nvm_mngr_free(manager);
+        nvm_ctrl_free(&controller);
+        exit(2);
+    }
+    
     nvm_mngr_free(manager);
     nvm_ctrl_free(&controller);
 

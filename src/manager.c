@@ -32,9 +32,9 @@
 /* Format of interrupt data */
 struct command_request
 {
+    nvm_cmd_t                   cmd;        // The admin command we want to execute remotely
     uint32_t                    node_id;    // Local node identifier so manager can "call" back
     uint32_t                    intno;      // Local interrupt number so manager can "call" back
-    nvm_cmd_t                   cmd;        // The admin command we want to execute remotely
 };
 
 
@@ -392,7 +392,7 @@ static sci_callback_action_t handle_command_request(
     pthread_mutex_unlock(&mngr->lk);
 
     // Return completion to remote command initiator
-    nvm_remote_cpl(cmdreq->node_id, export->adapter, cmdreq->node_id, &cpl, mngr->ctrl->timeout / 2);
+    nvm_remote_cpl(cmdreq->node_id, export->adapter, cmdreq->intno, &cpl, mngr->ctrl->timeout / 2);
 
     return SCI_CALLBACK_CONTINUE;
 }
@@ -413,12 +413,12 @@ static sci_error_t trigger_interrupt(sci_desc_t sd, uint32_t node_id, uint32_t a
 #endif
         return err;
     }
-
+    
     SCITriggerDataInterrupt(interrupt, data, len, 0, &err);
     if (err != SCI_ERR_OK)
     {
 #ifndef NDEBUG
-        fprintf(stderr, "Failed to trigger data interrupt %u on node %u: %x\n", intno, node_id, err);
+        fprintf(stderr, "Failed to trigger data interrupt %u on node %u: %s\n", intno, node_id, SCIGetErrorString(err));
 #endif
         status = err;
         SCIDisconnectDataInterrupt(interrupt, 0, &err);
@@ -456,9 +456,11 @@ int nvm_remote_cmd(uint32_t remote_node_id, uint32_t adapter, uint32_t remote_in
     }
 
     sci_local_data_interrupt_t intr;
-    unsigned local_intno = remote_intno; // FIXME: Data interrupts should work without SCI_FLAG_FIXED_INTO soon
+    //unsigned local_intno = remote_intno; // FIXME: Data interrupts should work without SCI_FLAG_FIXED_INTO soon
+    unsigned local_intno = 0;
 
-    SCICreateDataInterrupt(sd, &intr, adapter, &local_intno, NULL, NULL, SCI_FLAG_FIXED_INTNO /* FIXME: remove this */, &err);
+    //SCICreateDataInterrupt(sd, &intr, adapter, &local_intno, NULL, NULL, SCI_FLAG_FIXED_INTNO /* FIXME: remove this */, &err);
+    SCICreateDataInterrupt(sd, &intr, adapter, &local_intno, NULL, NULL, 0, &err);
     if (err != SCI_ERR_OK)
     {
 #ifndef NDEBUG

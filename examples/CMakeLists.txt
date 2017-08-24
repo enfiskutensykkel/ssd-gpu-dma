@@ -4,7 +4,8 @@ project (disnvme)
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 
-add_sisci_executable (backend ${CMAKE_PROJECT_NAME} Threads::Threads "${PROJECT_SOURCE_DIR}/manager/admin_manager.c")
+add_sisci_executable (daemon nvm_service Threads::Threads "${PROJECT_SOURCE_DIR}/manager/admin_manager.c")
+add_sisci_executable (util nvm_util "" "${PROJECT_SOURCE_DIR}/util/util.c")
 
 add_executable (native "${PROJECT_SOURCE_DIR}/native/test.c")
 target_link_libraries (native libnvme)

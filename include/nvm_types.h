@@ -70,10 +70,14 @@ typedef struct nvm_completion nvm_cpl_t;
 
 
 /* NVM command data type (64 bytes) */
-struct __align__(64) nvm_command
+//struct __align__(64) nvm_command
+//{
+//    uint32_t                dword[16];
+//} __attribute__((aligned (64)));
+struct nvm_command
 {
     uint32_t                dword[16];
-} __attribute__((aligned (64)));
+};
 
 
 /* Convenience type for command struct */
