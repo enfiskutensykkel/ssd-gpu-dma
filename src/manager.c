@@ -27,8 +27,6 @@
 #endif
 
 
-#define SCIGetErrorString(x) SCIGetErrorStr(x) // FIXME: Remove this when using updated version of SISCI
-
 
 #ifdef _SISCI
 /* Format of interrupt data */
@@ -217,8 +215,6 @@ int nvm_ctrl_get_info(nvm_mngr_t mngr, nvm_ctrl_info_t* info)
     memcpy(info->pci_vendor, bytes, 4);
     memcpy(&info->serial_no, bytes + 4, 20);
     memcpy(&info->model_no, bytes + 24, 40);
-
-    fprintf(stderr, "So far so good\n");
 
     info->max_data_size = bytes[77] * (1 << (12 + CAP$MPSMIN(mngr->ctrl->mm_ptr)));
     info->sq_entry_size = 1 << _RB(bytes[512], 3, 0);
@@ -601,7 +597,7 @@ static int create_queue_memory(const nvm_ctrl_t* ctrl, struct memory* mem, uint3
         fprintf(stderr, "Failed to export queue memory for controller: %s\n", SCIGetErrorString(err));
 #endif
         status = EIO;
-        goto unmap;
+        goto remove;
     }
 
     SCISetSegmentAvailable(mem->segment, ctrl->dev_ref->adapter, 0, &err);
@@ -611,10 +607,10 @@ static int create_queue_memory(const nvm_ctrl_t* ctrl, struct memory* mem, uint3
         fprintf(stderr, "Failed to export queue memory for controller: %s\n", SCIGetErrorString(err));
 #endif
         status = EIO;
-        goto unmap;
+        goto remove;
     }
 
-    SCIMapSegmentForDevice(mem->segment,ctrl->dev_ref->device, ctrl->dev_ref->adapter, &mem->ioaddr, 0, &err);
+    SCIMapSegmentForDevice(mem->segment, ctrl->dev_ref->device, ctrl->dev_ref->adapter, &mem->ioaddr, 0, &err);
     if (err != SCI_ERR_OK)
     {
 #ifndef NDEBUG
@@ -629,19 +625,19 @@ static int create_queue_memory(const nvm_ctrl_t* ctrl, struct memory* mem, uint3
 set_unavailable:
     do
     {
-        SCISetSegmentUnavailable(mngr->segment, mngr->ctrl->dev_ref->adapter, 0, &err);
+        SCISetSegmentUnavailable(mem->segment, ctrl->dev_ref->adapter, 0, &err);
     }
     while (err == SCI_ERR_BUSY);
 
 remove:
     do
     {
-        SCIRemoveSegment(mngr->segment, 0, &err);
+        SCIRemoveSegment(mem->segment, 0, &err);
     }
     while (err == SCI_ERR_BUSY);
 
 close:
-    SCIClose(mngr->sd, 0, &err);
+    SCIClose(mem->sd, 0, &err);
 
     return status;
 }
@@ -774,7 +770,7 @@ void sisci_free(nvm_mngr_t manager)
         return;
     }
 
-    remove_all_exports(manager->exports_head, manager->n_exports);
+    remove_all_exports(manager->exports_head);
 
     do
     {
@@ -814,12 +810,12 @@ int nvm_mngr_init(nvm_mngr_t* handle, const nvm_ctrl_t* ctrl, uint32_t segment_i
     }
 
     uint64_t ioaddrs[3];
-    ioaddr[0] = (uint64_t) segment_mem.ioaddr;
-    ioaddr[1] = ((uint64_t) segment_mem.ioaddr) + ctrl->page_size;
-    ioaddr[2] = ((uint64_t) segment_mem.ioaddr) + 2 * ctrl->page_size;
+    ioaddrs[0] = (uint64_t) segment_mem.ioaddr;
+    ioaddrs[1] = ((uint64_t) segment_mem.ioaddr) + ctrl->page_size;
+    ioaddrs[2] = ((uint64_t) segment_mem.ioaddr) + 2 * ctrl->page_size;
     
     memset(vaddr, 0, 3 * ctrl->page_size);
-    err = nvm_mngr_init_raw(handle, ctrl, vaddr, ioaddrs);
+    err = nvm_mngr_init_raw(handle, ctrl, vaddr, 3, ioaddrs);
     if (err != 0)
     {
         do
@@ -827,14 +823,15 @@ int nvm_mngr_init(nvm_mngr_t* handle, const nvm_ctrl_t* ctrl, uint32_t segment_i
             SCIUnmapSegment(map, 0, &status);
         }
         while (status == SCI_ERR_BUSY);
+
+        return err;
     }
 
-    manager->memory = segment_mem;
-    manager->map = map;
-    manager->n_exports = 0;
-    manager->exports_head = NULL;
+    (*handle)->memory = segment_mem;
+    (*handle)->map = map;
+    (*handle)->n_exports = 0;
+    (*handle)->exports_head = NULL;
 
-    *handle = manager;
     return 0;
 }
 

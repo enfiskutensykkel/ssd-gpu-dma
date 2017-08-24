@@ -9,7 +9,7 @@ set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -pedantic" CACHE INTERNAL "" 
 set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -DDEBUG" CACHE INTERNAL "" FORCE)
 
 # Try to find SISCI
-set (DIS "/opt/DIS2" CACHE PATH "SISCI install location")
+set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 find_path (sisci_include NAMES sisci_types.h sisci_api.h sisci_error.h PATHS "${DIS}")
 find_library (sisci_lib NAMES sisci PATHS "${DIS}/lib64" "${DIS}/lib")
 

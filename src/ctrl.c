@@ -19,8 +19,6 @@
 #include <sisci_types.h>
 #include <sisci_api.h>
 #include <sisci_error.h>
-
-#define SCIGetErrorString(x) SCIGetErrorStr(x) // FIXME: Remove this when using updated version of SISCI
 #endif /* #ifdef _SISCI */
 
 

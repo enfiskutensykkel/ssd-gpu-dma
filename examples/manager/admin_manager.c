@@ -16,8 +16,6 @@
 #include <sisci_api.h>
 #include <sisci_error.h>
 
-#define SCIGetErrorString(err) SCIGetErrorStr(err)
-
 
 static int identify_controller(nvm_mngr_t manager, nvm_ctrl_info_t* features)
 {
