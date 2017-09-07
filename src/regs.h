@@ -46,4 +46,4 @@
 #define CQ_DBL(p, y, dstrd)    \
         ((volatile uint32_t*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y) + 1) * (4 << (dstrd)))) )
 
-#endif
+#endif /* __DIS_NVM_INTERNAL_REGS_H__ */

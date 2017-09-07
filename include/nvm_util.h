@@ -5,7 +5,7 @@
 
 
 /* Convenience function for creating a bit mask */
-static inline uint64_t bitmask(int hi, int lo)
+static inline uint64_t _nvm_bitmask(int hi, int lo)
 {
     uint64_t mask = 0;
 
@@ -18,38 +18,28 @@ static inline uint64_t bitmask(int hi, int lo)
 }
 
 
-/* Convenience function for getting the base-2 logarithm of a number */
-static inline uint32_t b2log(uint32_t n)
-{
-    uint32_t count = 0;
-
-    while (n > 0)
-    {
-        ++count;
-        n >>= 1;
-    }
-
-    return count - 1;
-}
-
-
 /* Get minimum of two values */
 #define _MIN(a, b) ( (a) <= (b) ? (a) : (b) )
 
 
 /* Extract specific bits */
 #define _RB(v, hi, lo)   \
-    ( ( (v) & bitmask((hi), (lo)) ) >> (lo) )
+    ( ( (v) & _nvm_bitmask((hi), (lo)) ) >> (lo) )
 
 
 /* Set specifics bits */
 #define _WB(v, hi, lo)   \
-    ( ( (v) << (lo) ) & bitmask((hi), (lo)) )
+    ( ( (v) << (lo) ) & _nvm_bitmask((hi), (lo)) )
 
 
 /* Offset to a register */
 #define _REG(p, offs, bits) \
     ((volatile uint##bits##_t *) (((volatile unsigned char*) ((volatile void*) (p))) + (offs)))
+
+
+/* Get the virtual address from a DMA window descriptor */
+#define DMA_SIZE(size, page_size)   (((size) + (page_size) - 1) & ~((page_size) - 1))
+#define DMA_VADDR(p)                ((p)->vaddr)
 
 
 /* Standard fields in a command */

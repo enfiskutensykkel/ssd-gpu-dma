@@ -4,111 +4,85 @@
 extern "C" {
 #endif
 
+#include <nvm_types.h>
 #include <stddef.h>
-
-struct nvm_manager;
-struct nvm_command;
-struct nvm_completion;
-struct nvm_controller_information;
+#include <stdint.h>
+#include <stdbool.h>
 
 
+#ifdef __DIS_CLUSTER__
 
-
-/* NVM controller manager handle
+/*
+ * Remote command accepter callback.
  *
- * Handle to the controller manager. The controller manager is responsible
- * for administrating the controller's admin queues (ASQ and ACQ) in a 
- * thread-safe manner. Only one manager per controller should be created.
+ * Callback function called whenever a remote NVM admin command is received.
+ * Should indicate whether or not a remote admin command should be accepted or
+ * dismissed by returning true for accept or false for dismiss. Note that the
+ * callback is also allowed to make changes to the command, although no 
+ * no signalling mechanism is in place for notifying the remote caller of any
+ * changes.
  */
-typedef struct nvm_manager* nvm_mngr_t;
+typedef bool (*nvm_rpc_filter_t)(uint32_t dis_node_id, uint32_t dis_adapter, uint32_t dis_intr_no, nvm_cmd_t* cmd);
+
+#endif /* _SISCI */
+
+
+/* 
+ * Register as controller manager.
+ *
+ * Register the local process as the dedicated controller manager, responsible 
+ * for exclusive access to the NVM admin queues (ASQ and ACQ). This function
+ * will initialize queue descriptors and reset the controller. Make sure that
+ * the DMA window for the queue memory is at least two pages large.
+ *
+ * Access to the admin queues are available through an RPC-like interface.
+ *
+ * Note: This function will implicitly reset the controller.
+ */
+int nvm_manager_register(nvm_manager_t* manager, const nvm_ctrl_t ctrl, nvm_dma_t queue_memory);
 
 
 /*
- * Initialize a NVM manager
+ * Unregister as controller manager.
  *
- * Note: At least three pages
+ * Stop relaying admin commands and release resources.
  */
-int nvm_mngr_init_raw(nvm_mngr_t* mngr, const struct nvm_controller* ctrl, void* vaddr, size_t n_ioaddrs, const uint64_t* ioaddrs);
+void nvm_manager_unregister(nvm_manager_t manager);
+
+
+
+#ifdef __DIS_CLUSTER__
+
+/* 
+ * Enable remote commands.
+ *
+ * Enables relaying of remote admin commands on the specified DIS adapter.
+ * The accepter callback indicates on an per command basis whether or not the
+ * command should be relayed to the controller or not.
+ *
+ * The manager will relay NVM admin commands from remote hosts to the local 
+ * admin SQ, and send the corresponding completion back to the remote 
+ * command initiator. There should be only one manager per controller in a
+ * cluster. However, the manager must be manually enabled on the desired
+ * DIS adapters.
+ *
+ */
+int nvm_dis_rpc_enable(nvm_manager_t manager, uint32_t dis_adapter, uint32_t dis_intr_no, nvm_rpc_filter_t filter);
 
 
 /*
- * Release and free resources acquired by the controller manager.
+ * Disable remote commands.
+ *
+ * Stop relaying admin commands from remote nodes connected to the specified DIS adapter.
  */
-void nvm_mngr_free(nvm_mngr_t mngr);
+int nvm_dis_rpc_disable(nvm_manager_t manager, uint32_t dis_adapter);
 
 
-/*
- * Relay an NVM admin command to the controller manager
- *
- * Relay an NVM admin command to the controller manager that controls the admin
- * queues (ASQ and ACQ). The function will block until either a timeout occurs
- * or until the controller manager replies with an NVM completion.
- *
- * Note: Caller should use a timeout of at least twice the controller's timeout
- *
- * Note: This function is very inefficient and should typically only be called
- *       in order to create or delete IO queues
- */
-int nvm_local_cmd(nvm_mngr_t mngr, const struct nvm_command* cmd, struct nvm_completion* cpl, uint64_t timeout);
+#endif 
 
 
-/*
- * Get controller information.
- */
-int nvm_ctrl_get_info(nvm_mngr_t mngr, nvm_ctrl_info_t* info);
-
-
-#ifdef _SISCI /* Only expose the following if SISCI is used */
-
-/*
- * Create NVM controller manager
- *
- * Create admin queues (ASQ and ACQ) and manage NVM admin commands.
- */
-int nvm_mngr_init(nvm_mngr_t* mngr, const struct nvm_controller* ctrl, uint32_t unique_id);
-
-
-/*
- * Export NVM manager and accept remote admin commands on a specified adapter.
- */
-int nvm_mngr_export(nvm_mngr_t mngr, uint32_t adapter, uint32_t intno);
-
-
-/*
- * Stop accepting remote admin commands on a specific adapter.
- */
-int nvm_mngr_unexport(nvm_mngr_t mngr, uint32_t adapter);
-
-
-/*
- * Relay an NVM admin command to the controller manager
- *
- * Relay an NVM admin command to the controller manager that controls the admin
- * queues (ASQ and ACQ). The function will block until either a timeout occurs
- * or until the controller manager replies with an NVM completion.
- *
- * Note: Caller should use a timeout of at least twice the controller's timeout
- *
- * Note: This function is very inefficient and should typically only be called
- *       in order to create or delete IO queues
- */
-int nvm_remote_cmd(uint32_t node_id, uint32_t adapter, uint32_t intno, const struct nvm_command* cmd, struct nvm_completion* cpl, uint64_t timeout);
-
-
-/*
- * Complete a relayed command with a completion
- *
- * Send completion reply back to admin command initiator. 
- *
- * Note: This function is used internally by the controller manager and 
- *       should not be called directly.
- */
-int nvm_remote_cpl(uint32_t node_id, uint32_t adapter, uint32_t intno, const struct nvm_completion* cpl, uint64_t timeout);
-
-
-#endif /* #ifdef _SISCI */
 
 #ifdef __cplusplus
 }
 #endif
-#endif /* #ifdef __DIS_NVM_MNGR_H__ */
+#endif /* #ifdef __DIS_NVM_MANAGER_H__ */

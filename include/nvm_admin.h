@@ -59,7 +59,15 @@ void nvm_admin_sq_delete(struct nvm_command* cmd, const struct nvm_queue* sq, co
 void nvm_admin_cq_delete(struct nvm_command* cmd, const struct nvm_queue*cq);
 
 
+/* 
+ * Identify controller.
+ *
+ * Build an NVM admin command for identifying the controller.
+ */
+void nvm_admin_identify_ctrl(struct nvm_command* cmd, uint64_t ioaddr);
+
+
 #ifdef __cplusplus
 }
 #endif
-#endif /* __DIS_NVM_ADMIN_H__ */
+#endif /* #ifdef __DIS_NVM_ADMIN_H__ */

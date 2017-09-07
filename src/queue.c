@@ -5,15 +5,32 @@
 #include <stdint.h>
 #include <time.h>
 #include <errno.h>
+#include "regs.h"
+#include "util.h"
 
 
 #define PHASE(p)    _RB(*CPL_STATUS(p),  0,  0) // Offset to phase tag bit
 
 
+void nvm_queue_clear(nvm_queue_t* queue, const struct nvm_controller* ctrl, int cq, uint16_t no, void* vaddr, uint64_t ioaddr)
+{
+    queue->no = no;
+    queue->max_entries = 0;
+    queue->entry_size = cq ? sizeof(nvm_cpl_t) : sizeof(nvm_cmd_t);
+    queue->head = 0;
+    queue->tail = 0;
+    queue->phase = 1;
+    queue->vaddr = vaddr;
+    queue->ioaddr = ioaddr;
+    queue->db = cq ? CQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd) : SQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd);
+    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
+}
+
+
 nvm_cmd_t* sq_enqueue(nvm_queue_t* sq)
 {
     // Check the capacity
-    if ((sq->tail - sq->head) % sq->max_entries == sq->max_entries - 1)
+    if ((uint16_t) ((sq->tail - sq->head) % sq->max_entries) == sq->max_entries - 1)
     {
         return NULL;
     }
@@ -67,24 +84,6 @@ nvm_cpl_t* cq_dequeue(nvm_queue_t* cq)
 }
 
 
-/* Delay execution by one millisecond */
-static inline void delay(uint64_t* remaining_nsecs)
-{
-    if (*remaining_nsecs == 0)
-    {
-        return;
-    }
-
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = _MIN(1000000UL, *remaining_nsecs);
-
-    clock_nanosleep(CLOCK_REALTIME, 0, &ts, NULL);
-
-    *remaining_nsecs -= _MIN(1000000UL, *remaining_nsecs);
-}
-
-
 nvm_cpl_t* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout)
 {
     uint64_t nsecs = timeout * 1000000UL;
@@ -92,7 +91,7 @@ nvm_cpl_t* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout)
 
     while (cpl == NULL && nsecs > 0)
     {
-        delay(&nsecs);
+        nsecs = _nvm_delay_remain(nsecs);
         cpl = cq_dequeue(cq);
     }
 

@@ -1,129 +1,85 @@
+#ifdef _SISCI
+#include <sisci_types.h>
+#include <sisci_error.h>
+#include <sisci_api.h>
+#ifndef __DIS_CLUSTER__
+#define __DIS_CLUSTER__
+#endif
+#endif
+
 #include <nvm_types.h>
 #include <nvm_ctrl.h>
 #include <nvm_util.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
 #include <errno.h>
-#include <time.h>
+#include "device.h"
+#include "util.h"
 #include "regs.h"
+#include "dprintf.h"
 
-#ifndef NDEBUG
-#include <stdio.h>
-#endif
+
+/* Forward declaration */
+struct bar_reference;
+
 
 #ifdef _SISCI
-#include "pcidev.h"
-#include <sisci_types.h>
-#include <sisci_api.h>
-#include <sisci_error.h>
-#endif /* #ifdef _SISCI */
+/*
+ * Reference to a PCI device in the cluster.
+ *
+ * This structure is used to hold a SmartIO reference to the physical 
+ * controller.
+ */
+struct bar_reference
+{
+    struct nvm_device       device;         // Device reference
+    sci_remote_segment_t    segment;        // SISCI remote segment to device BAR
+    sci_map_t               map;            // SISCI memory map handle
+    size_t                  mm_size;        // Size of memory-mapped region
+    volatile void*          mm_ptr;         // Memory-mapped pointer to device BAR
+};
+#endif
+
+
+/*
+ * NVM controller handle container.
+ */
+struct handle_container
+{
+    struct bar_reference*       bar_ref;    // Device BAR reference handle
+    struct nvm_controller       ctrl;       // Actual controlle handle
+};
+
 
 
 /* Convenience defines */
-#define encode_page_size(ps)        b2log((ps) >> 12)
-#define encode_entry_size(es)       b2log(es)
+#define encode_page_size(ps)        _nvm_b2log((ps) >> 12)
+#define encode_entry_size(es)       _nvm_b2log(es)
 
 
-void nvm_queue_clear(nvm_queue_t* queue, const nvm_ctrl_t* ctrl, int cq, uint16_t no, void* vaddr, uint64_t ioaddr)
+
+/*
+ * Helper function to retrieve a controller handle's surrounding container.
+ */
+static inline struct handle_container* get_container(nvm_ctrl_t ctrl)
 {
-    queue->no = no;
-    queue->max_entries = 0;
-    queue->entry_size = cq ? sizeof(nvm_cpl_t) : sizeof(nvm_cmd_t);
-    queue->head = 0;
-    queue->tail = 0;
-    queue->phase = 1;
-    queue->vaddr = vaddr;
-    queue->ioaddr = ioaddr;
-    queue->db = cq ? CQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd) : SQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd);
-    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
+    return (struct handle_container*) (((unsigned char*) ctrl) - offsetof(struct handle_container, ctrl));
 }
 
 
-/* Delay execution by 1 millisecond */
-static inline uint64_t delay(uint64_t remaining)
+
+/*
+ * Helper function to retrieve a controller handle's surrounding container.
+ */
+static inline const struct handle_container* get_container_const(const struct nvm_controller* ctrl)
 {
-    if (remaining == 0)
-    {
-        return 0;
-    }
-
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = _MIN(1000000UL, remaining);
-
-    clock_nanosleep(CLOCK_REALTIME, 0, &ts, NULL);
-
-    remaining -= _MIN(1000000UL, remaining);
-    return remaining;
+    return (const struct handle_container*) (((const unsigned char*) ctrl) - offsetof(struct handle_container, ctrl));
 }
 
 
-int nvm_ctrl_init_raw(nvm_ctrl_t* handle, volatile void* mm_ptr, size_t mm_size)
-{
-    nvm_ctrl_t ctrl;
 
-    if (mm_size < NVM_CTRL_MEM_MINSIZE)
-    {
-        return EINVAL;
-    }
-
-    ctrl.dev_ref = NULL;
-    ctrl.mm_size = mm_size;
-    ctrl.mm_ptr = mm_ptr;
-
-    // Retrieve host's page size
-    long page_size = sysconf(_SC_PAGESIZE);
-    if (page_size == -1)
-    {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to retrieve host page size: %s\n", strerror(errno));
-#endif
-        return errno;
-    }
-
-    uint8_t host_page_size = encode_page_size(page_size);
-    uint8_t max_page_size = CAP$MPSMAX(ctrl.mm_ptr);
-    uint8_t min_page_size = CAP$MPSMIN(ctrl.mm_ptr);
-
-    if ( ! (min_page_size <= host_page_size && host_page_size <= max_page_size) )
-    {
-#ifndef NDEBUG
-        fprintf(stderr, "Host is configured with an unsupported page size\n");
-#endif
-        return ERANGE;
-    }
-
-    // Set controller properties
-    ctrl.page_size = page_size;
-    ctrl.dstrd = CAP$DSTRD(ctrl.mm_ptr);
-    ctrl.timeout = CAP$TO(ctrl.mm_ptr) * 500UL;
-    ctrl.max_entries = CAP$MQES(ctrl.mm_ptr) + 1; // CAP.MQES is 0's based
-    
-    *handle = ctrl;
-    return 0;
-}
-
-
-void nvm_ctrl_free(nvm_ctrl_t* ctrl)
-{
-    if (ctrl != NULL)
-    {
-#ifdef _SISCI
-        if (ctrl->dev_ref != NULL)
-        {
-            pci_dev_ref_put(ctrl->dev_ref);
-            free(ctrl->dev_ref);
-            ctrl->dev_ref = NULL;
-        }
-#endif
-    }
-}
-
-
-int nvm_ctrl_reset(const nvm_ctrl_t* ctrl, uint64_t acq_addr, uint64_t asq_addr)
+int nvm_ctrl_reset(const nvm_ctrl_t ctrl, uint64_t acq_addr, uint64_t asq_addr)
 {
     volatile uint32_t* cc = CC(ctrl->mm_ptr);
 
@@ -132,19 +88,17 @@ int nvm_ctrl_reset(const nvm_ctrl_t* ctrl, uint64_t acq_addr, uint64_t asq_addr)
 
     // Wait for CSTS.RDY to transition from 1 to 0
     uint64_t timeout = ctrl->timeout * 1000000UL;
-    uint64_t remaining = delay(timeout);
+    uint64_t remaining = _nvm_delay_remain(timeout);
 
     while (CSTS$RDY(ctrl->mm_ptr) != 0)
     {
         if (remaining == 0)
         {
-#ifndef NDEBUG
-            fprintf(stderr, "Timeout exceeded while waiting for reset\n");
-#endif
+            dprintf("Timeout exceeded while waiting for controller reset\n");
             return ETIME;
         }
 
-        remaining = delay(remaining);
+        remaining = _nvm_delay_remain(remaining);
     }
 
     // Set admin queue attributes
@@ -167,72 +121,177 @@ int nvm_ctrl_reset(const nvm_ctrl_t* ctrl, uint64_t acq_addr, uint64_t asq_addr)
     *cc = CC$IOCQES(cqes) | CC$IOSQES(sqes) | CC$MPS(encode_page_size(ctrl->page_size)) | CC$CSS(0) | CC$EN(1);
 
     // Wait for CSTS.RDY to transition from 0 to 1
-    remaining = delay(timeout);
+    remaining = _nvm_delay_remain(timeout);
 
     while (CSTS$RDY(ctrl->mm_ptr) != 1)
     {
         if (remaining == 0)
         {
-#ifndef NDEBUG
-            fprintf(stderr, "Timeout exceeded while waiting for enable\n");
-#endif
+            dprintf("Timeout exceeded while waiting for controller enable\n");
             return ETIME;
         }
 
-        remaining = delay(remaining);
+        remaining = _nvm_delay_remain(remaining);
     }
 
     return 0;
 }
 
 
+
+/* 
+ * Helper function to initialize the controller handle by reading
+ * the appropriate registers from the controller BAR.
+ */
+static int initialize_handle(nvm_ctrl_t ctrl, volatile void* mm_ptr, size_t mm_size)
+{
+    if (mm_size < NVM_CTRL_MEM_MINSIZE)
+    {
+        return EINVAL;
+    }
+
+    ctrl->mm_size = mm_size;
+    ctrl->mm_ptr = mm_ptr;
+
+    // Get the system page size
+    size_t page_size = _nvm_host_page_size();
+    if (page_size == 0)
+    {
+        return ENOMEM;
+    }
+
+    // Get the controller page size
+    uint8_t host_page_size = encode_page_size(page_size);
+    uint8_t max_page_size = CAP$MPSMAX(mm_ptr);
+    uint8_t min_page_size = CAP$MPSMIN(mm_ptr);
+
+    if ( ! (min_page_size <= host_page_size && host_page_size <= max_page_size) )
+    {
+        dprintf("System page size is incompatible with controller page size\n");
+        return ERANGE;
+    }
+
+    // Set controller properties
+    ctrl->page_size = page_size;
+    ctrl->dstrd = CAP$DSTRD(mm_ptr);
+    ctrl->timeout = CAP$TO(mm_ptr) * 500UL;
+    ctrl->max_entries = CAP$MQES(mm_ptr) + 1; // CAP.MQES is 0's based
+
+    return 0;
+}
+
+
+
+int nvm_ctrl_init(nvm_ctrl_t* ctrl_handle, volatile void* mm_ptr, size_t mm_size)
+{
+    int err;
+
+    *ctrl_handle = NULL;
+
+    struct handle_container* container = (struct handle_container*) malloc(sizeof(struct handle_container));
+    if (container == NULL)
+    {
+        dprintf("Failed to allocate controller handle: %s\n", strerror(errno));
+        return ENOMEM;
+    }
+
+    container->bar_ref = NULL;
+
+    err = initialize_handle(&container->ctrl, mm_ptr, mm_size);
+    if (err != 0)
+    {
+        free(container);
+        return err;
+    }
+
+    *ctrl_handle = &container->ctrl;
+    return 0;
+}
+
+
+
 #ifdef _SISCI
 
-static int connect_device_bar(struct pci_dev* dev, uint64_t dev_id, uint32_t adapter, int bar, size_t size)
+/*
+ * Look up device reference from a controller handle.
+ */
+const struct nvm_device* _nvm_dev_from_ctrl(const struct nvm_controller* ctrl)
 {
-    int status;
+    const struct handle_container* container = get_container_const(ctrl);
+
+    if (container->bar_ref != NULL)
+    {
+        return &container->bar_ref->device;
+    }
+
+    return NULL;
+}
+
+
+
+/* 
+ * Acquire a device reference.
+ */
+int _nvm_dev_get(struct nvm_device* dev, uint64_t dev_id, uint32_t adapter)
+{
     sci_error_t err;
 
     dev->device_id = dev_id;
     dev->adapter = adapter;
-    dev->mm_size = size;
 
     SCIOpen(&dev->sd, 0, &err);
     if (err != SCI_ERR_OK)
     {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to create SISCI virtual device: %s\n", SCIGetErrorString(err));
-#endif
-        status = EIO;
-        goto quit;
+        dprintf("Failed to create virtual device: %s\n", SCIGetErrorString(err));
+        return EIO;
     }
 
     SCIBorrowDevice(dev->sd, &dev->device, dev_id, 0, &err);
     if (err != SCI_ERR_OK)
     {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to increase device reference: %s\n", SCIGetErrorString(err));
-#endif
-        status = EIO;
-        goto close;
+        dprintf("Failed to increase device reference: %s\n", SCIGetErrorString(err));
+        SCIClose(dev->sd, 0, &err);
+        return ENODEV;
     }
+    
+    return 0;
+}
 
-    SCIConnectDeviceMemory(dev->sd, &dev->segment, dev->device, adapter, bar, 0, 0, &err);
+
+
+/*
+ * Release device reference.
+ */
+void _nvm_dev_put(struct nvm_device* dev)
+{
+    sci_error_t err;
+    SCIReturnDevice(dev->device, 0, &err);
+    SCIClose(dev->sd, 0, &err);
+}
+
+
+/* 
+ * Connect and memory-map to a BAR region on a PCI device in the cluster 
+ */
+static int connect_device_bar(struct bar_reference* dev, int bar, size_t size)
+{
+    int status;
+    sci_error_t err;
+
+    dev->mm_size = size;
+
+    SCIConnectDeviceMemory(dev->device.sd, &dev->segment, dev->device.device, dev->device.adapter, bar, 0, 0, &err);
     if (err != SCI_ERR_OK)
     {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to connect to device memory: %s\n", SCIGetErrorString(err));
-#endif
+        dprintf("Failed to connect to device memory: %s\n", SCIGetErrorString(err));
         status = EIO;
-        goto return_dev;
+        goto quit;
     }
 
     dev->mm_ptr = SCIMapRemoteSegment(dev->segment, &dev->map, 0, size, NULL, SCI_FLAG_IO_MAP_IOSPACE, &err);
     if (err != SCI_ERR_OK)
     {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to memory-map device memory: %s\n", SCIGetErrorString(err));
-#endif
+        dprintf("Failed to memory-map device memory: %s\n", SCIGetErrorString(err));
         status = EIO;
         goto disconnect;
     }
@@ -248,154 +307,138 @@ disconnect:
     
     if (err != SCI_ERR_OK)
     {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to disconnect from device memory: %s\n", SCIGetErrorString(err));
-#endif
+        dprintf("Failed to disconnect from device memory: %s\n", SCIGetErrorString(err));
     }
-
-return_dev:
-    SCIReturnDevice(dev->device, 0, &err);
-
-close:
-    SCIClose(dev->sd, 0, &err);
 
 quit:
     return status;
 }
 
 
-int pci_dev_ref_get(struct pci_dev* handle, uint64_t dev_id, uint32_t adapter, int bar, size_t size)
+
+/* 
+ * Acquire a reference to a device BAR region.
+ */
+static int get_bar_reference(struct bar_reference* ref, uint64_t dev_id, uint32_t adapter, int bar, size_t size)
 {
     int err;
-    struct pci_dev dev;
 
-    err = connect_device_bar(&dev, dev_id, adapter, bar, size);
+    err = _nvm_dev_get(&ref->device, dev_id, adapter);
     if (err != 0)
     {
         return err;
     }
 
-    *handle = dev;
+    err = connect_device_bar(ref, bar, size);
+    if (err != 0)
+    {
+        _nvm_dev_put(&ref->device);
+        return err;
+    }
+
     return 0;
 }
 
 
-void pci_dev_ref_put(struct pci_dev* dev)
+
+/*
+ * Release device BAR reference.
+ */
+static void put_bar_reference(struct bar_reference* bar)
 {
     sci_error_t err;
 
-    dev->mm_ptr = NULL;
-    dev->mm_size = 0;
+    bar->mm_ptr = NULL;
+    bar->mm_size = 0;
 
     do
     {
-        SCIUnmapSegment(dev->map, 0, &err);
+        SCIUnmapSegment(bar->map, 0, &err);
     }
     while (err == SCI_ERR_BUSY);
 
     if (err != SCI_ERR_OK)
     {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to unmap device memory: %s\n", SCIGetErrorString(err));
-#endif
+        dprintf("Failed to unmap device memory: %s\n", SCIGetErrorString(err));
     }
 
     do
     {
-        SCIDisconnectSegment(dev->segment, 0, &err);
+        SCIDisconnectSegment(bar->segment, 0, &err);
     }
     while (err == SCI_ERR_BUSY);
 
     if (err != SCI_ERR_OK)
     {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to disconnect from device memory: %s\n", SCIGetErrorString(err));
-#endif
+        dprintf("Failed to disconnect from device memory: %s\n", SCIGetErrorString(err));
     }
 
-    SCIReturnDevice(dev->device, 0, &err);
-    SCIClose(dev->sd, 0, &err);
+    _nvm_dev_put(&bar->device);
 }
 
 
-int nvm_ctrl_init(nvm_ctrl_t* handle, uint64_t device_id, uint32_t adapter)
+
+int nvm_dis_ctrl_init(nvm_ctrl_t* ctrl_handle, uint64_t device_id, uint32_t adapter)
 {
     int err;
-    nvm_ctrl_t ctrl;
 
-    struct pci_dev* dev = (struct pci_dev*) malloc(sizeof(struct pci_dev));
-    if (dev == NULL)
+    *ctrl_handle = NULL;
+
+    struct bar_reference* bar_ref = (struct bar_reference*) malloc(sizeof(struct bar_reference));
+    if (bar_ref == NULL)
     {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to allocate device reference: %s\n", strerror(errno));
-#endif
+        dprintf("Failed to allocate device reference handle: %s\n", strerror(errno));
         return ENOMEM;
     }
 
-    err = pci_dev_ref_get(dev, device_id, adapter, 0, NVM_CTRL_MEM_MINSIZE);
+    err = get_bar_reference(bar_ref, device_id, adapter, 0, NVM_CTRL_MEM_MINSIZE);
     if (err != 0)
     {
-        free(dev);
+        free(bar_ref);
         return err;
     }
 
-    err = nvm_ctrl_init_raw(&ctrl, dev->mm_ptr, dev->mm_size);
+    struct handle_container* container = (struct handle_container*) malloc(sizeof(struct handle_container));
+    if (container == NULL)
+    {
+        dprintf("Failed to allocate controller handle: %s\n", strerror(errno));
+        free(bar_ref);
+        return ENOMEM;
+    }
+
+    container->bar_ref = bar_ref;
+
+    err = initialize_handle(&container->ctrl, bar_ref->mm_ptr, bar_ref->mm_size);
     if (err != 0)
     {
-        free(dev);
+        free(bar_ref);
+        free(container);
         return err;
     }
 
-    ctrl.dev_ref = dev;
-    *handle = ctrl;
+    *ctrl_handle = &container->ctrl;
     return 0;
 }
 
+#endif /* _SISCI */
 
-int nvm_dma_window_create(sci_local_segment_t segment, const nvm_ctrl_t* ctrl, uint64_t* ioaddr)
+
+
+void nvm_ctrl_free(nvm_ctrl_t ctrl)
 {
-    sci_error_t err;
-    sci_ioaddr_t addr;
-
-    if (ctrl->dev_ref == NULL)
+    if (ctrl != NULL)
     {
-        return EINVAL;
-    }
+        struct handle_container* container = get_container(ctrl);
 
-    SCIMapSegmentForDevice(segment, ctrl->dev_ref->device, ctrl->dev_ref->adapter, &addr, 0, &err);
-    if (err != SCI_ERR_OK)
-    {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to create DMA window for controller: %s\n", SCIGetErrorString(err));
+#if _SISCI
+        if (container->bar_ref != NULL)
+        {
+            put_bar_reference(container->bar_ref);
+            free(container->bar_ref);
+        }
 #endif
-        return EIO;
-    }
 
-    *ioaddr = (uint64_t) addr;
-    return 0;
+        free(container);
+    }
 }
-
-
-int nvm_dma_window_destroy(sci_local_segment_t segment, const nvm_ctrl_t* ctrl)
-{
-    sci_error_t err;
-
-    if (ctrl->dev_ref == NULL)
-    {
-        return EINVAL;
-    }
-
-    SCIUnmapSegmentForDevice(segment, ctrl->dev_ref->device, ctrl->dev_ref->adapter, 0, &err);
-    if (err != SCI_ERR_OK)
-    {
-#ifndef NDEBUG
-        fprintf(stderr, "Failed to destroy DMA window for controller: %s\n", SCIGetErrorString(err));
-#endif
-        return EIO;
-    }
-
-    return 0;
-}
-
-#endif /* #ifdef _SISCI */
 
