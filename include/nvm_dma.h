@@ -45,7 +45,7 @@ int nvm_dma_window_init(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* vaddr, size_t pag
  * Note that the controller must "be alive" as long as DMA windows exists,
  * because the reference is used to unmap windows and release resources.
  */
-int nvm_dis_dma_window_init(nvm_dma_t* wnd, nvm_ctrl_t ctrl, sci_local_segment_t segment, void* vaddr, size_t size);
+int nvm_dis_dma_window_init(nvm_dma_t* wnd, nvm_ctrl_t ctrl, uint32_t dis_adapter, sci_local_segment_t segment, void* vaddr, size_t size);
 
 //#elif defined( _LKM )
 //

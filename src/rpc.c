@@ -9,11 +9,15 @@
 
 #include <nvm_types.h>
 #include <nvm_rpc.h>
+#include <nvm_command.h>
+#include <nvm_admin.h>
+#include <nvm_util.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <errno.h>
 #include <string.h>
+#include "regs.h"
 #include "rpc.h"
 #include "dprintf.h"
 
@@ -241,5 +245,85 @@ int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl, uint64_
     memcpy(cpl, &reply.cpl, sizeof(nvm_cpl_t));
 
     return status;
+}
+
+
+int nvm_rpc_identify(nvm_rpc_t ref, nvm_ctrl_t ctrl, nvm_dma_t wnd, nvm_ctrl_info_t* info)
+{
+    int err;
+    nvm_cmd_t command;
+    nvm_cpl_t completion;
+
+    if (info != NULL)
+    {
+        info->nvme_version = (uint32_t) *VER(ctrl->mm_ptr);
+        info->page_size = ctrl->page_size;
+        info->db_stride = 1UL << ctrl->dstrd;
+        info->timeout = ctrl->timeout;
+    }
+
+    if (info != NULL)
+    {
+        memset(&command, 0, sizeof(nvm_cmd_t));
+        nvm_cmd_header(&command, NVM_ADMIN_GET_FEATURES, 0);
+        nvm_cmd_data_ptr(&command, 0, 0);
+        command.dword[10] = (0x03 << 8) | 0x07;
+        command.dword[11] = 0;
+
+        err = nvm_rpc_raw_cmd(ref, &command, &completion, ctrl->timeout * 2);
+        if (err != 0)
+        {
+            return err;
+        }
+
+        if (SCT(&completion) != 0 && SC(&completion) != 0)
+        {
+            dprintf("GET FEATURES failed: %s\n",
+                    nvm_strerror(&completion));
+        }
+
+        info->max_sqs = (completion.dword[0] >> 16) + 1;
+        info->max_cqs = (completion.dword[0] & 0xffff) + 1;
+    }
+
+    if (wnd == NULL)
+    {
+        return 0;
+    }
+
+    memset(&command, 0, sizeof(nvm_cmd_t));
+    nvm_cmd_header(&command, NVM_ADMIN_IDENTIFY_CONTROLLER, 0);
+    nvm_cmd_data_ptr(&command, wnd->ioaddrs[0], 0);
+    command.dword[10] = (0 << 16) | 0x01;
+
+    err = nvm_rpc_raw_cmd(ref, &command, &completion, ctrl->timeout * 2);
+    if (err != 0)
+    {
+        return err;
+    }
+
+    if (SCT(&completion) != 0 && SC(&completion) != 0)
+    {
+        dprintf("IDENTIFY CONTROLLER failed: %s\n",
+                nvm_strerror(&completion));
+        return EIO;
+    }
+
+    if (wnd->vaddr != NULL && info != NULL)
+    {
+        unsigned char* bytes = ((unsigned char*) wnd->vaddr);
+
+        memcpy(info->pci_vendor, bytes, 4);
+        memcpy(info->serial_no, bytes + 4, 20);
+        memcpy(info->model_no, bytes + 24, 40);
+
+        info->max_data_size = bytes[77] * (1 << (12 + CAP$MPSMIN(ctrl->mm_ptr)));
+        info->sq_entry_size = 1 << _RB(bytes[512], 3, 0);
+        info->cq_entry_size = 1 << _RB(bytes[513], 3, 0);
+        info->max_out_cmds = *((uint16_t*) (bytes + 514));
+        info->n_ns = *((uint32_t*) (bytes + 516));
+    }
+
+    return 0;
 }
 

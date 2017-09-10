@@ -49,19 +49,19 @@ int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl, uint64_
 /*
  * Identify controller.
  */
-int nvm_rpc_identify(nvm_rpc_t ref, const nvm_ctrl_t* ctrl, const nvm_dma_t dma_window);
+int nvm_rpc_identify(nvm_rpc_t ref, nvm_ctrl_t ctrl, nvm_dma_t dma_window, nvm_ctrl_info_t* info);
 
 
 /*
  * Create IO completion queue (CQ)
  */
-int nvm_rpc_cq_create(nvm_rpc_t ref, const nvm_ctrl_t* ctrl, const nvm_dma_t dma_window, nvm_queue_t* cq);
+int nvm_rpc_cq_create(nvm_rpc_t ref, nvm_ctrl_t ctrl, nvm_dma_t dma_window, nvm_queue_t* cq);
 
 
 /*
  * Create IO submission queue (SQ)
  */
-int nvm_rpc_sq_create(nvm_rpc_t ref, const nvm_ctrl_t* ctrl, const nvm_queue_t* cq, const nvm_dma_t dma_window, nvm_queue_t* sq);
+int nvm_rpc_sq_create(nvm_rpc_t ref, nvm_ctrl_t ctrl, const nvm_queue_t* cq, nvm_dma_t dma_window, nvm_queue_t* sq);
 
 
 #ifdef __cplusplus

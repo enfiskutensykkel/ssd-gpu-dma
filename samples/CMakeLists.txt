@@ -4,7 +4,7 @@ project (disnvme)
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 
-add_sisci_executable (manager nvm_manager Threads::Threads "${PROJECT_SOURCE_DIR}/manager/admin_manager.c")
+add_sisci_executable (dis_manager nvm_dis_manager "Threads::Threads" "${PROJECT_SOURCE_DIR}/dis-manager/dis_manager.c")
 #add_sisci_executable (util nvm_util "" "${PROJECT_SOURCE_DIR}/util/util.c")
 
 #add_executable (native "${PROJECT_SOURCE_DIR}/native/test.c")

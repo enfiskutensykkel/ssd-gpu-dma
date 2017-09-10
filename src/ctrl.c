@@ -79,7 +79,7 @@ static inline const struct handle_container* get_container_const(const struct nv
 
 
 
-int nvm_ctrl_reset(const nvm_ctrl_t ctrl, uint64_t acq_addr, uint64_t asq_addr)
+int nvm_ctrl_reset(nvm_ctrl_t ctrl, uint64_t acq_addr, uint64_t asq_addr)
 {
     volatile uint32_t* cc = CC(ctrl->mm_ptr);
 

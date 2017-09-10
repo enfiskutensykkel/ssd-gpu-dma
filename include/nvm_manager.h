@@ -39,7 +39,7 @@ typedef bool (*nvm_rpc_filter_t)(uint32_t dis_node_id, uint32_t dis_adapter, uin
  *
  * Note: This function will implicitly reset the controller.
  */
-int nvm_manager_register(nvm_manager_t* manager, const nvm_ctrl_t ctrl, nvm_dma_t queue_memory);
+int nvm_manager_register(nvm_manager_t* manager, nvm_ctrl_t ctrl, nvm_dma_t queue_memory);
 
 
 /*

@@ -122,7 +122,7 @@ static sci_callback_action_t handle_rpc(nvm_manager_t manager, sci_local_data_in
     memset(&reply.cpl, 0, sizeof(nvm_cpl_t));
 
     // Check if the command is accepted
-    if ( handle->filter( request->node_id, handle->adapter, handle->intr_no, (nvm_cmd_t*) &request->cmd ) )
+    if ( handle->filter == NULL || handle->filter( request->node_id, handle->adapter, handle->intr_no, (nvm_cmd_t*) &request->cmd ) )
     {
         // It was, execute it...
         _nvm_rpc_local(manager, request, &reply, manager->ctrl_timeout);
@@ -156,7 +156,7 @@ static int initialize_rpc_handle(nvm_manager_t manager, struct rpc_handle* handl
     uint32_t flags = 0;
     sci_cb_data_interrupt_t callback = NULL;
 
-    if (intr_no != 0)
+    if (manager != NULL)
     {
         flags = SCI_FLAG_USE_CALLBACK | SCI_FLAG_FIXED_INTNO;
         callback = (sci_cb_data_interrupt_t) handle_rpc;
@@ -276,7 +276,15 @@ int nvm_dis_rpc_disable(nvm_manager_t manager, uint32_t adapter)
     err = EINVAL;
     if (curr != NULL)
     {
-        prev->next = curr->next;
+        if (prev != NULL)
+        {
+            manager->rpc_handlers = curr->next;
+        }
+        else
+        {
+            prev->next = curr->next;
+        }
+
         _nvm_rpc_handle_free(&curr->handle);
         free(curr);
         err = 0;
@@ -356,7 +364,7 @@ int _nvm_rpc_local(nvm_manager_t manager, const struct rpc_cmd* cmd, struct rpc_
 /*
  * Register admin queue manager.
  */
-int nvm_manager_register(nvm_manager_t* handle, const nvm_ctrl_t ctrl, nvm_dma_t window)
+int nvm_manager_register(nvm_manager_t* handle, nvm_ctrl_t ctrl, nvm_dma_t window)
 {
     int err;
     nvm_manager_t manager;

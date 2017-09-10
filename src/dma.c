@@ -158,7 +158,7 @@ int nvm_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t 
 
 #ifdef _SISCI
 
-int nvm_dis_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, sci_local_segment_t segment, void* vaddr, size_t size)
+int nvm_dis_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, uint32_t adapter, sci_local_segment_t segment, void* vaddr, size_t size)
 {
     sci_error_t err;
     sci_ioaddr_t addr;
@@ -184,14 +184,19 @@ int nvm_dis_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, sci_local_segmen
         return ENOMEM;
     }
 
-    // FIXME: Should we create a new reference rather than copying it?
-    memcpy(&mapped_seg->device, dev_ref, sizeof(struct nvm_device));
     mapped_seg->segment = segment;
+
+    if (_nvm_dev_get(&mapped_seg->device, dev_ref->device_id, adapter) != 0)
+    {
+        dprintf("Failed to get device reference");
+        return ENODEV;
+    }
 
     // Create handle container
     struct handle_container* container = create_container(ctrl, size, 1);
     if (container == NULL)
     {
+        _nvm_dev_put(&mapped_seg->device);
         free(mapped_seg);
         return ENOMEM;
     }
@@ -201,6 +206,7 @@ int nvm_dis_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, sci_local_segmen
     if (err != SCI_ERR_OK)
     {
         dprintf("Failed to map DMA window for controller: %s\n", SCIGetErrorString(err));
+        _nvm_dev_put(&mapped_seg->device);
         free(mapped_seg);
         return EIO;
     }
@@ -234,6 +240,7 @@ void nvm_dma_window_free(nvm_dma_t window)
                 dprintf("Failed to unmap DMA window for controller: %s\n", SCIGetErrorString(err));
             }
 
+            _nvm_dev_put(&container->mapped_seg->device);
             free(container->mapped_seg);
         }
 #endif

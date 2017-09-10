@@ -109,6 +109,7 @@ typedef struct __align__(64) nvm_command
  */
 typedef struct
 {
+    uint32_t                nvme_version;   // NVM Express version number
     size_t                  page_size;      // Memory page size used by the controller (MPS)
     size_t                  db_stride;      // Doorbell stride (DSTRD)
     uint64_t                timeout;        // Controller timeout in milliseconds (TO)
@@ -116,11 +117,10 @@ typedef struct
     uint8_t                 pci_vendor[4];  // PCI vendor and subsystem vendor identifier
     char                    serial_no[20];  // Serial number (NB! not null terminated)
     char                    model_no[40];   // Model number (NB! not null terminated)
-    uint32_t                nvme_version;   // NVM Express version number
     size_t                  max_data_size;  // Maximum data transfer size (MDTS)
-//  size_t                  n_cqs;          // Number of CQs
+    size_t                  n_cqs;          // Number of CQs
     size_t                  max_cqs;        // Maximum number of CQs
-//  size_t                  n_sqs;          // Number of SQs
+    size_t                  n_sqs;          // Number of SQs
     size_t                  max_sqs;        // Maximum number of SQs
     size_t                  cq_entry_size;  // CQ entry size (CQES)
     size_t                  sq_entry_size;  // SQ entry size (SQES)

@@ -53,13 +53,7 @@ void nvm_ctrl_free(nvm_ctrl_t ctrl);
  *
  * Note: This function is implicitly called by the controller manager.
  */
-int nvm_ctrl_reset(const nvm_ctrl_t ctrl, uint64_t acq_ioaddr, uint64_t asq_ioaddr);
-
-
-/*
- * Parse the result of IDENTIFY CONTROLLER page into a neat format.
- */
-int nvm_ctrl_info(const nvm_ctrl_t ctrl, const void* vaddr, nvm_ctrl_info_t* info);
+int nvm_ctrl_reset(nvm_ctrl_t ctrl, uint64_t acq_ioaddr, uint64_t asq_ioaddr);
 
 
 #ifdef __cplusplus
