@@ -1,16 +1,17 @@
-libnvme - Userspace library for accessing NVM Express drives
+libcunvme = CUDA + NVM Express
 ==============================================================================
+Build custom userspace NVM Express drivers with CUDA support.
 
-This project is intended to allow userspace programs to control and manage 
-NVM Express (NVMe) drives through an easy-to-use API. The motivation for this
-is to create an easy-to-use library your program can link against in order to
-use one or more PCIe-based SSDs as generic persistent storage memory with
-block read/write semantics.
+This library is intended to allow userspace programs to control and manage 
+NVM Express (NVMe) disk controllers through an easy-to-use API. The motivation 
+is to provide a userspace library your CUDA applications and other programs 
+can easily link against, in order to build custom distributed drivers for 
+NVMe disk drives.
 
-By providing a simple yet low-level interface for NVMe drives, the API is also
-able to provide efficient IO semantics. Among the provided sample programs,
-we demonstrate that it is possible to do IO operations over PCIe in a more
-efficient manner than through the normal filesystem abstraction provided by 
-the Linux kernel. We demonstrate that that mapping IO transfers directly on
-to device memory, rather than bouncing through RAM buffers, is a lot more
-efficient.
+The library provides simple semantics and functions for mapping userspace
+buffers and device memory, providing a simple yet low-level mechanism suitable
+for controlling an NVMe drive. By mapping buffers, an NVMe drive is able to 
+access these buffers directly (DMA), greatly increasing the IO performance
+compared to accessing the drive through normal filesystem abstractions 
+provided by the Linux kernel.
+
