@@ -24,6 +24,11 @@ int nvm_dis_rpc_bind(nvm_rpc_t* ref, uint32_t remote_node_id, uint32_t remote_in
 #endif
 
 
+#ifdef __TCP_CLUSTER__
+// int nvm_tcp_rpc_bind(nvm_rpc_t* ref, const char* hostname, uint16_t port);
+#endif
+
+
 /*
  * Unbind the manager reference.
  */
@@ -36,32 +41,56 @@ void nvm_rpc_unbind(nvm_rpc_t ref);
  * Call this function to relay an NVM command to the controller manager.
  * The manager is responsible for submitting the command to the physical 
  * controller and sending the completion back. This function will block until
- * either a timeout occurs, or until a completion is received, and the caller
- * should use a timeout value much greater than the controller timeout.
+ * either a timeout occurs, or until a completion is received.
  *
  * Note: A remote manager is allowed to change the command, and can do so 
  * without notifying the command initiator as no signalling mechanism is in
  * place.
  */
-int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl, uint64_t timeout);
+int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl);
 
 
 /*
- * Identify controller.
+ * Get controller information.
  */
-int nvm_rpc_identify(nvm_rpc_t ref, nvm_ctrl_t ctrl, nvm_dma_t dma_window, nvm_ctrl_info_t* info);
+int nvm_rpc_ctrl_info(nvm_ctrl_info_t* info, nvm_rpc_t ref, nvm_ctrl_t ctrl, const void* vaddr, uint64_t ioaddr);
+
+
+/* 
+ * Get namespace information.
+ */
+int nvm_rpc_ns_info(nvm_ns_info_t* info, nvm_rpc_t ref, uint32_t ns_id, const void* vaddr, uint64_t ioaddr);
+
+
+/*
+ * Make controller allocate number of queues before issuing them.
+ */
+int nvm_rpc_set_num_queues(nvm_rpc_t ref, uint16_t n_cqs, uint16_t n_sqs);
+
+
+/*
+ * Retrieve the number of allocated queues.
+ */
+int nvm_rpc_get_num_queues(nvm_rpc_t ref, uint16_t* n_cqs, uint16_t* n_sqs);
+
+
+/*
+ * Make controller allocate number of queues before issuing them.
+ */
+int nvm_rpc_request_num_queues(nvm_rpc_t ref, uint16_t* n_cqs, uint16_t* n_sqs);
 
 
 /*
  * Create IO completion queue (CQ)
  */
-int nvm_rpc_cq_create(nvm_rpc_t ref, nvm_ctrl_t ctrl, nvm_dma_t dma_window, nvm_queue_t* cq);
+int nvm_rpc_cq_create(nvm_queue_t* cq, nvm_rpc_t ref, nvm_ctrl_t ctrl, uint16_t id, void* vaddr, uint64_t ioaddr);
 
 
 /*
  * Create IO submission queue (SQ)
  */
-int nvm_rpc_sq_create(nvm_rpc_t ref, nvm_ctrl_t ctrl, const nvm_queue_t* cq, nvm_dma_t dma_window, nvm_queue_t* sq);
+int nvm_rpc_sq_create(nvm_queue_t* sq, nvm_rpc_t ref, nvm_ctrl_t ctrl, const nvm_queue_t* cq, uint16_t id, void* vaddr, uint64_t ioaddr);
+
 
 
 #ifdef __cplusplus

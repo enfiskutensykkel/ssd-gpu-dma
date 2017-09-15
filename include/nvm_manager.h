@@ -9,9 +9,6 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
-
-#ifdef __DIS_CLUSTER__
-
 /*
  * Remote command accepter callback.
  *
@@ -22,9 +19,14 @@ extern "C" {
  * no signalling mechanism is in place for notifying the remote caller of any
  * changes.
  */
-typedef bool (*nvm_rpc_filter_t)(uint32_t dis_node_id, uint32_t dis_adapter, uint32_t dis_intr_no, nvm_cmd_t* cmd);
+typedef bool (*nvm_rpc_filter_t)(nvm_cmd_t* cmd);
 
-#endif /* _SISCI */
+
+#ifdef __DIS_CLUSTER__
+
+typedef bool (*nvm_dis_rpc_filter_t)(nvm_cmd_t* cmd, uint32_t dis_node_id, uint32_t dis_adapter, uint32_t dis_intr_no);
+
+#endif /* __DIS_CLUSTER__ */
 
 
 /* 
@@ -67,7 +69,7 @@ void nvm_manager_unregister(nvm_manager_t manager);
  * DIS adapters.
  *
  */
-int nvm_dis_rpc_enable(nvm_manager_t manager, uint32_t dis_adapter, uint32_t dis_intr_no, nvm_rpc_filter_t filter);
+int nvm_dis_rpc_enable(nvm_manager_t manager, uint32_t dis_adapter, uint32_t dis_intr_no, nvm_dis_rpc_filter_t filter);
 
 
 /*
@@ -77,9 +79,12 @@ int nvm_dis_rpc_enable(nvm_manager_t manager, uint32_t dis_adapter, uint32_t dis
  */
 int nvm_dis_rpc_disable(nvm_manager_t manager, uint32_t dis_adapter);
 
+#endif /* __DIS_CLUSTER__ */
 
-#endif 
 
+#ifdef __TCP_CLUSTER__
+// int nvm_tcp_rpc_enable(nvm_manager_t manager, uint16_t port, nvm_rpc_filter_t filter);
+#endif
 
 
 #ifdef __cplusplus

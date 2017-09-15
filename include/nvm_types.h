@@ -104,29 +104,38 @@ typedef struct __align__(64) nvm_command
 
 /*
  * Controller information structure.
- *
- * Some information about a specified controller.
  */
-typedef struct
+typedef struct nvm_controller_info
 {
     uint32_t                nvme_version;   // NVM Express version number
     size_t                  page_size;      // Memory page size used by the controller (MPS)
     size_t                  db_stride;      // Doorbell stride (DSTRD)
     uint64_t                timeout;        // Controller timeout in milliseconds (TO)
+    int                     contiguous;     // Contiguous queues required (CQR)
     uint16_t                max_entries;    // Maximum queue entries supported (MQES)
     uint8_t                 pci_vendor[4];  // PCI vendor and subsystem vendor identifier
     char                    serial_no[20];  // Serial number (NB! not null terminated)
     char                    model_no[40];   // Model number (NB! not null terminated)
-    size_t                  max_data_size;  // Maximum data transfer size (MDTS)
-    size_t                  n_cqs;          // Number of CQs
-    size_t                  max_cqs;        // Maximum number of CQs
-    size_t                  n_sqs;          // Number of SQs
-    size_t                  max_sqs;        // Maximum number of SQs
+    size_t                  max_transfer_size;  // Maximum data transfer size (MDTS)
     size_t                  cq_entry_size;  // CQ entry size (CQES)
     size_t                  sq_entry_size;  // SQ entry size (SQES)
     size_t                  max_out_cmds;   // Maximum outstanding commands (MAXCMD)
-    size_t                  n_ns;           // Number of namespaces
+    size_t                  max_n_ns;       // Maximum number of namespaces (NN)
 } nvm_ctrl_info_t;
+
+
+/*
+ * Namespace information structure.
+ */
+typedef struct nvm_namespace_info
+{
+    uint32_t                ns_id;          // Namespace identifier
+    size_t                  size;           // Size in logical blocks (NSZE)
+    size_t                  capacity;       // Capacity in logical blocks (NCAP)
+    size_t                  utilization;    // Utilization in logical blocks (NUSE)
+    size_t                  lba_data_size;  // Logical block size (LBADS)
+    size_t                  metadata_size;  // Metadata size (MS)
+} nvm_ns_info_t;
 
 
 

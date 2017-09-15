@@ -9,9 +9,9 @@
 
 #include <nvm_types.h>
 #include <nvm_rpc.h>
-#include <nvm_command.h>
 #include <nvm_admin.h>
 #include <nvm_util.h>
+#include <nvm_queue.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -20,6 +20,7 @@
 #include "regs.h"
 #include "rpc.h"
 #include "dprintf.h"
+#include "dprintnvm.h"
 
 
 /* Forward declaration */
@@ -36,6 +37,7 @@ struct nvm_rpc_reference
 {
     struct rpc_reference*       reference;  // Reference to a remote manager.
     nvm_manager_t               manager;    // Reference to a local manager.
+    uint64_t                    timeout;    // Controller time out
 };
 
 
@@ -54,6 +56,7 @@ int nvm_rpc_bind_local(nvm_rpc_t* ref, nvm_manager_t manager)
 
     handle->reference = NULL;
     handle->manager = manager;
+    handle->timeout = 0;
 
     *ref = handle;
     return 0;
@@ -118,7 +121,8 @@ int _nvm_rpc_ref_init(struct rpc_reference* ref, uint32_t node_id, uint32_t intr
     SCIConnectDataInterrupt(ref->sd, &ref->intr, node_id, adapter, intr_no, SCI_INFINITE_TIMEOUT, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to connect to remote data interrupt: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to connect to remote data interrupt %u on node %u (%u): %s\n", 
+                intr_no, node_id, adapter, SCIGetErrorString(err));
         SCIClose(ref->sd, 0, &err);
         return EIO;
     }
@@ -179,6 +183,7 @@ int nvm_dis_rpc_bind(nvm_rpc_t* ref, uint32_t node_id, uint32_t intr_no, uint32_
 
     handle->reference = reference;
     handle->manager = NULL;
+    handle->timeout = DIS_CLUSTER_TIMEOUT;
 
     *ref = handle;
     return 0;
@@ -188,7 +193,7 @@ int nvm_dis_rpc_bind(nvm_rpc_t* ref, uint32_t node_id, uint32_t intr_no, uint32_
 
 
 
-int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl, uint64_t timeout)
+int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl)
 {
     int status = EINVAL;
     struct rpc_cmd request;
@@ -198,7 +203,7 @@ int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl, uint64_
 
     if (ref->manager != NULL)
     {
-        status = _nvm_rpc_local(ref->manager, &request, &reply, timeout);
+        status = _nvm_rpc_local(ref->manager, &request, &reply);
     }
 #ifdef _SISCI
     else if (ref->reference != NULL)
@@ -228,7 +233,7 @@ int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl, uint64_
         }
 
         uint32_t length = sizeof(reply);
-        SCIWaitForDataInterrupt(handle.intr, &reply, &length, timeout, 0, &err);
+        SCIWaitForDataInterrupt(handle.intr, &reply, &length, ref->timeout, 0, &err);
         if (err != SCI_ERR_OK)
         {
             _nvm_rpc_handle_free(&handle);
@@ -248,82 +253,216 @@ int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl, uint64_
 }
 
 
-int nvm_rpc_identify(nvm_rpc_t ref, nvm_ctrl_t ctrl, nvm_dma_t wnd, nvm_ctrl_info_t* info)
+int nvm_rpc_cq_create(nvm_queue_t* handle, nvm_rpc_t ref, nvm_ctrl_t ctrl, uint16_t id, void* vaddr, uint64_t ioaddr)
 {
-    int err;
     nvm_cmd_t command;
     nvm_cpl_t completion;
+    nvm_queue_t cq;
 
-    if (info != NULL)
-    {
-        info->nvme_version = (uint32_t) *VER(ctrl->mm_ptr);
-        info->page_size = ctrl->page_size;
-        info->db_stride = 1UL << ctrl->dstrd;
-        info->timeout = ctrl->timeout;
-    }
-
-    if (info != NULL)
-    {
-        memset(&command, 0, sizeof(nvm_cmd_t));
-        nvm_cmd_header(&command, NVM_ADMIN_GET_FEATURES, 0);
-        nvm_cmd_data_ptr(&command, 0, 0);
-        command.dword[10] = (0x03 << 8) | 0x07;
-        command.dword[11] = 0;
-
-        err = nvm_rpc_raw_cmd(ref, &command, &completion, ctrl->timeout * 2);
-        if (err != 0)
-        {
-            return err;
-        }
-
-        if (SCT(&completion) != 0 && SC(&completion) != 0)
-        {
-            dprintf("GET FEATURES failed: %s\n",
-                    nvm_strerror(&completion));
-        }
-
-        info->max_sqs = (completion.dword[0] >> 16) + 1;
-        info->max_cqs = (completion.dword[0] & 0xffff) + 1;
-    }
-
-    if (wnd == NULL)
-    {
-        return 0;
-    }
+    nvm_queue_clear(&cq, ctrl, 1, id, vaddr, ioaddr);
 
     memset(&command, 0, sizeof(nvm_cmd_t));
-    nvm_cmd_header(&command, NVM_ADMIN_IDENTIFY_CONTROLLER, 0);
-    nvm_cmd_data_ptr(&command, wnd->ioaddrs[0], 0);
-    command.dword[10] = (0 << 16) | 0x01;
+    nvm_admin_cq_create(&command, &cq);
 
-    err = nvm_rpc_raw_cmd(ref, &command, &completion, ctrl->timeout * 2);
+    int err = nvm_rpc_raw_cmd(ref, &command, &completion);
     if (err != 0)
     {
         return err;
     }
 
-    if (SCT(&completion) != 0 && SC(&completion) != 0)
+    if ( ! CPL_OK(&completion) )
     {
-        dprintf("IDENTIFY CONTROLLER failed: %s\n",
-                nvm_strerror(&completion));
+        dprintnvm(&command, &completion);
         return EIO;
     }
 
-    if (wnd->vaddr != NULL && info != NULL)
+    *handle = cq;
+    return 0;
+}
+
+
+int nvm_rpc_sq_create(nvm_queue_t* handle, nvm_rpc_t ref, nvm_ctrl_t ctrl, const nvm_queue_t* cq, uint16_t id, void* vaddr, uint64_t ioaddr)
+{
+    nvm_cmd_t command;
+    nvm_cpl_t completion;
+    nvm_queue_t sq;
+
+    nvm_queue_clear(&sq, ctrl, 0, id, vaddr, ioaddr);
+
+    memset(&command, 0, sizeof(nvm_cmd_t));
+    nvm_admin_sq_create(&command, &sq, cq);
+
+    int err = nvm_rpc_raw_cmd(ref, &command, &completion);
+    if (err != 0)
     {
-        unsigned char* bytes = ((unsigned char*) wnd->vaddr);
-
-        memcpy(info->pci_vendor, bytes, 4);
-        memcpy(info->serial_no, bytes + 4, 20);
-        memcpy(info->model_no, bytes + 24, 40);
-
-        info->max_data_size = bytes[77] * (1 << (12 + CAP$MPSMIN(ctrl->mm_ptr)));
-        info->sq_entry_size = 1 << _RB(bytes[512], 3, 0);
-        info->cq_entry_size = 1 << _RB(bytes[513], 3, 0);
-        info->max_out_cmds = *((uint16_t*) (bytes + 514));
-        info->n_ns = *((uint32_t*) (bytes + 516));
+        return err;
     }
 
+    if ( ! CPL_OK(&completion) )
+    {
+        dprintnvm(&command, &completion);
+        return EIO;
+    }
+
+    *handle = sq;
+    return 0;
+}
+
+
+int nvm_rpc_ctrl_info(nvm_ctrl_info_t* info, nvm_rpc_t ref, nvm_ctrl_t ctrl, const void* vaddr, uint64_t ioaddr)
+{
+    int err;
+    nvm_cmd_t command;
+    nvm_cpl_t completion;
+
+    memset(info, 0, sizeof(nvm_ctrl_info_t));
+    info->nvme_version = (uint32_t) *VER(ctrl->mm_ptr);
+    info->page_size = ctrl->page_size;
+    info->db_stride = 1UL << ctrl->dstrd;
+    info->timeout = ctrl->timeout;
+    info->contiguous = !!CAP$CQR(ctrl->mm_ptr);
+    info->max_entries = ctrl->max_entries;
+
+    if (vaddr == NULL)
+    {
+        return 0;
+    }
+
+    memset(&command, 0, sizeof(nvm_cmd_t));
+    nvm_admin_identify_ctrl(&command, ioaddr);
+
+    err = nvm_rpc_raw_cmd(ref, &command, &completion);
+    if (err != 0)
+    {
+        return err;
+    }
+
+    if ( ! CPL_OK(&completion) )
+    {
+        dprintnvm(&command, &completion);
+        return EIO;
+    }
+
+    const unsigned char* bytes = ((const unsigned char*) vaddr);
+
+    memcpy(info->pci_vendor, bytes, 4);
+    memcpy(info->serial_no, bytes + 4, 20);
+    memcpy(info->model_no, bytes + 24, 40);
+
+    info->max_transfer_size = bytes[77] * (1 << (12 + CAP$MPSMIN(ctrl->mm_ptr)));
+    info->sq_entry_size = 1 << _RB(bytes[512], 3, 0);
+    info->cq_entry_size = 1 << _RB(bytes[513], 3, 0);
+    info->max_out_cmds = *((uint16_t*) (bytes + 514));
+    info->max_n_ns = *((uint32_t*) (bytes + 516));
+
+    return 0;
+}
+
+
+int nvm_rpc_ns_info(nvm_ns_info_t* info, nvm_rpc_t ref, uint32_t ns_id, const void* vaddr, uint64_t ioaddr)
+{
+    int err;
+    nvm_cmd_t cmd;
+    nvm_cpl_t cpl;
+
+    memset(info, 0, sizeof(nvm_ns_info_t));
+    info->ns_id = ns_id;
+
+    if (vaddr == NULL)
+    {
+        return EINVAL;
+    }
+
+    nvm_admin_identify_ns(&cmd, ns_id, ioaddr);
+
+    err = nvm_rpc_raw_cmd(ref, &cmd, &cpl);
+    if (err != 0)
+    {
+        return err;
+    }
+
+    if ( ! CPL_OK(&cpl) )
+    {
+        dprintnvm(&cmd, &cpl);
+        return EIO;
+    }
+
+    const unsigned char* bytes = (const unsigned char*) vaddr;
+    info->size = *((uint64_t*) bytes);
+    info->capacity = *((uint64_t*) (bytes + 8));
+    info->utilization = *((uint64_t*) (bytes + 16));
+
+    uint8_t format_idx = _RB(bytes[26], 3, 0);
+
+    uint32_t lba_format = *((uint32_t*) (bytes + 128 + sizeof(uint32_t) * format_idx));
+    info->lba_data_size = 1 << _RB(lba_format, 23, 16);
+    info->metadata_size = _RB(lba_format, 15, 0);
+
+    return 0;
+}
+
+
+int nvm_rpc_get_num_queues(nvm_rpc_t ref, uint16_t* n_cqs, uint16_t* n_sqs)
+{
+    int err;
+    nvm_cmd_t command;
+    nvm_cpl_t completion;
+
+    memset(&command, 0, sizeof(nvm_cmd_t));
+    nvm_admin_current_num_queues(&command, 0, 0, 0);
+
+    err = nvm_rpc_raw_cmd(ref, &command, &completion);
+    if (err != 0)
+    {
+        return err;
+    }
+
+    if ( ! CPL_OK(&completion) )
+    {
+        dprintnvm(&command, &completion);
+        return EIO;
+    }
+
+    *n_sqs = (completion.dword[0] >> 16) + 1;
+    *n_cqs = (completion.dword[0] & 0xffff) + 1;
+    return 0;
+}
+
+
+int nvm_rpc_set_num_queues(nvm_rpc_t ref, uint16_t n_cqs, uint16_t n_sqs)
+{
+    return nvm_rpc_request_num_queues(ref, &n_cqs, &n_sqs);
+}
+
+
+int nvm_rpc_request_num_queues(nvm_rpc_t ref, uint16_t* n_cqs, uint16_t* n_sqs)
+{
+    int err;
+    nvm_cmd_t command;
+    nvm_cpl_t completion;
+
+    if (*n_cqs == 0 || *n_sqs == 0)
+    {
+        return ERANGE;
+    }
+
+    memset(&command, 0, sizeof(nvm_cmd_t));
+    nvm_admin_current_num_queues(&command, 1, *n_cqs, *n_sqs);
+
+    err = nvm_rpc_raw_cmd(ref, &command, &completion);
+    if (err != 0)
+    {
+        return err;
+    }
+
+    if ( ! CPL_OK(&completion) )
+    {
+        dprintnvm(&command, &completion);
+        return EIO;
+    }
+
+    *n_sqs = (completion.dword[0] >> 16) + 1;
+    *n_cqs = (completion.dword[0] & 0xffff) + 1;
     return 0;
 }
 

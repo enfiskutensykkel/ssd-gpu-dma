@@ -18,11 +18,12 @@ enum nvm_admin_command_set
     NVM_ADMIN_CREATE_SUBMISSION_QUEUE   = (0x00 << 7) | (0x00 << 2) | 0x01,
     NVM_ADMIN_DELETE_COMPLETION_QUEUE   = (0x00 << 7) | (0x01 << 2) | 0x00,
     NVM_ADMIN_CREATE_COMPLETION_QUEUE   = (0x00 << 7) | (0x01 << 2) | 0x01,
-    NVM_ADMIN_IDENTIFY_CONTROLLER       = (0x00 << 7) | (0x01 << 2) | 0x02,
+    NVM_ADMIN_IDENTIFY                  = (0x00 << 7) | (0x01 << 2) | 0x02,
     NVM_ADMIN_ABORT                     = (0x00 << 7) | (0x02 << 2) | 0x00,
     NVM_ADMIN_SET_FEATURES              = (0x00 << 7) | (0x02 << 2) | 0x01,
     NVM_ADMIN_GET_FEATURES              = (0x00 << 7) | (0x02 << 2) | 0x02
 };
+
 
 
 /*
@@ -65,6 +66,18 @@ void nvm_admin_cq_delete(struct nvm_command* cmd, const struct nvm_queue*cq);
  * Build an NVM admin command for identifying the controller.
  */
 void nvm_admin_identify_ctrl(struct nvm_command* cmd, uint64_t ioaddr);
+
+
+/*
+ * Identify namespace.
+ */
+void nvm_admin_identify_ns(struct nvm_command* cmd, uint32_t ns_id, uint64_t ioaddr);
+
+
+/*
+ * Set/get current number of queues.
+ */
+void nvm_admin_current_num_queues(struct nvm_command* cmd, int set, uint16_t n_cqs, uint16_t n_sqs);
 
 
 #ifdef __cplusplus

@@ -12,25 +12,42 @@ const char* nvm_strerror(const nvm_cpl_t* cpl)
 }
 
 
-uint64_t nvm_prp_list(void* prp_list, size_t page_size, size_t n_prps, const uint64_t* list_addrs, const uint64_t* prp_addrs)
+size_t nvm_prp_list(void* vaddr, size_t page_size, size_t transfer_size, const uint64_t* lists, const uint64_t* prps)
 {
-    uint64_t* list_ptr = (uint64_t*) prp_list;
-    size_t list_pos = 0;
+    size_t n_prps = DMA_SIZE(transfer_size, page_size) / page_size;
+
+    size_t i_list = 0;
     size_t i_prp = 0;
-    size_t next_list = 1;
-    size_t n_offs = page_size / sizeof(uint64_t);
+
+    uint64_t* start_ptr = (uint64_t*) vaddr;
+    uint64_t* entry_ptr = (uint64_t*) vaddr;
 
     while (i_prp < n_prps)
     {
-        list_ptr[list_pos++] = prp_addrs[i_prp++];
+        *entry_ptr++ = prps[i_prp++];
 
-        if (list_pos == n_offs)
+        if (((entry_ptr - start_ptr) & (page_size - 1)) == 0)
         {
-            list_ptr[list_pos++] = list_addrs[next_list++];
+            *entry_ptr++ = lists[++i_list];
         }
     }
 
-    return list_addrs[0];
+    return i_prp;
+}
+
+
+size_t nvm_num_prp_pages(size_t page_size, size_t transfer_size)
+{
+    size_t prps_per_page = page_size / sizeof(uint64_t) - 1;
+    size_t n_prps = DMA_SIZE(transfer_size, page_size) / page_size;
+    size_t n_prp_pages = 1;
+
+    while (n_prp_pages * prps_per_page + 1 < n_prps)
+    {
+        ++n_prp_pages;
+    }
+
+    return n_prp_pages;
 }
 
 

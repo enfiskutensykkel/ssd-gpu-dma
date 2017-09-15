@@ -22,6 +22,13 @@ file (GLOB api_include "${PROJECT_BINARY_DIR}/include/*.h" "${PROJECT_SOURCE_DIR
 
 include_directories ("${PROJECT_BINARY_DIR}/include" "${PROJECT_SOURCE_DIR}/include" "${sisci_include}" "${sisci_include}/dis") 
 
+# Samples common files
+set (samples_source "${CMAKE_SOURCE_DIR}/samples")
+set (samples_common "${samples_source}samples-common")
+file (GLOB samples_common "${samples_source}/samples-common/common_*.c")
+file (GLOB samples_common_sisci "${samples_source}/samples-common/dis_*.c")
+
+
 # Create NVME library target
 add_library (libnvme SHARED ${api_source})
 
@@ -31,6 +38,7 @@ if (sisci_include AND sisci_lib AND NOT no_sisci_lib)
 else ()
     target_link_libraries (libnvme Threads::Threads)
 endif ()
+
 
 # Set name of library
 set_target_properties (libnvme PROPERTIES OUTPUT_NAME "${CMAKE_PROJECT_NAME}")
@@ -43,19 +51,45 @@ set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 install (FILES ${api_include} DESTINATION "include")
 install (TARGETS libnvme DESTINATION "lib")
 
-# Macros for creating targets that depend on SISCI
-macro (add_sisci_executable target binary deps files)
-    if (sisci_include AND sisci_lib AND NOT no_sisci_samples)
-        add_executable (${target} ${files})
-        add_dependencies (${target} libnvme)
+#macro (make_benchmark target binary_name files)
+#    if (sisci_include AND sisci_lib)
+#        add_executable (${target} EXCLUDE_FROM_ALL ${files})
+#        list (APPEND benchmark_targets ${target})
+#    endif ()
+#endmacro ()
+
+
+# Macro for creating a sample target
+macro (make_sample target binary_name files)
+    add_executable (${target} EXCLUDE_FROM_ALL ${files})
+    add_dependencies (${target} libnvme)
+    target_include_directories (${target} PRIVATE "${samples_source}/samples-include")
+    target_link_libraries (${target} libnvme)
+    target_sources (${target} PRIVATE ${samples_common})
+    set_target_properties (${target} PROPERTIES OUTPUT_NAME "${binary_name}")
+    list (APPEND sample_targets ${target})
+    set (sample_targets "${sample_targets}" PARENT_SCOPE)
+endmacro ()
+
+
+# Macro for making a sample depend on SISCI
+macro (set_sisci target)
+    if (NOT no_sisci_samples AND sisci_include AND sisci_lib)
+        target_link_libraries (${target} ${sisci_lib})
+        target_sources (${target} PRIVATE ${samples_common_sisci})
         target_compile_definitions (${target} PRIVATE _REENTRANT __DIS_CLUSTER__)
-        target_link_libraries (${target} libnvme ${sisci_lib} ${deps})
-        set_target_properties (${target} PROPERTIES OUTPUT_NAME "${binary}")
-        install (TARGETS ${target} DESTINATION "bin")
-        list (APPEND sisci_targets ${target})
+    else ()
+        list (REMOVE_ITEM sample_targets ${target})
+        set_target_properties (${target} PROPERTIES EXCLUDE_FROM_ALL 1)
     endif ()
 endmacro ()
 
-# Build examples
-add_subdirectory ("${PROJECT_SOURCE_DIR}/samples")
 
+# Build samples
+add_subdirectory ("${samples_source}/dis-rpc-manager")
+add_subdirectory ("${samples_source}/dis-rw-example")
+
+# Build all samples
+add_custom_target (samples DEPENDS ${sample_targets})
+
+#add_custom_target (benchmarks DEPENDS ${benchmark_targets})

@@ -284,7 +284,7 @@ static int connect_device_bar(struct bar_reference* dev, int bar, size_t size)
     if (err != SCI_ERR_OK)
     {
         dprintf("Failed to connect to device memory: %s\n", SCIGetErrorString(err));
-        status = EIO;
+        status = ENODEV;
         goto quit;
     }
 

@@ -37,17 +37,16 @@ void nvm_cmd_header(struct nvm_command* cmd, uint8_t opcode, uint32_t ns_id);
 void nvm_cmd_data_ptr(struct nvm_command* cmd, uint64_t prp1, uint64_t prp2);
 
 
-/* Build a PRP list consisting of PRP entries 
- *
- * prp_list     - pointer to contiguous virtual memory where the PRP lists reside
- * page_size    - the controllers memory page size (MPS)
- * list_addrs   - array of bus addresses to prp_list's physical MPS-sized pages
- * prp_addrs    - array of n_prps elements containing bus address to describe PRPs
- *
- * Returns the bus address of the start of the PRP list
+/*
+ * Calculate number of pages needed to build a PRP list.
  */
-uint64_t nvm_prp_list(void* prp_list, size_t page_size, size_t n_prps, const uint64_t* list_addrs, const uint64_t* prp_addrs);
+size_t nvm_num_prp_pages(size_t page_size, size_t transfer_size);
 
+
+/* 
+ * Build a PRP list consisting of PRP entries.
+ */
+size_t nvm_prp_list(void* list_vaddr, size_t page_size, size_t transfer_size, const uint64_t* list_pages, const uint64_t* data_pages);
 
 #ifdef __cplusplus
 }

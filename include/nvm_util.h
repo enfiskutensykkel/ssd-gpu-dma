@@ -37,9 +37,11 @@ static inline uint64_t _nvm_bitmask(int hi, int lo)
     ((volatile uint##bits##_t *) (((volatile unsigned char*) ((volatile void*) (p))) + (offs)))
 
 
-/* Get the virtual address from a DMA window descriptor */
-#define DMA_SIZE(size, page_size)   (((size) + (page_size) - 1) & ~((page_size) - 1))
-#define DMA_VADDR(p)                ((p)->vaddr)
+#define DMA_SIZE(size, page_size) \
+    (((size) + (page_size) - 1) & ~((page_size) - 1))
+
+#define DMA_VADDR(vaddr, page_size, page) \
+    ((void*) (((unsigned char*) (vaddr)) + (page_size) * (page)))
 
 
 /* Standard fields in a command */

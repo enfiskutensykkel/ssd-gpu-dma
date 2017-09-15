@@ -121,11 +121,13 @@ static sci_callback_action_t handle_rpc(nvm_manager_t manager, sci_local_data_in
     reply.accepted = false;
     memset(&reply.cpl, 0, sizeof(nvm_cpl_t));
 
+    nvm_dis_rpc_filter_t filter = (nvm_dis_rpc_filter_t) handle->filter;
+
     // Check if the command is accepted
-    if ( handle->filter == NULL || handle->filter( request->node_id, handle->adapter, handle->intr_no, (nvm_cmd_t*) &request->cmd ) )
+    if ( filter == NULL || filter( (nvm_cmd_t*) &request->cmd, request->node_id, handle->adapter, handle->intr_no ) )
     {
         // It was, execute it...
-        _nvm_rpc_local(manager, request, &reply, manager->ctrl_timeout);
+        _nvm_rpc_local(manager, request, &reply);
     }
 
     // Call back with the response
@@ -198,7 +200,7 @@ void _nvm_rpc_handle_free(struct rpc_handle* handle)
 
 
 
-int nvm_dis_rpc_enable(nvm_manager_t manager, uint32_t adapter, uint32_t intr_no, nvm_rpc_filter_t filter)
+int nvm_dis_rpc_enable(nvm_manager_t manager, uint32_t adapter, uint32_t intr_no, nvm_dis_rpc_filter_t filter)
 {
     int err;
     struct rpc_list* insert;
@@ -224,7 +226,7 @@ int nvm_dis_rpc_enable(nvm_manager_t manager, uint32_t adapter, uint32_t intr_no
         return err;
     }
 
-    err = initialize_rpc_handle(manager, &insert->handle, intr_no, adapter, filter);
+    err = initialize_rpc_handle(manager, &insert->handle, intr_no, adapter, (nvm_rpc_filter_t) filter);
     if (err != 0)
     {
         free(insert);
@@ -302,7 +304,7 @@ int nvm_dis_rpc_disable(nvm_manager_t manager, uint32_t adapter)
 /*
  * Execute an NVM admin command.
  */
-int _nvm_rpc_local(nvm_manager_t manager, const struct rpc_cmd* cmd, struct rpc_cpl* cpl, uint64_t timeout)
+int _nvm_rpc_local(nvm_manager_t manager, const struct rpc_cmd* cmd, struct rpc_cpl* cpl)
 {
     int err;
     nvm_cmd_t* queue_cmd;
@@ -336,7 +338,7 @@ int _nvm_rpc_local(nvm_manager_t manager, const struct rpc_cmd* cmd, struct rpc_
     // Submit command and wait for reply
     sq_submit(&manager->asq);
     
-    queue_cpl = cq_dequeue_block(&manager->acq, timeout);
+    queue_cpl = cq_dequeue_block(&manager->acq, manager->ctrl_timeout);
     if (queue_cpl == NULL)
     {
         dprintf("Waiting for admin completion timed out\n");

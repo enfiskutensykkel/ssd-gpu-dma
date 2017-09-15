@@ -167,6 +167,10 @@ int nvm_dis_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, uint32_t adapter
 
     // Round size argument up to nearest controller page-aligned size
     size = (size + ctrl->page_size - 1) & ~(ctrl->page_size - 1);
+    if (size == 0)
+    {
+        return EINVAL;
+    }
 
     // Retrieve SmartIO device reference
     const struct nvm_device* dev_ref = _nvm_dev_from_ctrl(ctrl);

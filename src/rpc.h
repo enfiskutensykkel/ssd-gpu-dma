@@ -9,6 +9,7 @@
 
 #ifdef _SISCI
 #include <sisci_types.h>
+#define DIS_CLUSTER_TIMEOUT     2500
 #endif
 
 
@@ -128,7 +129,7 @@ int _nvm_rpc_ref_send(struct rpc_reference* ref, void* data, size_t length);
 /*
  * Execute an NVM admin command using a local manager.
  */
-int _nvm_rpc_local(nvm_manager_t mngr, const struct rpc_cmd* cmd, struct rpc_cpl* cpl, uint64_t timeout);
+int _nvm_rpc_local(nvm_manager_t mngr, const struct rpc_cmd* cmd, struct rpc_cpl* cpl);
 
 
 #endif /* __NVM_INTERNAL_RPC_H__ */
