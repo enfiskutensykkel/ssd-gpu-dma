@@ -110,21 +110,6 @@ static int identify_ns(nvm_rpc_t rpc, nvm_ctrl_t ctrl, uint32_t adapter, uint32_
 }
 
 
-static size_t dequeue_cpls(nvm_queue_t* cq, nvm_queue_t* sq, uint64_t timeout)
-{
-    nvm_cpl_t* cpl;
-    size_t n_cpls = 0;
-    
-    while ((cpl = cq_dequeue_block(cq, timeout)) != NULL)
-    {
-        sq_update(sq, cpl);
-        ++n_cpls;
-    }
-
-    return n_cpls;
-}
-
-
 static void dump_memory(FILE* fp, void* vaddr, size_t size, bool ascii)
 {
     size_t i;
@@ -197,35 +182,54 @@ static size_t set_data_pointer(nvm_cmd_t* cmd, size_t page_size, size_t transfer
 }
 
 
-
-static int transfer(nvm_ctrl_info_t* ctrl, nvm_ns_info_t* ns, nvm_queue_t* cq, nvm_queue_t* sq, nvm_dma_t prp_list, nvm_dma_t buffer, size_t transfer_size, struct cl_args* args)
+static size_t transfer(nvm_ctrl_info_t* ctrl, nvm_ns_info_t* ns, nvm_queue_t* cq, nvm_queue_t* sq, nvm_dma_t prp_list, nvm_dma_t buffer, size_t transfer_size, struct cl_args* args)
 {
     nvm_cmd_t* cmd;
+    nvm_cpl_t* cpl;
     uint64_t start_lba = args->start_lba;
     size_t i_buffer_page = 0;
     size_t page_size = ctrl->page_size;
     size_t blk_size = ns->lba_data_size;
     uint32_t ns_id = ns->ns_id;
     size_t n_cmds = 0;
+    size_t n_cpls = 0;
 
     uint8_t opcode = args->data == NULL ? NVM_IO_READ : NVM_IO_WRITE;
 
-    // Divide transfer into transfer_size sized chunks
+    // Divide transfer into transfer_size sized chunks and prepare commands
     while (i_buffer_page < buffer->n_ioaddrs)
     {
         size_t curr_transfer_size = _MIN(transfer_size, blk_size * 0x10000);
         uint64_t n_blks = DMA_SIZE(curr_transfer_size, blk_size) / blk_size;
 
         cmd = sq_enqueue(sq);
+
+        // If queue is full, submit what we have so far
+        // and wait for the first completion to come in
         if (cmd == NULL)
         {
-            // Queue is full, wait for some time
-            size_t n_cpls = dequeue_cpls(cq, sq, ctrl->timeout);
-            if (n_cpls > 0)
+            if (n_cmds > 0)
             {
-                cq_update(cq);
-                n_cmds -= n_cpls;
+                sq_submit(sq);
             }
+
+            fprintf(stderr, "Queue wrap\n");
+
+            cpl = cq_dequeue_block(cq, ctrl->timeout);
+            if (cpl == NULL)
+            {
+                fprintf(stderr, "Controller appears to be dead, aborting...\n");
+                return 0;
+            }
+            else if (!CPL_OK(cpl))
+            {
+                fprintf(stderr, "Completion failed: %s\n", nvm_strerror(cpl));
+                return 0;
+            }
+
+            sq_update(sq, cpl);
+            cq_update(cq);
+            ++n_cpls;
             continue;
         }
 
@@ -237,22 +241,35 @@ static int transfer(nvm_ctrl_info_t* ctrl, nvm_ns_info_t* ns, nvm_queue_t* cq, n
         cmd->dword[12] = (n_blks - 1) & 0xffff;
         start_lba += n_blks;
 
-        // Submit command
-        sq_submit(sq);
         ++n_cmds;
     }
 
-    if (n_cmds > 0)
+    // Submit all commands
+    sq_submit(sq);
+
+    // Wait for all commands to complete
+    while ((n_cmds - n_cpls) > 0 && (cpl = cq_dequeue_block(cq, ctrl->timeout)) != NULL)
     {
-        cq_dequeue_block(cq, ctrl->timeout);
+        sq_update(sq, cpl);
+
+        if (!CPL_OK(cpl))
+        {
+            fprintf(stderr, "Completion failed: %s\n", nvm_strerror(cpl));
+            return 0;
+        }
+
+        ++n_cpls;
     }
 
-    if (args->data == NULL)
+    cq_update(cq);
+
+    if ((n_cmds - n_cpls) > 0)
     {
-        dump_memory(stdout, buffer->vaddr, args->length, args->use_ascii);
+        fprintf(stderr, "Not all commands were completed!\n");
+        return 0;
     }
 
-    return 0;
+    return n_cpls;
 }
 
 
@@ -316,12 +333,25 @@ static int start_transfer(nvm_rpc_t rpc, nvm_ctrl_t ctrl, struct cl_args* args, 
                 DMA_SIZE( args->length, ns_info.lba_data_size ) / ns_info.lba_data_size);
     }
 
-    status = transfer(&ctrl_info, &ns_info, cq, sq, prp_wnd, rw_wnd, transfer_size, args);
+    size_t cmds = transfer(&ctrl_info, &ns_info, cq, sq, prp_wnd, rw_wnd, transfer_size, args);
+    if (cmds == 0)
+    {
+        status = 3;
+        goto out;
+    }
 
+    if (args->data == NULL)
+    {
+        dump_memory(stdout, buffer->vaddr, args->length, args->use_ascii);
+    }
+
+    fprintf(stderr, "Number of commands: %zu\n", cmds);
+
+out:
     dma_remove(&prp_wnd, &prp_list, args->ctrl_adapter);
     segment_remove(&prp_list);
     dma_remove(&rw_wnd, buffer, args->ctrl_adapter);
-    return 0;
+    return status;
 }
 
 
