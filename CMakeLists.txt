@@ -24,9 +24,9 @@ include_directories ("${PROJECT_BINARY_DIR}/include" "${PROJECT_SOURCE_DIR}/incl
 
 # Samples common files
 set (samples_source "${CMAKE_SOURCE_DIR}/samples")
-set (samples_common "${samples_source}samples-common")
-file (GLOB samples_common "${samples_source}/samples-common/common_*.c")
-file (GLOB samples_common_sisci "${samples_source}/samples-common/dis_*.c")
+set (samples_common "${samples_source}/samples-common")
+file (GLOB samples_common_files "${samples_source}/samples-common/*.c")
+file (GLOB samples_common_sisci "${samples_source}/samples-common/dis/*.c")
 
 
 # Create NVME library target
@@ -63,12 +63,12 @@ install (TARGETS libnvme DESTINATION "lib")
 macro (make_sample target binary_name files)
     add_executable (${target} EXCLUDE_FROM_ALL ${files})
     add_dependencies (${target} libnvme)
-    target_include_directories (${target} PRIVATE "${samples_source}/samples-include")
+    target_include_directories (${target} PRIVATE "${samples_common}")
     target_link_libraries (${target} libnvme)
-    target_sources (${target} PRIVATE ${samples_common})
+    target_sources (${target} PRIVATE ${samples_common_files})
     set_target_properties (${target} PROPERTIES OUTPUT_NAME "${binary_name}")
-    list (APPEND sample_targets ${target})
-    set (sample_targets "${sample_targets}" PARENT_SCOPE)
+    list (APPEND sample_targets "${target}")
+    set(sample_targets "${sample_targets}" PARENT_SCOPE)
 endmacro ()
 
 
@@ -79,17 +79,20 @@ macro (set_sisci target)
         target_sources (${target} PRIVATE ${samples_common_sisci})
         target_compile_definitions (${target} PRIVATE _REENTRANT __DIS_CLUSTER__)
     else ()
-        list (REMOVE_ITEM sample_targets ${target})
+        list (REMOVE_ITEM sample_targets "${target}")
+        set(sample_targets "${sample_targets}" PARENT_SCOPE)
         set_target_properties (${target} PROPERTIES EXCLUDE_FROM_ALL 1)
     endif ()
 endmacro ()
 
 
 # Build samples
-add_subdirectory ("${samples_source}/dis-rpc-manager")
-add_subdirectory ("${samples_source}/dis-rw-example")
+add_subdirectory ("${samples_source}/rpc-example")
+add_subdirectory ("${samples_source}/rw-example")
+add_subdirectory ("${samples_source}/identify")
 
 # Build all samples
+message(STATUS "${sample_targets}")
 add_custom_target (samples DEPENDS ${sample_targets})
 
 #add_custom_target (benchmarks DEPENDS ${benchmark_targets})

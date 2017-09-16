@@ -1,4 +1,4 @@
-libcunvme = CUDA + NVM Express
+libdisnvme = Dolphin + Nvidia CUDA + NVM Express
 ==============================================================================
 Build custom userspace NVM Express drivers with CUDA support.
 

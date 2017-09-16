@@ -540,9 +540,9 @@ static void parse_opts(int argc, char** argv, struct cl_args* args)
     int opt;
     int idx;
 
-    args->data = NULL;
     memset(args, 0, sizeof(struct cl_args));
     
+    args->data = NULL;
     args->namespace = 1;
     args->length = 1;
 
@@ -626,6 +626,13 @@ static void parse_opts(int argc, char** argv, struct cl_args* args)
                 args->use_ascii = true;
                 break;
         }
+    }
+
+    if (args->namespace == 0)
+    {
+        fprintf(stderr, "Invalid namespace!\n");
+        give_usage(argv[0]);
+        exit('n');
     }
 
     if (args->offset >= args->length)
