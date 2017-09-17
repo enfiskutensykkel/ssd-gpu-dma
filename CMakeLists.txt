@@ -1,48 +1,45 @@
 cmake_minimum_required (VERSION 3.1)
 project (disnvme)
 
-set (no_sisci_examples false CACHE BOOL "Do not use SISCI for examples")
-set (no_sisci false CACHE BOOL "Do not use SISCI for library")
-set (no_module false CACHE BOOL "Do not build kernel module")
-
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 find_package (CUDA 8.0)
+
+set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
+set (NVIDIA "" CACHE PATH "Path to Nvidia driver source")
+
+set (no_sisci_examples false CACHE BOOL "Do not use SISCI for examples")
+set (no_sisci false CACHE BOOL "Do not use SISCI for library")
+set (no_module false CACHE BOOL "Do not build kernel module")
+set (no_cuda false CACHE BOOL "Do not build with CUDA")
 
 # Set global compiler flags
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -pedantic" CACHE INTERNAL "" FORCE)
 set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -DDEBUG" CACHE INTERNAL "" FORCE)
 
-# Try to find Nvidia headers (will choose the newest version)
-file (GLOB_RECURSE nvheader_paths "/usr/src/nvidia-*/nv-p2p2.h")
+# Try to find Nvidia driver
+if (CUDA_FOUND AND NOT no_cuda)
 
-if (CUDA_FOUND AND NOT nvheader_paths)
-    message (WARNING "Could not find Nvidia header files")
-else ()
-    list (REVERSE nvheader_paths)
-    list (GET nvheader_paths 0 nv_header)
+    # Try to find Nvidia headers (will choose the newest version)
+    file (GLOB_RECURSE driver_paths "/usr/src/nvidia-*/nv-p2p.h")
+    string (REPLACE "nv-p2p.h" "" driver_paths "${driver_paths}")
+    if (driver_paths)
+        list (REVERSE driver_paths)
+    endif ()
+
+    find_path (driver_include NAMES "nv-p2p.h" PATHS "${NVIDIA}" ${driver_paths})
+    set (driver_dir "${driver_include}")
+
+    # Find Nvidia driver symbols
+    if (NOT EXISTS "${driver_dir}/Module.symvers")
+        get_filename_component (driver_dir "${driver_dir}" DIRECTORY)
+    endif ()
+
+    message(STATUS "Using NVIDIA driver found in ${driver_dir}")
 endif ()
-
-set (nv_header "${nv_header}" CACHE STRING "Path to Nvidia p2p header")
-
-# Attempt to find Nvidia driver
-get_filename_component (nvdriver_path "${nv_header}" DIRECTORY)
-if (NOT EXISTS "${nvdriver_path}/Module.symvers")
-    get_filename_component (nvdriver_path "${nvdriver_path}" DIRECTORY)
-endif ()
-
-set (nv_driver "${nvdriver_path}/Module.symvers")
-
-if (CUDA_FOUND AND NOT EXISTS "${nv_driver}")
-    message (WARNING "Could not find Nvidia driver symbols")
-    set (nv_driver "")
-endif ()
-
-set (nv_driver "${nv_driver}" CACHE STRING "Path to Nvidia driver symbols")
 
 
 # Try to find SISCI
-set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 find_path (sisci_include NAMES sisci_types.h sisci_api.h sisci_error.h PATHS "${DIS}")
 find_library (sisci_lib NAMES sisci PATHS "${DIS}/lib64" "${DIS}/lib")
 
@@ -87,11 +84,13 @@ set (module_output "${CMAKE_BINARY_DIR}/module")
 install (FILES ${libnvme_include} DESTINATION "include")
 install (TARGETS libnvme DESTINATION "lib")
 
-
-# Create kernel module target
+# Create kernel module makefile
 if (NOT no_module)
-    #message(STATUS "${CUDA_TOOLKIT_ROOT_DIR}")
-    #add_custom_command (OUTPUT nvdriver 
+    if (CUDA_FOUND AND NOT no_cuda AND EXISTS "${driver_dir}/Module.symvers")
+        set (module_ccflags "-D_CUDA -I${driver_include}")
+        set (module_symbols "${driver_dir}/Module.symvers")
+    endif ()
+
     set (kdir "/lib/modules/${CMAKE_SYSTEM_VERSION}/build")
     configure_file ("${module_root}/Makefile.in" "${module_output}/Makefile" @ONLY)
 endif ()
