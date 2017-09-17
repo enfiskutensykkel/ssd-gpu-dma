@@ -1,0 +1,30 @@
+
+ifneq ($(KERNELRELEASE),)
+	src := @module_root@
+	obj-m := @CMAKE_PROJECT_NAME@.o
+	
+ifneq (@nv_driver@,)
+	ccflags-y := -D_CUDA -I$(dir @nv_header@)
+	KBUILD_EXTRA_SYMBOLS := @nv_driver@
+endif
+
+else
+
+.PHONY: default reload unload load clean
+
+default:
+	$(MAKE) -C @kdir@ M=@module_output@ modules
+
+clean:
+	$(MAKE) -C @kdir@ M=@module_output@ clean
+
+reload: unload load
+
+unload:
+	-rmmod @CMAKE_PROJECT_NAME@.ko
+
+load:
+	insmod @CMAKE_PROJECT_NAME@.ko
+
+endif
+
