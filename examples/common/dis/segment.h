@@ -1,5 +1,5 @@
-#ifndef __DIS_NVM_SAMPLES_SEGMENT_H__
-#define __DIS_NVM_SAMPLES_SEGMENT_H__
+#ifndef __DIS_NVM_EXAMPLES_SEGMENT_H__
+#define __DIS_NVM_EXAMPLES_SEGMENT_H__
 #ifdef __DIS_CLUSTER__
 
 #include <nvm_types.h>
@@ -50,4 +50,4 @@ void dma_remove(nvm_dma_t* dma_window, struct segment* segment, uint32_t dis_ada
 
 
 #endif // __DIS_CLUSTER__
-#endif // __DIS_NVM_SAMPLES_SEGMENT_H__
+#endif // __DIS_NVM_EXAMPLES_SEGMENT_H__

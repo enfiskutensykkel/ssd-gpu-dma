@@ -13,7 +13,7 @@ set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 find_path (sisci_include NAMES sisci_types.h sisci_api.h sisci_error.h PATHS "${DIS}")
 find_library (sisci_lib NAMES sisci PATHS "${DIS}/lib64" "${DIS}/lib")
 
-set (no_sisci_samples false CACHE BOOL "Do not use SISCI for samples")
+set (no_sisci_examples false CACHE BOOL "Do not use SISCI for examples")
 set (no_sisci_lib false CACHE BOOL "Do not use SISCI for library")
 
 # API source files
@@ -22,11 +22,11 @@ file (GLOB api_include "${PROJECT_BINARY_DIR}/include/*.h" "${PROJECT_SOURCE_DIR
 
 include_directories ("${PROJECT_BINARY_DIR}/include" "${PROJECT_SOURCE_DIR}/include" "${sisci_include}" "${sisci_include}/dis") 
 
-# Samples common files
-set (samples_source "${CMAKE_SOURCE_DIR}/samples")
-set (samples_common "${samples_source}/samples-common")
-file (GLOB samples_common_files "${samples_source}/samples-common/*.c")
-file (GLOB samples_common_sisci "${samples_source}/samples-common/dis/*.c")
+# Samples shared files
+set (samples_root "${CMAKE_SOURCE_DIR}/examples")
+set (samples_common "${samples_root}/common")
+file (GLOB samples_common_all "${samples_common}/*.c")
+file (GLOB samples_common_sisci "${samples_common}/dis/*.c")
 
 
 # Create NVME library target
@@ -59,14 +59,20 @@ install (TARGETS libnvme DESTINATION "lib")
 #endmacro ()
 
 
-# Macro for creating a sample target
+# Macro for creating sample binaries
 macro (make_sample target binary_name files)
     add_executable (${target} EXCLUDE_FROM_ALL ${files})
+
+    # Make sample depend on library
     add_dependencies (${target} libnvme)
-    target_include_directories (${target} PRIVATE "${samples_common}")
     target_link_libraries (${target} libnvme)
-    target_sources (${target} PRIVATE ${samples_common_files})
+
+    # Add shared example code
+    target_include_directories (${target} PRIVATE "${samples_common}")
+    target_sources (${target} PRIVATE ${samples_common_all})
+
     set_target_properties (${target} PROPERTIES OUTPUT_NAME "${binary_name}")
+
     list (APPEND sample_targets "${target}")
     set(sample_targets "${sample_targets}" PARENT_SCOPE)
 endmacro ()
@@ -74,7 +80,7 @@ endmacro ()
 
 # Macro for making a sample depend on SISCI
 macro (set_sisci target)
-    if (NOT no_sisci_samples AND sisci_include AND sisci_lib)
+    if (NOT no_sisci_examples AND sisci_include AND sisci_lib)
         target_link_libraries (${target} ${sisci_lib})
         target_sources (${target} PRIVATE ${samples_common_sisci})
         target_compile_definitions (${target} PRIVATE _REENTRANT __DIS_CLUSTER__)
@@ -87,12 +93,12 @@ endmacro ()
 
 
 # Build samples
-add_subdirectory ("${samples_source}/rpc-example")
-add_subdirectory ("${samples_source}/rw-example")
-add_subdirectory ("${samples_source}/identify")
+add_subdirectory ("${samples_root}/dis-rpc")
+add_subdirectory ("${samples_root}/dis-rw")
+add_subdirectory ("${samples_root}/identify")
 
 # Build all samples
-message(STATUS "${sample_targets}")
-add_custom_target (samples DEPENDS ${sample_targets})
+add_custom_target (examples DEPENDS ${sample_targets})
+add_custom_target (samples DEPENDS examples)
 
 #add_custom_target (benchmarks DEPENDS ${benchmark_targets})

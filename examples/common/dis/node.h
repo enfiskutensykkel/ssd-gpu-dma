@@ -1,5 +1,5 @@
-#ifndef __DIS_NVM_SAMPLES_NODE_H__
-#define __DIS_NVM_SAMPLES_NODE_H__
+#ifndef __DIS_NVM_EXAMPLES_NODE_H__
+#define __DIS_NVM_EXAMPLES_NODE_H__
 #ifdef __DIS_CLUSTER__
 
 #include <stdint.h>
@@ -12,4 +12,4 @@ int get_local_node_id(uint32_t adapter, uint32_t* node_id);
 
 
 #endif // __DIS_CLUSTER__
-#endif // __DIS_NVM_SAMPLES_NODE_H__
+#endif // __DIS_NVM_EXAMPLES_NODE_H__

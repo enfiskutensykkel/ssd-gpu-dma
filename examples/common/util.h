@@ -1,5 +1,5 @@
-#ifndef __DIS_NVM_SAMPLES_UTIL_H__
-#define __DIS_NVM_SAMPLES_UTIL_H__
+#ifndef __DIS_NVM_EXAMPLES_UTIL_H__
+#define __DIS_NVM_EXAMPLES_UTIL_H__
 
 #include <nvm_types.h>
 #include <stdint.h>
@@ -31,4 +31,4 @@ int parse_u32(const char* str, uint32_t* number, int base);
 void print_ctrl_info(FILE* fp, const nvm_ctrl_info_t* info);
 
 
-#endif // __DIS_NVM_SAMPLES_UTIL_H__
+#endif // __DIS_NVM_EXAMPLES_UTIL_H__
