@@ -2,11 +2,12 @@
 ifneq ($(KERNELRELEASE),)
 	src := @module_root@
 	obj-m := @CMAKE_PROJECT_NAME@.o
+	@CMAKE_PROJECT_NAME@-objs := main.o dev.o
 	ccflags-y += @module_ccflags@
 	KBUILD_EXTRA_SYMBOLS := @module_symbols@
 else
 
-.PHONY: default reload unload load clean
+.PHONY: default reload unload load clean install
 
 default:
 	$(MAKE) -C @kdir@ M=@module_output@ modules
@@ -20,7 +21,10 @@ unload:
 	-rmmod @CMAKE_PROJECT_NAME@.ko
 
 load:
-	insmod @CMAKE_PROJECT_NAME@.ko
+	insmod @CMAKE_PROJECT_NAME@.ko num_ctrl_devs=2 num_ctrl_refs=8 pages_per_map=128
+
+install: default
+	$(MAKE) INSTALL_MOD_DIR=@CMAKE_PROJECT_NAME@ -C @kdir@ M=@module_output@ modules_install
 
 endif
 

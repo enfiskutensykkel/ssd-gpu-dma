@@ -11,6 +11,7 @@ set (NVIDIA "" CACHE PATH "Path to Nvidia driver source")
 set (no_sisci_examples false CACHE BOOL "Do not use SISCI for examples")
 set (no_sisci false CACHE BOOL "Do not use SISCI for library")
 set (no_module false CACHE BOOL "Do not build kernel module")
+set (no_nvidia_driver false CACHE BOOL "Build kernel module without NVIDIA support")
 set (no_cuda false CACHE BOOL "Do not build with CUDA")
 
 # Set global compiler flags
@@ -18,7 +19,7 @@ set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -pedantic" CACHE INTERNAL "" 
 set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -DDEBUG" CACHE INTERNAL "" FORCE)
 
 # Try to find Nvidia driver
-if (CUDA_FOUND AND NOT no_cuda)
+if (CUDA_FOUND AND NOT no_nvidia_driver)
 
     # Try to find Nvidia headers (will choose the newest version)
     file (GLOB_RECURSE driver_paths "/usr/src/nvidia-*/nv-p2p.h")
@@ -86,7 +87,7 @@ install (TARGETS libnvme DESTINATION "lib")
 
 # Create kernel module makefile
 if (NOT no_module)
-    if (CUDA_FOUND AND NOT no_cuda AND EXISTS "${driver_dir}/Module.symvers")
+    if (CUDA_FOUND AND NOT no_nvidia_driver AND EXISTS "${driver_dir}/Module.symvers")
         set (module_ccflags "-D_CUDA -I${driver_include}")
         set (module_symbols "${driver_dir}/Module.symvers")
     endif ()
