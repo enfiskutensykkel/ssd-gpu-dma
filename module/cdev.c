@@ -82,7 +82,7 @@ int ctrl_dev_chrdev_create(struct ctrl_dev* dev,
 
     dev->chrdev = chrdev;
 
-    printk(KERN_DEBUG "Character device /dev/%s created (%d.%d)\n", 
+    printk(KERN_INFO "Character device /dev/%s created (%d.%d)\n", 
             dev->name, MAJOR(dev->rdev), MINOR(dev->rdev));
 
     return 0;

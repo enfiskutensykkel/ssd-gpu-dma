@@ -24,7 +24,8 @@ load:
 	insmod @CMAKE_PROJECT_NAME@.ko num_ctrl_devs=2 num_ctrl_refs=8 max_pages_per_map=128
 
 install: default
-	$(MAKE) INSTALL_MOD_DIR=@CMAKE_PROJECT_NAME@ -C @kdir@ M=@module_output@ modules_install
+	$(MAKE) -C @kdir@ M=@module_output@ modules_install
+	#$(MAKE) INSTALL_MOD_DIR=@CMAKE_PROJECT_NAME@ -C @kdir@ M=@module_output@ modules_install
 
 endif
 

@@ -11,6 +11,7 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/errno.h>
+#include <asm/page.h>
 
 #define DRIVER_NAME         "disnvme"
 #define PCI_CLASS_NVME      0x010802
@@ -168,14 +169,14 @@ static int ref_put(struct inode* inode, struct file* file)
     dev = find_dev_by_inode(inode);
     if (dev == NULL)
     {
-        printk(KERN_ALERT "Unknown controller device!\n");
+        printk(KERN_CRIT "Unknown controller device!\n");
         return -EBADF;
     }
     
     ref = find_ref(dev, current);
     if (ref == NULL)
     {
-        printk(KERN_WARNING "No controller references found but device exists!\n");
+        printk(KERN_ERR "No controller references found but device exists!\n");
         return -EACCES;
     }
 
@@ -190,6 +191,41 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 }
 
 
+static int ref_mmap(struct file* file, struct vm_area_struct* vma)
+{
+    struct ctrl_dev* dev;
+    struct ctrl_ref* ref;
+
+    dev = find_dev_by_inode(file->f_inode);
+    if (dev == NULL)
+    {
+        printk(KERN_CRIT "Unknown controller device!\n");
+        return -EBADF;
+    }
+
+    if (dev->pdev == NULL)
+    {
+        printk(KERN_ALERT "Controller device exists but PCI device is removed\n");
+        return -EAGAIN;
+    }
+
+    ref = find_ref(dev, current);
+    if (ref == NULL)
+    {
+        printk(KERN_ERR "No controller references found but device exists!\n");
+        return -EACCES;
+    }
+
+    if (vma->vm_end - vma->vm_start > pci_resource_len(dev->pdev, 0))
+    {
+        return -EINVAL;
+    }
+
+    vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+    return vm_iomap_memory(vma, pci_resource_start(dev->pdev, 0), vma->vm_end - vma->vm_start);
+}
+
+
 /* Define file operations for device file */
 static const struct file_operations dev_fops = 
 {
@@ -197,7 +233,7 @@ static const struct file_operations dev_fops =
     .open = ref_get,
     .release = ref_put,
     .unlocked_ioctl = ref_ioctl,
-    .mmap = NULL,
+    .mmap = ref_mmap,
 };
 
 
@@ -226,10 +262,18 @@ static int add_pci_dev(struct pci_dev* pdev, const struct pci_device_id* id)
         return -ENOSPC;
     }
 
+    err = pci_request_region(pdev, 0, DRIVER_NAME);
+    if (err != 0)
+    {
+        ctrl_dev_put(dev);
+        return err;
+    }
+
     // Enable PCI device
     err = pci_enable_device(pdev);
     if (err < 0)
     {
+        pci_release_region(pdev, 0);
         ctrl_dev_put(dev);
         printk(KERN_ERR "Failed to enable PCI device\n");
         return err;
@@ -239,6 +283,7 @@ static int add_pci_dev(struct pci_dev* pdev, const struct pci_device_id* id)
     err = ctrl_dev_chrdev_create(dev, &dev_fops);
     if (err != 0)
     {
+        pci_release_region(pdev, 0);
         pci_disable_device(pdev);
         ctrl_dev_put(dev);
         return err;
@@ -264,6 +309,7 @@ static void remove_pci_dev(struct pci_dev* pdev)
     // Disable PCI device
     pci_clear_master(pdev);
     pci_disable_device(pdev);
+    pci_release_region(pdev, 0);
 
     // Find controller device in question
     dev = find_dev_by_pdev(pdev);
@@ -298,9 +344,6 @@ static struct pci_driver driver =
     .remove = remove_pci_dev,
 };
 
-
-//   // pci_bus_addr_t b = pci_bus_address(pdev, bar);
-//
 
 static int __init disnvme_entry(void)
 {
@@ -358,7 +401,7 @@ static int __init disnvme_entry(void)
         unregister_chrdev_region(dev_first, num_ctrl_devs);
         kfree(ctrl_refs);
         kfree(ctrl_devs);
-        printk(KERN_CRIT"Failed to register as PCI driver\n");
+        printk(KERN_CRIT "Failed to register as PCI driver\n");
         return err;
     }
 
