@@ -3,6 +3,32 @@
 
 # Object files
 *.o
+*.ko
 
-# Ignore build directories
+# Library builds
+*.so
+
+# Intermediate files
+*.mod
+*.mod.c
+.*.cmd
+
+# Kernel symbols
+Module.symvers
+modules.order
+.tmp_versions/*
+
+# CUDA stuff
+*.i
+*.ii
+*.gpu
+*.ptx
+*.cubin
+*.fatbin
+
+# Profiling stuff
+*.prof
+*.nvprof
+
+# Ignore build directory
 build/*
