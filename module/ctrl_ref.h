@@ -2,14 +2,15 @@
 #define __NVM_MODULE_CTRL_REF_H__
 
 #include <linux/types.h>
-#include <linux/spinlock.h>
 #include <linux/mm_types.h>
 #include <linux/sched.h>
-#include <linux/pci.h>
+#include <linux/fs.h>
+#include <asm/uaccess.h>
 #ifdef _CUDA
 #include <nv-p2p.h>
 #endif
 
+struct ctrl_dev;
 struct mem_map;
 
 
@@ -21,7 +22,9 @@ struct mem_map;
  */
 struct ctrl_ref
 {
-    struct task_struct*         holder;         /* Userspace process that holds this reference */
+    unsigned long               in_use;         /* Indicates if this struct is used */
+    struct ctrl_dev*            ctrl;           /* Controller device */
+    struct task_struct*         owner;          /* Userspace process that holds this reference */
     struct mem_map*             maps;           /* Linked list of memory mappings */
 };
 
@@ -36,7 +39,7 @@ struct ctrl_ref
  */
 struct mem_map
 {
-    spinlock_t                  lock;           /* Lock structure when making changes */
+    unsigned long               in_use;         /* Indicates that the structure is currently being modified */
     struct mem_map*             next;           /* Pointer to the next memory map reference */
     struct mem_map*             prev;           /* Pointer to the previous memory map reference */
     u64                         vaddr_start;    /* Start address of virtual memory, used to look up the mapping again */
@@ -51,35 +54,35 @@ struct mem_map
 
 
 /*
- * Initialize a controller reference.
+ * Acquire a controller reference.
  */
-int ctrl_ref_init(struct ctrl_ref** ctrl, const struct pci_dev* pdev, struct vm_area_struct* vma);
+struct ctrl_ref* ctrl_ref_get(struct ctrl_ref* ref, struct ctrl_dev* dev);
 
 
 /*
  * Release a controller reference.
  */
-void ctrl_ref_free(struct ctrl_ref** ctrl);
+void ctrl_ref_put(struct ctrl_ref* ref);
 
 
 /*
  * Map host pages for controller.
  * Returns handle.
  */
-long map_host_pages(struct ctrl_ref* ctrl, u64 vaddr, long n_pages, struct mem_map** map);
+//long map_ram_pages(struct ctrl_ref* ref, u64 vaddr, long n_pages, __user);
 
 
 /* 
  * Map GPU pages for controller.
  * Returns handle.
  */
-long map_dev_pages(struct ctrl_ref* ctrl, u64 vaddr, long n_pages, struct mem_map** map);
+long map_gpu_pages(struct ctrl_ref* ref, u64 vaddr, long n_pages, struct mem_map** map);
 
 
 /*
  * Look up a memory mapping.
  */
-struct mem_map* find_map(struct ctrl_ref* ctrl, u64 vaddr);
+struct mem_map* find_ram_mapping(struct ctrl_ref* ref, u64 vaddr);
 
 
 /*
