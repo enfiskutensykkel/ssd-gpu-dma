@@ -88,7 +88,7 @@ install (TARGETS libnvme DESTINATION "lib")
 # Create kernel module makefile
 if (NOT no_module)
     if (CUDA_FOUND AND NOT no_nvidia_driver AND EXISTS "${driver_dir}/Module.symvers")
-        set (module_ccflags "-D_CUDA -I${driver_include}")
+        set (module_ccflags "-D_CUDA -D__CUDA__ -I${driver_include}")
         set (module_symbols "${driver_dir}/Module.symvers")
     endif ()
 
@@ -130,6 +130,12 @@ macro (set_sisci target)
 endmacro ()
 
 
+# Macro for making a sample depend on the kernel module
+macro (set_module target)
+    target_include_directories (${target} PRIVATE ${module_root})
+endmacro ()
+
+
 #macro (make_benchmark target binary_name files)
 #    if (sisci_include AND sisci_lib)
 #        add_executable (${target} EXCLUDE_FROM_ALL ${files})
@@ -145,7 +151,7 @@ add_subdirectory ("${samples_root}/dis-rw")
 add_subdirectory ("${samples_root}/identify")
 
 # Build all samples
-add_custom_target (examples DEPENDS ${sample_targets})
-add_custom_target (samples DEPENDS examples)
+add_custom_target (samples DEPENDS ${sample_targets})
+add_custom_target (examples DEPENDS samples)
 
 #add_custom_target (benchmarks DEPENDS ${benchmark_targets})

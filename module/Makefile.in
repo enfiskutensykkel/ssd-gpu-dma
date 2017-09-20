@@ -2,7 +2,7 @@
 ifneq ($(KERNELRELEASE),)
 	src := @module_root@
 	obj-m := @CMAKE_PROJECT_NAME@.o
-	@CMAKE_PROJECT_NAME@-objs := pci.o cdev.o map.o
+	@CMAKE_PROJECT_NAME@-objs := pci.o cdev.o map.o list.o
 	ccflags-y += @module_ccflags@
 	KBUILD_EXTRA_SYMBOLS := @module_symbols@
 else

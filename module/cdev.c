@@ -25,7 +25,7 @@ void ctrl_dev_reset(struct ctrl_dev* dev,
 }
 
 
-struct ctrl_dev* ctrl_dev_get(struct ctrl_dev* dev, const struct pci_dev* pdev)
+struct ctrl_dev* ctrl_dev_get(struct ctrl_dev* dev, struct pci_dev* pdev)
 {
     if (test_and_set_bit(1, &dev->in_use) == 0)
     {

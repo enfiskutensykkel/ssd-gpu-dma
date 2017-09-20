@@ -1,5 +1,5 @@
-#ifndef __NVM_MODULE_CTRL_DEV_H__
-#define __NVM_MODULE_CTRL_DEV_H__
+#ifndef __DIS_NVM_MODULE_CTRL_DEV_H__
+#define __DIS_NVM_MODULE_CTRL_DEV_H__
 
 #include <linux/pci.h>
 #include <linux/cdev.h>
@@ -9,7 +9,7 @@
 struct ctrl_dev
 {
     unsigned long               in_use;         /* Indicates if this struct is used */
-    const struct pci_dev*       pdev;           /* Reference to physical PCI device */
+    struct pci_dev*             pdev;           /* Reference to physical PCI device */
     char                        name[64];       /* Device name */
     dev_t                       rdev;           /* Device register */
     struct class*               cls;            /* Device class */
@@ -31,7 +31,7 @@ void ctrl_dev_reset(struct ctrl_dev* dev,
 /*
  * Acquire a controller device
  */
-struct ctrl_dev* ctrl_dev_get(struct ctrl_dev* dev, const struct pci_dev* pdev);
+struct ctrl_dev* ctrl_dev_get(struct ctrl_dev* dev, struct pci_dev* pdev);
 
 
 /*
@@ -53,4 +53,4 @@ int ctrl_dev_chrdev_create(struct ctrl_dev* dev,
 void ctrl_dev_chrdev_remove(struct ctrl_dev* dev);
 
 
-#endif
+#endif /* __DIS_NVM_MODULE_CTRL_DEV_H__ */

@@ -1,5 +1,7 @@
 #include "ctrl_ref.h"
 #include "ctrl_dev.h"
+#include "map.h"
+#include "nvm_ioctl.h"
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -75,6 +77,11 @@ static struct ctrl_ref* find_ref(struct ctrl_dev* dev, struct task_struct* owner
 
         if (ref->ctrl == dev && (owner == NULL || ref->owner == owner))
         {
+            if (dev->pdev == NULL)
+            {
+                printk(KERN_ERR "PCI device is removed but reference still exists!\n");
+            }
+
             return ref;
         }
     }
@@ -96,7 +103,7 @@ static struct ctrl_dev* find_dev_by_inode(struct inode* inode)
         {
             if (ctrl_devs[i].pdev == NULL)
             {
-                printk(KERN_CRIT "Controller device is removed but reference still exists!\n");
+                printk(KERN_ERR "Controller device exists but PCI device is removed!\n");
             }
 
             return dev;
@@ -128,7 +135,7 @@ static struct ctrl_dev* find_dev_by_pdev(const struct pci_dev* pdev)
 
 static int ref_get(struct inode* inode, struct file* file)
 {
-    int i;
+    long i;
     struct ctrl_dev* dev;
     struct ctrl_ref* ref = NULL;
 
@@ -136,7 +143,7 @@ static int ref_get(struct inode* inode, struct file* file)
     dev = find_dev_by_inode(inode);
     if (dev == NULL)
     {
-        printk(KERN_ALERT "Unknown character device!\n");
+        printk(KERN_CRIT "Unknown character device!\n");
         return -EBADF;
     }
 
@@ -152,6 +159,7 @@ static int ref_get(struct inode* inode, struct file* file)
         ref = ctrl_ref_get(&ctrl_refs[i], dev);
         if (ref != NULL)
         {
+            printk(KERN_DEBUG "Controller reference %ld created\n", i);
             return 0;
         }
     }
@@ -181,20 +189,73 @@ static int ref_put(struct inode* inode, struct file* file)
     }
 
     ctrl_ref_put(ref);
+    printk(KERN_DEBUG "Controller reference %ld removed\n", ref - ctrl_refs);
     return 0;
 }
 
 
 static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 {
-    return 0;
+    long retval = 0;
+    struct ctrl_dev* dev;
+    struct ctrl_ref* ref;
+    struct nvm_ioctl_map request;
+    struct map_descriptor* map = NULL;
+    size_t max_pages = max_pages_per_map;
+
+    dev = find_dev_by_inode(file->f_inode);
+    if (dev == NULL)
+    {
+        printk(KERN_CRIT "Unknown controller device!\n");
+        return -EBADF;
+    }
+
+    ref = find_ref(dev, current);
+    if (ref == NULL)
+    {
+        printk(KERN_CRIT "Controller reference not found!\n");
+        return -EBADF;
+    }
+
+    switch (cmd)
+    {
+        case NVM_MAP_HOST_MEMORY:
+            copy_from_user(&request, (void __user*) arg, sizeof(request));
+            
+            if (request.n_pages >= max_pages)
+            {
+                retval = -EINVAL;
+                break;
+            }
+
+            retval = map_user_pages(ref, request.vaddr_start, request.n_pages, &map);
+
+            if (retval == 0 && map != NULL)
+            {
+                copy_to_user((void __user*) request.ioaddrs, map->addrs, map->n_addrs * sizeof(uint64_t));
+            }
+            break;
+
+        case NVM_MAP_DEVICE_MEMORY:
+            break;
+
+        case NVM_UNMAP_MEMORY:
+            break;
+
+        default:
+            printk(KERN_NOTICE "Unknown ioctl command from process %d: %u\n", 
+                    current->pid, cmd);
+            retval = -EINVAL;
+            break;
+    }
+
+    return retval;
 }
 
 
 static int ref_mmap(struct file* file, struct vm_area_struct* vma)
 {
     struct ctrl_dev* dev;
-    struct ctrl_ref* ref;
 
     dev = find_dev_by_inode(file->f_inode);
     if (dev == NULL)
@@ -205,15 +266,8 @@ static int ref_mmap(struct file* file, struct vm_area_struct* vma)
 
     if (dev->pdev == NULL)
     {
-        printk(KERN_ALERT "Controller device exists but PCI device is removed\n");
+        printk(KERN_CRIT "Controller device exists but PCI device is removed\n");
         return -EAGAIN;
-    }
-
-    ref = find_ref(dev, current);
-    if (ref == NULL)
-    {
-        printk(KERN_ERR "No controller references found but device exists!\n");
-        return -EACCES;
     }
 
     if (vma->vm_end - vma->vm_start > pci_resource_len(dev->pdev, 0))
@@ -243,7 +297,7 @@ static int add_pci_dev(struct pci_dev* pdev, const struct pci_device_id* id)
     int err;
     struct ctrl_dev* dev = NULL;
 
-    printk(KERN_NOTICE "Adding controller device: %02x:%02x.%1x", 
+    printk(KERN_INFO "Adding controller device: %02x:%02x.%1x", 
             pdev->bus->number, PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
 
     // Find free slot
@@ -315,7 +369,7 @@ static void remove_pci_dev(struct pci_dev* pdev)
     dev = find_dev_by_pdev(pdev);
     if (dev == NULL)
     {
-        printk(KERN_ALERT "Attempting to remove unknown PCI device: %02x:%02x.%1x\n",
+        printk(KERN_CRIT "Attempting to remove unknown PCI device: %02x:%02x.%1x\n",
                 pdev->bus->number, PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
         return;
     }
@@ -330,7 +384,7 @@ static void remove_pci_dev(struct pci_dev* pdev)
     // Remove character device
     ctrl_dev_put(dev);
 
-    printk(KERN_NOTICE "Controller device removed: %02x:%02x.%1x", 
+    printk(KERN_INFO "Controller device removed: %02x:%02x.%1x", 
             pdev->bus->number, PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
 }
 
