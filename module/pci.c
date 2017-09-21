@@ -236,10 +236,43 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
             }
             break;
 
+#ifdef _CUDA
         case NVM_MAP_DEVICE_MEMORY:
+            copy_from_user(&request, (void __user*) arg, sizeof(request));
+
+            if (request.n_pages >= max_pages)
+            {
+                retval = -EINVAL;
+                break;
+            }
+
+            retval = map_gpu_memory(ref, request.vaddr_start, request.n_pages, &map);
+            if (retval == 0 && map != NULL)
+            {
+                copy_to_user((void __user*) request.ioaddrs, map->addrs, map->n_addrs * sizeof(uint64_t));
+            }
             break;
+#endif
 
         case NVM_UNMAP_MEMORY:
+            map = find_user_page_map(ref, arg);
+            if (map != NULL)
+            {
+                unmap_user_pages(map);
+                break;
+            }
+
+#ifdef _CUDA
+            map = find_gpu_map(ref, arg);
+            if (map != NULL)
+            {
+                unmap_gpu_memory(map);
+                break;
+            }
+#endif
+
+            retval = -EINVAL;
+            printk(KERN_WARNING "Mapping for address %lx not found\n", arg);
             break;
 
         default:

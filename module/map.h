@@ -5,6 +5,7 @@
 #include <linux/types.h>
 #include <linux/mm_types.h>
 
+struct device;
 struct ctrl_ref;
 
 
@@ -15,7 +16,8 @@ struct ctrl_ref;
  */
 struct map_descriptor
 {
-    struct list_head            list_head;      /* Linked list header */
+    struct map_list_head        list_head;      /* Linked list header */
+    struct device*              dev;            /* PCI device mappings are mapped for */
     unsigned long               page_size;      /* Virtual/logical page size */
     unsigned long               n_pages;        /* Number of pages pinned (should equal n_addrs) */
     void*                       pages;          /* Reference to the pinned pages */
@@ -32,10 +34,15 @@ struct map_descriptor
 long map_user_pages(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, struct map_descriptor** map);
 
 
-/*
- * 
- */
-void unmap_user_pages(struct ctrl_ref* ref, struct map_descriptor* map);
+void unmap_user_pages(struct map_descriptor* map);
+
+
+#ifdef _CUDA
+long map_gpu_memory(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, struct map_descriptor** map);
+
+
+void unmap_gpu_memory(struct map_descriptor* map);
+#endif
 
 
 /*
@@ -47,13 +54,7 @@ struct map_descriptor* find_user_page_map(struct ctrl_ref* ref, u64 vaddr);
 /*
  * Look up a map from the list of GPU mappings.
  */
-//struct map_descriptor* find_gpu_page_map(struct ctrl_ref* ref, u64 vaddr);
-
-
-
-
-//long map_device_memory(struct ctrl_ref* ref, u64 addr, size_t n_pages, u64 __user* ioaddrs);
-
+struct map_descriptor* find_gpu_map(struct ctrl_ref* ref, u64 vaddr);
 
 
 #endif /* __DIS_NVM_MODULE_MAP_H__ */

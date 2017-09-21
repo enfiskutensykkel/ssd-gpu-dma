@@ -38,19 +38,24 @@ void* list_find(struct map_list_head* list_start, u64 vaddr)
 
 
 void list_remove(void* node)
+
 {
     struct map_list_head* curr = (struct map_list_head*) node;
     struct map_list_head* next = curr->next;
     struct map_list_head* prev = curr->prev;
 
-    // Previous is always present because of list head
-    prev->next = next;
+    if (prev != NULL)
+    {
+        prev->next = next;
+    }
 
-    // Set next pointer's prev 
     if (next != NULL)
     {
         next->prev = prev;
     }
+
+    curr->next = NULL;
+    curr->prev = NULL;
 }
 
 

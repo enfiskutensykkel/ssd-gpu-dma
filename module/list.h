@@ -14,7 +14,7 @@ struct map_list_head
 {
     struct map_list_head*           next;           /* Pointer to next element in list */
     struct map_list_head*           prev;           /* Pointer to previous element in list */
-    u64                         vaddr;          /* Sort list by virtual address ranges */
+    u64                             vaddr;          /* Sort list by virtual address ranges */
 };
 
 
