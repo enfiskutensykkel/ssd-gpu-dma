@@ -1,7 +1,7 @@
 #include "ctrl_ref.h"
 #include "ctrl_dev.h"
 #include "map.h"
-#include "nvm_ioctl.h"
+#include "ioctl.h"
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
@@ -220,6 +220,7 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
     switch (cmd)
     {
         case NVM_MAP_HOST_MEMORY:
+            printk(KERN_DEBUG "Mapping user page request from pid %d\n", current->pid);
             copy_from_user(&request, (void __user*) arg, sizeof(request));
             
             if (request.n_pages >= max_pages)
@@ -238,6 +239,7 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 
 #ifdef _CUDA
         case NVM_MAP_DEVICE_MEMORY:
+            printk(KERN_DEBUG "Mapping device memory request from pid %d\n", current->pid);
             copy_from_user(&request, (void __user*) arg, sizeof(request));
 
             if (request.n_pages >= max_pages)
@@ -255,6 +257,8 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 #endif
 
         case NVM_UNMAP_MEMORY:
+            printk(KERN_DEBUG "Unmapping request from pid %d\n", current->pid);
+
             map = find_user_page_map(ref, arg);
             if (map != NULL)
             {

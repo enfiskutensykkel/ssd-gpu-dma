@@ -284,12 +284,13 @@ int main(int argc, char** argv)
     }
 
     // Get controller reference
-    status = nvm_ctrl_init(&ctrl, ctrl_registers, NVM_CTRL_MEM_MINSIZE);
+    status = nvm_ctrl_init_userspace(&ctrl, ctrl_registers, NVM_CTRL_MEM_MINSIZE);
     if (status != 0)
     {
         munmap((void*) ctrl_registers, NVM_CTRL_MEM_MINSIZE);
         close(fd);
         fprintf(stderr, "Failed to get controller reference: %s\n", strerror(status));
+        exit(4);
     }
 
     status = identify_ctrl(ctrl);

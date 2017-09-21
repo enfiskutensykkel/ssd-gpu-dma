@@ -45,7 +45,8 @@ find_path (sisci_include NAMES sisci_types.h sisci_api.h sisci_error.h PATHS "${
 find_library (sisci_lib NAMES sisci PATHS "${DIS}/lib64" "${DIS}/lib")
 
 # API source files
-file (GLOB libnvme_source "${PROJECT_SOURCE_DIR}/src/*.c")
+set (libnvme_root "${PROJECT_SOURCE_DIR}/src")
+file (GLOB libnvme_source "${libnvme_root}/*.c")
 file (GLOB libnvme_include "${PROJECT_BINARY_DIR}/include/*.h" "${PROJECT_SOURCE_DIR}/include/*.h")
 
 # Module source files
@@ -73,6 +74,10 @@ else ()
     target_link_libraries (libnvme Threads::Threads)
 endif ()
 
+if (NOT no_cuda)
+    target_compile_definitions(libnvme PRIVATE _CUDA __CUDA__)
+endif ()
+
 # Set name of library
 set_target_properties (libnvme PROPERTIES OUTPUT_NAME "${CMAKE_PROJECT_NAME}")
 
@@ -85,10 +90,11 @@ set (module_output "${CMAKE_BINARY_DIR}/module")
 install (FILES ${libnvme_include} DESTINATION "include")
 install (TARGETS libnvme DESTINATION "lib")
 
+
 # Create kernel module makefile
 if (NOT no_module)
     if (CUDA_FOUND AND NOT no_nvidia_driver AND EXISTS "${driver_dir}/Module.symvers")
-        set (module_ccflags "-D_CUDA -D__CUDA__ -I${driver_include}")
+        set (module_ccflags "-D_CUDA -I${driver_include} -I${libnvme_root}")
         set (module_symbols "${driver_dir}/Module.symvers")
     endif ()
 
@@ -132,7 +138,6 @@ endmacro ()
 
 # Macro for making a sample depend on the kernel module
 macro (set_module target)
-    target_include_directories (${target} PRIVATE ${module_root})
 endmacro ()
 
 

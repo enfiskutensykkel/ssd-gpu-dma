@@ -45,5 +45,4 @@ void _nvm_dev_put(struct nvm_device* device);
 
 #endif /* _SISCI */
 
-
 #endif /* __NVM_INTERNAL_DEVICE_H__ */

@@ -1,8 +1,10 @@
-#ifndef __DIS_NVM_MODULE_IOCTL_H__
-#define __DIS_NVM_MODULE_IOCTL_H__
+#ifndef __NVM_INTERNAL_IOCTL_H__
+#define __NVM_INTERNAL_IOCTL_H__
 
 #include <linux/types.h>
 #include <asm/ioctl.h>
+
+struct nvm_controller;
 
 
 #define NVM_IOCTL_TYPE          0x80
@@ -22,16 +24,19 @@ struct nvm_ioctl_map
 enum nvm_ioctl_type
 {
     NVM_MAP_HOST_MEMORY         = _IOW(NVM_IOCTL_TYPE, 1, struct nvm_ioctl_map),
-#ifdef __CUDA__
+#ifdef _CUDA
     NVM_MAP_DEVICE_MEMORY       = _IOW(NVM_IOCTL_TYPE, 2, struct nvm_ioctl_map),
 #endif
     NVM_UNMAP_MEMORY            = _IOW(NVM_IOCTL_TYPE, 3, uint64_t)
 };
 
 
-
-
 #ifndef __KERNEL__
-#undef __user
+/*
+ * Get the IOCTL file descriptor from the controller reference.
+ */
+int _nvm_ioctl_fd_from_ctrl(const struct nvm_controller* ctrl);
 #endif
-#endif /* __DIS_NVM_MODULE_IOCTL_H__ */
+
+
+#endif /* __NVM_INTERNAL_IOCTL_H__ */

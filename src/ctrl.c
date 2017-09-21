@@ -14,6 +14,8 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 #include "device.h"
 #include "util.h"
 #include "regs.h"
@@ -47,6 +49,7 @@ struct bar_reference
  */
 struct handle_container
 {
+    int                         ioctl_fd;   // File descriptor
     struct bar_reference*       bar_ref;    // Device BAR reference handle
     struct nvm_controller       ctrl;       // Actual controlle handle
 };
@@ -182,7 +185,7 @@ static int initialize_handle(nvm_ctrl_t ctrl, volatile void* mm_ptr, size_t mm_s
 
 
 
-int nvm_ctrl_init(nvm_ctrl_t* ctrl_handle, volatile void* mm_ptr, size_t mm_size)
+int nvm_ctrl_init_userspace(nvm_ctrl_t* ctrl_handle, volatile void* mm_ptr, size_t mm_size)
 {
     int err;
 
@@ -195,6 +198,7 @@ int nvm_ctrl_init(nvm_ctrl_t* ctrl_handle, volatile void* mm_ptr, size_t mm_size
         return ENOMEM;
     }
 
+    container->ioctl_fd = -1;
     container->bar_ref = NULL;
 
     err = initialize_handle(&container->ctrl, mm_ptr, mm_size);
@@ -206,6 +210,68 @@ int nvm_ctrl_init(nvm_ctrl_t* ctrl_handle, volatile void* mm_ptr, size_t mm_size
 
     *ctrl_handle = &container->ctrl;
     return 0;
+}
+
+
+
+int nvm_ctrl_init(nvm_ctrl_t* ctrl_handle, uint64_t device_id)
+{
+    int err;
+    char path[128];
+
+    *ctrl_handle = NULL;
+
+    snprintf(path, sizeof(path), "/dev/disnvme%lu", device_id);
+    int fd = open(path, O_RDWR | O_NONBLOCK);
+    if (fd < 0)
+    {
+        dprintf("Could not find device %lu: %s\n", device_id, strerror(errno));
+        return ENODEV;
+    }
+
+    volatile void* ptr = mmap(NULL, NVM_CTRL_MEM_MINSIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FILE, fd, 0);
+    if (ptr == NULL)
+    {
+        close(fd);
+        dprintf("Failed to map BAR resource: %s\n", strerror(errno));
+        return EIO;
+    }
+
+    struct handle_container* container = (struct handle_container*) malloc(sizeof(struct handle_container));
+    if (container == NULL)
+    {
+        munmap((void*) ptr, NVM_CTRL_MEM_MINSIZE);
+        close(fd);
+        dprintf("Failed to allocate controller handle: %s\n", strerror(errno));
+        return ENOMEM;
+    }
+
+    container->ioctl_fd = fd;
+    container->bar_ref = NULL;
+
+    err = initialize_handle(&container->ctrl, ptr, NVM_CTRL_MEM_MINSIZE);
+    if (err != 0)
+    {
+        munmap((void*) ptr, NVM_CTRL_MEM_MINSIZE);
+        close(fd);
+        free(container);
+        return err;
+    }
+
+    *ctrl_handle = &container->ctrl;
+    return 0;
+}
+
+
+
+/*
+ * Get the IOCTL file descriptor from the controller reference.
+ */
+int _nvm_ioctl_fd_from_ctrl(const struct nvm_controller* ctrl)
+{
+    const struct handle_container* container = get_container_const(ctrl);
+    
+    return container->ioctl_fd;
 }
 
 
@@ -406,6 +472,7 @@ int nvm_dis_ctrl_init(nvm_ctrl_t* ctrl_handle, uint64_t device_id, uint32_t adap
         return ENOMEM;
     }
 
+    container->ioctl_fd = -1;
     container->bar_ref = bar_ref;
 
     err = initialize_handle(&container->ctrl, bar_ref->mm_ptr, bar_ref->mm_size);
@@ -429,6 +496,13 @@ void nvm_ctrl_free(nvm_ctrl_t ctrl)
     if (ctrl != NULL)
     {
         struct handle_container* container = get_container(ctrl);
+
+        if (container->ioctl_fd >= 0)
+        {
+
+            munmap((void*) ctrl->mm_ptr, NVM_CTRL_MEM_MINSIZE);
+            close(container->ioctl_fd);
+        }
 
 #if _SISCI
         if (container->bar_ref != NULL)

@@ -10,11 +10,16 @@
 #include <nvm_types.h>
 #include <nvm_ctrl.h>
 #include <nvm_util.h>
+#include <nvm_dma.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include "ioctl.h"
 #include "device.h"
 #include "util.h"
 #include "regs.h"
@@ -45,6 +50,7 @@ struct mapped_segment
  */
 struct handle_container
 {
+    int                         ioctl_fd;   // ioctl file descriptor
     struct mapped_segment*      mapped_seg; // Mapped segment descriptor
     struct nvm_dma_window       window;     // Actual DMA window handle
 } __attribute__((aligned (32)));
@@ -84,6 +90,7 @@ static struct handle_container* create_container(const nvm_ctrl_t ctrl, size_t p
         return NULL;
     }
 
+    container->ioctl_fd = -1;
     container->mapped_seg = NULL;
     return container;
 }
@@ -91,7 +98,7 @@ static struct handle_container* create_container(const nvm_ctrl_t ctrl, size_t p
 
 
 /* 
- * Iinitialize DMA window descriptor.
+ * Initialize DMA window descriptor.
  */
 static int initialize_handle(nvm_dma_t window, nvm_ctrl_t ctrl, void* vaddr, size_t page_size, size_t n_pages, uint64_t* ioaddrs)
 {
@@ -127,6 +134,53 @@ static int initialize_handle(nvm_dma_t window, nvm_ctrl_t ctrl, void* vaddr, siz
 
 
 
+/*
+ * Request page-lock and IO addresses for a virtual memory range.
+ */
+static int map_memory(int ioctl_fd, int devptr, uint64_t vaddr_start, size_t n_pages, uint64_t* ioaddrs)
+{
+    enum nvm_ioctl_type type;
+
+#ifdef _CUDA
+    type = devptr ? NVM_MAP_DEVICE_MEMORY : NVM_MAP_HOST_MEMORY;
+#else
+    type = NVM_MAP_HOST_MEMORY;
+#endif
+
+    struct nvm_ioctl_map request = {
+        .vaddr_start = vaddr_start,
+        .n_pages = n_pages,
+        .ioaddrs = ioaddrs
+    };
+
+    int err = ioctl(ioctl_fd, type, &request);
+    if (err < 0)
+    {
+        dprintf("Map request failed: %s\n", strerror(errno));
+        return EIO;
+    }
+    
+    return 0;
+}
+
+
+
+/*
+ * Release locked pages.
+ */
+static int unmap_memory(int ioctl_fd, uint64_t vaddr_start)
+{
+    int err = ioctl(ioctl_fd, NVM_UNMAP_MEMORY, vaddr_start);
+    if (err < 0)
+    {
+        dprintf("Unmap request failed: %s\n", strerror(errno));
+    }
+
+    return err;
+}
+
+
+
 int nvm_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t page_size, size_t n_pages, uint64_t* ioaddrs)
 {
     int err;
@@ -140,8 +194,6 @@ int nvm_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t 
         return ENOMEM;
     }
 
-    container->mapped_seg = NULL;
-            
     // Initialize DMA window handle
     err = initialize_handle(&container->window, ctrl, vaddr, page_size, n_pages, ioaddrs);
     if (err != 0)
@@ -151,6 +203,71 @@ int nvm_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t 
     }
 
     *window = &container->window;
+    return 0;
+}
+
+
+
+int nvm_dma_window_host_mem(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t size)
+{
+    int ioctl_fd;
+
+    *window = NULL;
+
+    // Get ioctl descriptor
+    ioctl_fd = _nvm_ioctl_fd_from_ctrl(ctrl);
+    if (ioctl_fd < 0)
+    {
+        return EINVAL;
+    }
+
+    // Get RAM page size
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (page_size < 0)
+    {
+        dprintf("Unable to retrieve page size: %s\n", strerror(errno));
+        return EINVAL;
+    }
+
+    // Duplicate file descriptor
+    ioctl_fd = dup(ioctl_fd);
+    if (ioctl_fd < 0)
+    {
+        dprintf("Failed to copy ioctl handle: %s\n", strerror(errno));
+        return EBADF;
+    }
+
+    // Align arguments
+    vaddr = (void*) DMA_ALIGN((uint64_t) vaddr, page_size);
+    size = DMA_SIZE(size, page_size);
+    size_t n_pages = size / page_size;
+
+    uint64_t* ioaddrs = calloc(n_pages, sizeof(uint64_t));
+    if (ioaddrs == NULL)
+    {
+        close(ioctl_fd);
+        return ENOMEM;
+    }
+    
+    // Pin pages to memory and get IO addresses
+    if (map_memory(ioctl_fd, 0, (uint64_t) vaddr, n_pages, ioaddrs) != 0)
+    {
+        close(ioctl_fd);
+        free(ioaddrs);
+        return EIO;
+    }
+
+    int err = nvm_dma_window_init(window, ctrl, vaddr, page_size, n_pages, ioaddrs);
+    free(ioaddrs);
+    if (err != 0)
+    {
+        close(ioctl_fd);
+        return err;
+    }
+
+    struct handle_container* container = get_container(*window);
+    container->ioctl_fd = ioctl_fd;
+
     return 0;
 }
 
@@ -166,7 +283,7 @@ int nvm_dis_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, uint32_t adapter
     *window = NULL;
 
     // Round size argument up to nearest controller page-aligned size
-    size = (size + ctrl->page_size - 1) & ~(ctrl->page_size - 1);
+    size = DMA_SIZE(size, ctrl->page_size);
     if (size == 0)
     {
         return EINVAL;
@@ -249,6 +366,12 @@ void nvm_dma_window_free(nvm_dma_t window)
         }
 #endif
         
+        if (container->ioctl_fd >= 0)
+        {
+            unmap_memory(container->ioctl_fd, (uint64_t) window->vaddr);
+            close(container->ioctl_fd);
+        }
+
         free(container);
     }
 }

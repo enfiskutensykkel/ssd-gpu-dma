@@ -22,7 +22,15 @@ extern "C" {
  * Note: This function should only be called directly if SISCI is not available,
  *       otherwise it is called implicitly.
  */
-int nvm_ctrl_init(nvm_ctrl_t* ctrl, volatile void* ctrl_mem, size_t ctrl_mem_size);
+int nvm_ctrl_init_userspace(nvm_ctrl_t* ctrl, volatile void* ctrl_mem, size_t ctrl_mem_size);
+
+
+/*
+ * Initialize controller reference.
+ *
+ * Read from device registers and initialize controller reference.
+ */
+int nvm_ctrl_init(nvm_ctrl_t* ctrl, uint64_t dev_id);
 
 
 #ifdef __DIS_CLUSTER__
@@ -30,7 +38,7 @@ int nvm_ctrl_init(nvm_ctrl_t* ctrl, volatile void* ctrl_mem, size_t ctrl_mem_siz
 /* 
  * Initialize controller reference.
  *
- * Read from PCI device registers and initialize controller reference.
+ * Read from device registers and initialize controller reference.
  */
 int nvm_dis_ctrl_init(nvm_ctrl_t* ctrl, uint64_t smartio_dev_id, uint32_t dis_adapter);
 
