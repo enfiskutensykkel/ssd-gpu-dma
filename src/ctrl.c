@@ -500,7 +500,7 @@ void nvm_ctrl_free(nvm_ctrl_t ctrl)
         if (container->ioctl_fd >= 0)
         {
 
-            munmap((void*) ctrl->mm_ptr, NVM_CTRL_MEM_MINSIZE);
+            munmap((void*) ctrl->mm_ptr, ctrl->mm_size);
             close(container->ioctl_fd);
         }
 

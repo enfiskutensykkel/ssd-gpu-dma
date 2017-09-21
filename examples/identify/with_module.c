@@ -87,7 +87,7 @@ int main(int argc, char** argv)
         exit(2);
     }
 
-    status = nvm_dma_window_host_mem(&window, ctrl, memory, 3 * page_size);
+    status = nvm_dma_window_host_map(&window, ctrl, memory, 3 * page_size);
     if (status != 0)
     {
         free(memory);
@@ -108,7 +108,7 @@ int main(int argc, char** argv)
 
 static void give_usage(const char* name)
 {
-    fprintf(stderr, "Usage: %s --ctrl=<pci bdf>\n", name);
+    fprintf(stderr, "Usage: %s --ctrl=<dev id>\n", name);
 }
 
 
@@ -116,7 +116,7 @@ static void show_help(const char* name)
 {
     give_usage(name);
     fprintf(stderr, "    Create a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
-            "    --ctrl     <pci bdf>       PCI bus-device-function to controller.\n"
+            "    --ctrl     <dev id>        Device ID ('/dev/disnvmeXXX').\n"
             "    --help                     Show this information.\n");
 }
 

@@ -35,7 +35,7 @@ struct ctrl_ref* ctrl_ref_get(struct ctrl_ref* ref, struct ctrl_dev* dev)
     }
 
     ref->ctrl = dev;
-    ref->owner = current;
+    ref->owner = current->pid;
     list_init(&ref->user_page_maps, 0);
     list_init(&ref->gpu_page_maps, 0);
 
@@ -61,7 +61,7 @@ void ctrl_ref_put(struct ctrl_ref* ref)
         unmap_user_pages(map);
     }
 
-    ref->owner = NULL;
+    ref->owner = 0;
     ref->ctrl = NULL;
 
     test_and_clear_bit(IN_USE_BIT, &ref->flags);
@@ -236,7 +236,7 @@ long map_user_pages(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
     list_init(md, vaddr);
     
     // Pin pages to memory
-    err = lock_user_pages(md, ref->owner, vaddr, n_pages);
+    err = lock_user_pages(md, /*ref->owner*/ current, vaddr, n_pages);
     if (err != 0)
     {
         kfree(md);

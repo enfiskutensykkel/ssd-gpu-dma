@@ -5,6 +5,7 @@ set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 find_package (CUDA 8.0)
 
+
 set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 set (NVIDIA "" CACHE PATH "Path to Nvidia driver source")
 
@@ -14,9 +15,13 @@ set (no_module false CACHE BOOL "Do not build kernel module")
 set (no_nvidia_driver false CACHE BOOL "Build kernel module without NVIDIA support")
 set (no_cuda false CACHE BOOL "Do not build with CUDA")
 
+
 # Set global compiler flags
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -pedantic" CACHE INTERNAL "" FORCE)
 set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -DDEBUG" CACHE INTERNAL "" FORCE)
+set (CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -D__CUDA__)
+
+
 
 # Try to find Nvidia driver
 if (CUDA_FOUND AND NOT no_nvidia_driver)
@@ -40,11 +45,13 @@ if (CUDA_FOUND AND NOT no_nvidia_driver)
 endif ()
 
 
+
 # Try to find SISCI
 find_path (sisci_include NAMES sisci_types.h sisci_api.h sisci_error.h PATHS "${DIS}")
 find_library (sisci_lib NAMES sisci PATHS "${DIS}/lib64" "${DIS}/lib")
 
-# API source files
+
+# Library source files
 set (libnvme_root "${PROJECT_SOURCE_DIR}/src")
 file (GLOB libnvme_source "${libnvme_root}/*.c")
 file (GLOB libnvme_include "${PROJECT_BINARY_DIR}/include/*.h" "${PROJECT_SOURCE_DIR}/include/*.h")
@@ -53,11 +60,22 @@ file (GLOB libnvme_include "${PROJECT_BINARY_DIR}/include/*.h" "${PROJECT_SOURCE
 set (module_root "${PROJECT_SOURCE_DIR}/module")
 file (GLOB module_source "${module_root}/*.c")
 
+# Benchmarks
+set (benchmarks_root "${PROJECT_SOURCE_DIR}/benchmarks")
+
 # Samples shared files
 set (samples_root "${CMAKE_SOURCE_DIR}/examples")
 set (samples_common "${samples_root}/common")
 file (GLOB samples_common_all "${samples_common}/*.c")
 file (GLOB samples_common_sisci "${samples_common}/dis/*.c")
+
+
+
+# Specify where stuff should be placed
+set (CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set (module_output "${CMAKE_BINARY_DIR}/module")
+
 
 
 # Set include directories
@@ -74,21 +92,19 @@ else ()
     target_link_libraries (libnvme Threads::Threads)
 endif ()
 
-if (NOT no_cuda)
+if (CUDA_FOUND AND NOT no_cuda)
     target_compile_definitions(libnvme PRIVATE _CUDA __CUDA__)
 endif ()
 
 # Set name of library
 set_target_properties (libnvme PROPERTIES OUTPUT_NAME "${CMAKE_PROJECT_NAME}")
 
-# Specify where stuff should be placed
-set (CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
-set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-set (module_output "${CMAKE_BINARY_DIR}/module")
-
 # Set install locations
 install (FILES ${libnvme_include} DESTINATION "include")
 install (TARGETS libnvme DESTINATION "lib")
+
+
+
 
 
 # Create kernel module makefile
@@ -103,26 +119,27 @@ if (NOT no_module)
 endif ()
 
 
-# Macro for creating sample binaries
+
+# Macro for creating sample target
 macro (make_sample target binary_name files)
     add_executable (${target} EXCLUDE_FROM_ALL ${files})
 
-    # Make sample depend on library
     add_dependencies (${target} libnvme)
     target_link_libraries (${target} libnvme)
 
-    # Add shared example code
     target_include_directories (${target} PRIVATE "${samples_common}")
     target_sources (${target} PRIVATE ${samples_common_all})
 
+    set_target_properties (${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/samples")
     set_target_properties (${target} PROPERTIES OUTPUT_NAME "${binary_name}")
 
     list (APPEND sample_targets "${target}")
-    set(sample_targets "${sample_targets}" PARENT_SCOPE)
+    set (sample_targets "${sample_targets}" PARENT_SCOPE)
 endmacro ()
 
 
-# Macro for making a sample depend on SISCI
+
+# Macro for making a target depend on SISCI
 macro (set_sisci target)
     if (NOT no_sisci_examples AND sisci_include AND sisci_lib)
         target_link_libraries (${target} ${sisci_lib})
@@ -130,27 +147,36 @@ macro (set_sisci target)
         target_compile_definitions (${target} PRIVATE _REENTRANT __DIS_CLUSTER__)
     else ()
         list (REMOVE_ITEM sample_targets "${target}")
-        set(sample_targets "${sample_targets}" PARENT_SCOPE)
+        set (sample_targets "${sample_targets}" PARENT_SCOPE)
+        list (REMOVE_ITEM benchmark_targets "${target}")
+        set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
         set_target_properties (${target} PROPERTIES EXCLUDE_FROM_ALL 1)
     endif ()
 endmacro ()
 
 
-# Macro for making a sample depend on the kernel module
-macro (set_module target)
+
+# Make benchmark target
+# We assume all benchmarks are CUDA programs
+macro (make_benchmark target binary_name files)
+    if (CUDA_FOUND AND NOT no_cuda)
+        cuda_add_executable (${target} ${files} OPTIONS -D__CUDA__ -std=c++11) # Ugly bugly
+
+        add_dependencies (${target} libnvme)
+        target_link_libraries (${target} libnvme)
+
+        set_target_properties (${target} PROPERTIES OUTPUT_NAME "${binary_name}")
+
+        list (APPEND benchmark_targets "${target}")
+        set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
+
+        install (TARGETS ${target} DESTINATION "bin")
+    endif ()
 endmacro ()
 
 
-#macro (make_benchmark target binary_name files)
-#    if (sisci_include AND sisci_lib)
-#        add_executable (${target} EXCLUDE_FROM_ALL ${files})
-#        list (APPEND benchmark_targets ${target})
-#    endif ()
-#endmacro ()
 
-
-
-# Build samples
+# Add individual samples
 add_subdirectory ("${samples_root}/dis-rpc")
 add_subdirectory ("${samples_root}/dis-rw")
 add_subdirectory ("${samples_root}/identify")
@@ -159,4 +185,9 @@ add_subdirectory ("${samples_root}/identify")
 add_custom_target (samples DEPENDS ${sample_targets})
 add_custom_target (examples DEPENDS samples)
 
-#add_custom_target (benchmarks DEPENDS ${benchmark_targets})
+
+# Add individual benchmarks
+if (CUDA_FOUND)
+    add_subdirectory ("${benchmarks_root}/simple-rdma")
+endif ()
+

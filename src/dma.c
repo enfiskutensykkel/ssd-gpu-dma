@@ -208,15 +208,45 @@ int nvm_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t 
 
 
 
-int nvm_dma_window_host_mem(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t size)
+static int initialize_and_map(nvm_dma_t* window, nvm_ctrl_t ctrl, int new_ioctl_fd, int devptr, size_t page_size, void* vaddr, size_t size)
 {
-    int ioctl_fd;
+    vaddr = (void*) DMA_ALIGN((uint64_t) vaddr, page_size);
+    size = DMA_SIZE(size, page_size);
+    size_t n_pages = size / page_size;
 
+    uint64_t* ioaddrs = calloc(n_pages, sizeof(uint64_t));
+    if (ioaddrs == NULL)
+    {
+        return ENOMEM;
+    }
+    
+    // Pin pages to memory and get IO addresses
+    if (map_memory(new_ioctl_fd, devptr, (uint64_t) vaddr, n_pages, ioaddrs) != 0)
+    {
+        free(ioaddrs);
+        return EIO;
+    }
+
+    int err = nvm_dma_window_init(window, ctrl, vaddr, page_size, n_pages, ioaddrs);
+    free(ioaddrs);
+    if (err != 0)
+    {
+        return err;
+    }
+
+    struct handle_container* container = get_container(*window);
+    container->ioctl_fd = new_ioctl_fd;
+
+    return 0;
+}
+
+
+
+int nvm_dma_window_host_map(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t size)
+{
     *window = NULL;
 
-    // Get ioctl descriptor
-    ioctl_fd = _nvm_ioctl_fd_from_ctrl(ctrl);
-    if (ioctl_fd < 0)
+    if (vaddr == NULL || size == 0)
     {
         return EINVAL;
     }
@@ -229,44 +259,65 @@ int nvm_dma_window_host_mem(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, siz
         return EINVAL;
     }
 
+    // Get ioctl descriptor
+    int ioctl_fd = _nvm_ioctl_fd_from_ctrl(ctrl);
+    if (ioctl_fd < 0)
+    {
+        return EINVAL;
+    }
+
     // Duplicate file descriptor
-    ioctl_fd = dup(ioctl_fd);
+    int new_ioctl_fd = dup(ioctl_fd);
     if (ioctl_fd < 0)
     {
         dprintf("Failed to copy ioctl handle: %s\n", strerror(errno));
         return EBADF;
     }
 
-    // Align arguments
-    vaddr = (void*) DMA_ALIGN((uint64_t) vaddr, page_size);
-    size = DMA_SIZE(size, page_size);
-    size_t n_pages = size / page_size;
-
-    uint64_t* ioaddrs = calloc(n_pages, sizeof(uint64_t));
-    if (ioaddrs == NULL)
-    {
-        close(ioctl_fd);
-        return ENOMEM;
-    }
-    
-    // Pin pages to memory and get IO addresses
-    if (map_memory(ioctl_fd, 0, (uint64_t) vaddr, n_pages, ioaddrs) != 0)
-    {
-        close(ioctl_fd);
-        free(ioaddrs);
-        return EIO;
-    }
-
-    int err = nvm_dma_window_init(window, ctrl, vaddr, page_size, n_pages, ioaddrs);
-    free(ioaddrs);
+    int err = initialize_and_map(window, ctrl, new_ioctl_fd, 0, page_size, vaddr, size);
     if (err != 0)
     {
-        close(ioctl_fd);
+        close(new_ioctl_fd);
         return err;
     }
 
-    struct handle_container* container = get_container(*window);
-    container->ioctl_fd = ioctl_fd;
+    return 0;
+}
+
+
+
+int nvm_dma_window_device_map(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t size)
+{
+    *window = NULL;
+
+    if (vaddr == NULL || size == 0)
+    {
+        return EINVAL;
+    }
+
+    size_t page_size = (1ULL << 16);
+
+    // Get ioctl descriptor
+    int ioctl_fd = _nvm_ioctl_fd_from_ctrl(ctrl);
+    if (ioctl_fd < 0)
+    {
+        return EINVAL;
+    }
+
+    // Duplicate file descriptor
+    int new_ioctl_fd = dup(ioctl_fd);
+    if (ioctl_fd < 0)
+    {
+        dprintf("Failed to copy ioctl handle: %s\n", strerror(errno));
+        return EBADF;
+    }
+
+    int err = initialize_and_map(window, ctrl, new_ioctl_fd, 1, page_size, vaddr, size);
+    if (err != 0)
+    {
+        close(new_ioctl_fd);
+        return err;
+    }
 
     return 0;
 }

@@ -19,7 +19,7 @@ struct ctrl_ref
 {
     unsigned long               flags;          /* 0=slot is free, 1=slot is taken */
     struct ctrl_dev*            ctrl;           /* Controller device */
-    struct task_struct*         owner;          /* Userspace process that holds this reference */
+    pid_t                       owner;          /* Userspace process that owns this reference */
     struct map_list_head        user_page_maps; /* Linked list of user pages */
     struct map_list_head        gpu_page_maps;  /* Linked list of mapped GPU memory */
 };

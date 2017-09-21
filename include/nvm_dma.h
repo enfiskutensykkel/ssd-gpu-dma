@@ -31,12 +31,14 @@ extern "C" {
 int nvm_dma_window_init(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* vaddr, size_t page_size, size_t n_pages, uint64_t* paddrs);
 
 
-int nvm_dma_window_host_mem(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* vaddr, size_t size);
+
+int nvm_dma_window_host_map(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* vaddr, size_t size);
+
 
 
 #if defined( __CUDA__ )
 
-int nvm_dma_window_device_mem(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* devptr, size_t size);
+int nvm_dma_window_device_map(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* devptr, size_t size);
 
 #endif
 

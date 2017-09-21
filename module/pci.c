@@ -75,7 +75,7 @@ static struct ctrl_ref* find_ref(struct ctrl_dev* dev, struct task_struct* owner
     {
         ref = &ctrl_refs[i];
 
-        if (ref->ctrl == dev && (owner == NULL || ref->owner == owner))
+        if (ref->ctrl == dev && (owner == NULL || ref->owner == owner->pid))
         {
             if (dev->pdev == NULL)
             {
@@ -150,6 +150,7 @@ static int ref_get(struct inode* inode, struct file* file)
     // Do some sanity checking to ensure that controller is still around
     if (dev->pdev == NULL)
     {
+        printk(KERN_ERR "PCI device is gone\n");
         return -EBADF;
     }
 
@@ -159,7 +160,8 @@ static int ref_get(struct inode* inode, struct file* file)
         ref = ctrl_ref_get(&ctrl_refs[i], dev);
         if (ref != NULL)
         {
-            printk(KERN_DEBUG "Controller reference %ld created\n", i);
+            printk(KERN_DEBUG "Controller reference %ld created for pid %d\n", 
+                    i, current->pid);
             return 0;
         }
     }
@@ -184,7 +186,7 @@ static int ref_put(struct inode* inode, struct file* file)
     ref = find_ref(dev, current);
     if (ref == NULL)
     {
-        printk(KERN_ERR "No controller references found but device exists!\n");
+        printk(KERN_WARNING "No controller references found for pid %d\n", current->pid);
         return -EACCES;
     }
 
@@ -293,6 +295,7 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 static int ref_mmap(struct file* file, struct vm_area_struct* vma)
 {
     struct ctrl_dev* dev;
+    int err;
 
     dev = find_dev_by_inode(file->f_inode);
     if (dev == NULL)
@@ -309,6 +312,7 @@ static int ref_mmap(struct file* file, struct vm_area_struct* vma)
 
     if (vma->vm_end - vma->vm_start > pci_resource_len(dev->pdev, 0))
     {
+        printk(KERN_WARNING "Invalid range size\n");
         return -EINVAL;
     }
 
@@ -411,11 +415,12 @@ static void remove_pci_dev(struct pci_dev* pdev)
         return;
     }
 
-    ref = find_ref(dev, NULL);
-    if (ref != NULL) 
+    while ((ref = find_ref(dev, NULL)) != NULL)
     {
-        printk(KERN_CRIT "Controller device is still referenced by at least one process: %02x:%02x.%1x\n", 
-                pdev->bus->number, PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
+        printk(KERN_CRIT "Controller device is still referenced by pid %d: %02x:%02x.%1x\n", 
+                ref->owner, pdev->bus->number, PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
+
+        ctrl_ref_put(ref);
     }
 
     // Remove character device
