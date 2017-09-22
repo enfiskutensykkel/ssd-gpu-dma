@@ -295,7 +295,6 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 static int ref_mmap(struct file* file, struct vm_area_struct* vma)
 {
     struct ctrl_dev* dev;
-    int err;
 
     dev = find_dev_by_inode(file->f_inode);
     if (dev == NULL)

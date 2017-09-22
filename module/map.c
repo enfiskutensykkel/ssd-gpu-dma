@@ -108,23 +108,8 @@ static long lock_user_pages(struct map_descriptor* map, struct task_struct* task
 #ifdef _CUDA
 static void free_callback(struct map_descriptor* map)
 {
-    unsigned long i;
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-#warning "dma_unmap_resource() is not tested"
-    for (i = 0; i < map->n_addrs; ++i)
-    {
-        dma_unmap_resource(map->dev, map->addrs[i], GPU_PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
-    }
-
-    printk(KERN_DEBUG "Unmapped %lu GPU pages for controller\n", i);
-#endif
-
-    i = map->n_pages;
     nvidia_p2p_free_page_table((nvidia_p2p_page_table_t*) map->pages);
-    kfree(map);
-    
-    printk(KERN_DEBUG "Released %lu GPU pages\n", i);
+    printk(KERN_NOTICE "Force released P2P page table\n");
 }
 #endif
 
@@ -169,6 +154,7 @@ long map_gpu_memory(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
 
     pages = (nvidia_p2p_page_table_t*) md->pages;
     md->n_pages = pages->entries;
+    md->n_addrs = 0;
 
     for (i = 0; i < md->n_pages; ++i)
     {
@@ -201,8 +187,26 @@ long map_gpu_memory(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
 #ifdef _CUDA
 void unmap_gpu_memory(struct map_descriptor* map)
 {
+    unsigned long i;
+
     list_remove(map);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
+#warning "dma_unmap_resource() is not tested"
+    for (i = 0; i < map->n_addrs; ++i)
+    {
+        dma_unmap_resource(map->dev, map->addrs[i], GPU_PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
+    }
+
+    printk(KERN_DEBUG "Unmapped %lu GPU pages for controller\n", i);
+#endif
+
+    i = map->n_pages;
+
     nvidia_p2p_put_pages(0, 0, map->list_head.vaddr, (nvidia_p2p_page_table_t*) map->pages);
+    kfree(map);
+
+    printk(KERN_DEBUG "Released %lu GPU pages\n", i);
 }
 #endif
 
