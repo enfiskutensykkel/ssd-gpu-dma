@@ -1,5 +1,8 @@
 cmake_minimum_required (VERSION 3.1)
-project (disnvme)
+project (disnvme LANGUAGES C CXX)
+
+set (CMAKE_C_STANDARD 99)
+set (CMAKE_CXX_STANDARD 11)
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
@@ -17,9 +20,14 @@ set (no_cuda false CACHE BOOL "Do not build with CUDA")
 
 
 # Set global compiler flags
-set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -pedantic" CACHE INTERNAL "" FORCE)
-set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -DDEBUG" CACHE INTERNAL "" FORCE)
-set (CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -D__CUDA__)
+set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra" CACHE INTERNAL "" FORCE)
+set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -Wall -Wextra -pedantic -g -DDEBUG" CACHE INTERNAL "" FORCE)
+set (CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra" CACHE INTERNAL "" FORCE)
+set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -Wextra -pedantic -g -DDEBUG" CACHE INTERNAL "" FORCE)
+set (CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
+set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D__CUDA__")
+set (CUDA_NVCC_FLAGS_RELEASE "${CMAKE_NVCC_FLAGS_RELEASE} -O2")
 
 
 
@@ -112,6 +120,8 @@ if (NOT no_module)
     if (CUDA_FOUND AND NOT no_nvidia_driver AND EXISTS "${driver_dir}/Module.symvers")
         set (module_ccflags "-D_CUDA -I${driver_include} -I${libnvme_root}")
         set (module_symbols "${driver_dir}/Module.symvers")
+    else ()
+        set (module_ccflags "-I${libnvme_root}")
     endif ()
 
     set (kdir "/lib/modules/${CMAKE_SYSTEM_VERSION}/build")
@@ -146,12 +156,24 @@ macro (set_sisci target)
         target_sources (${target} PRIVATE ${samples_common_sisci})
         target_compile_definitions (${target} PRIVATE _REENTRANT __DIS_CLUSTER__)
     else ()
-        list (REMOVE_ITEM sample_targets "${target}")
-        set (sample_targets "${sample_targets}" PARENT_SCOPE)
-        list (REMOVE_ITEM benchmark_targets "${target}")
-        set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
+	    if (sample_targets)
+            list (REMOVE_ITEM sample_targets "${target}")
+            set (sample_targets "${sample_targets}" PARENT_SCOPE)
+        endif ()
+
+        if (benchmark_targets)
+            list (REMOVE_ITEM benchmark_targets "${target}")
+            set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
+        endif ()
         set_target_properties (${target} PROPERTIES EXCLUDE_FROM_ALL 1)
     endif ()
+endmacro ()
+
+
+
+# Make target depend on pthreads
+macro (set_multithread target)
+    target_link_libraries (${target} Threads::Threads)
 endmacro ()
 
 
@@ -160,7 +182,7 @@ endmacro ()
 # We assume all benchmarks are CUDA programs
 macro (make_benchmark target binary_name files)
     if (CUDA_FOUND AND NOT no_cuda)
-        cuda_add_executable (${target} ${files} OPTIONS -D__CUDA__ -std=c++11) # Ugly bugly
+        cuda_add_executable (${target} ${files} OPTIONS -O3 -gencode arch=compute_50,code=sm_50 -D__CUDA__ -std=c++11) # Ugly bugly
 
         add_dependencies (${target} libnvme)
         target_link_libraries (${target} libnvme)
@@ -179,6 +201,7 @@ endmacro ()
 # Add individual samples
 add_subdirectory ("${samples_root}/dis-rpc")
 add_subdirectory ("${samples_root}/dis-rw")
+add_subdirectory ("${samples_root}/rw-example")
 add_subdirectory ("${samples_root}/identify")
 
 # Build all samples
