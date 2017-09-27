@@ -7,6 +7,7 @@
 #include <string.h>
 #include <errno.h>
 #include <nvm_types.h>
+#include <limits.h>
 
 
 int parse_u64(const char* str, uint64_t* num, int base)
@@ -31,13 +32,33 @@ int parse_u32(const char* str, uint32_t* num, int base)
 
     status = parse_u64(str, &ul, base);
 
-    if (status == 0)
+    if (status != 0 || ul > UINT_MAX)
     {
-        *num = (uint32_t) ul;
+        return EINVAL;
     }
 
+    *num = (uint32_t) ul;
     return status;
 }
+
+
+int parse_u16(const char* str, uint16_t* num, int base)
+{
+    int status;
+    uint64_t ul;
+
+    status = parse_u64(str, &ul, base);
+
+    if (status != 0 || ul > 0xffff)
+    {
+        return EINVAL;
+    }
+
+    *num = (uint16_t) ul;
+    return status;
+}
+
+
 
 
 uint16_t random_id()

@@ -238,6 +238,7 @@ static size_t transfer(nvm_ctrl_info_t* ctrl, nvm_ns_info_t* ns, nvm_queue_t* cq
         // Create rest of command
         nvm_cmd_header(cmd, opcode, ns_id);
         cmd->dword[10] = start_lba;
+        // TODO: dword[11]?
         cmd->dword[12] = (n_blks - 1) & 0xffff;
         start_lba += n_blks;
 
