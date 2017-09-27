@@ -114,7 +114,7 @@ static char* media_and_data_integrity_nvm_commands[] =
 };
 
 
-const char* nvm_strerror(const nvm_cpl_t* cpl)
+const char* nvm_status(const nvm_cpl_t* cpl)
 {
     uint8_t status_code_type = SCT(cpl);
     uint8_t status_code = SC(cpl);

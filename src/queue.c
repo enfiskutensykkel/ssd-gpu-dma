@@ -20,6 +20,7 @@ void nvm_queue_clear(nvm_queue_t* queue, const struct nvm_controller* ctrl, int 
     queue->head = 0;
     queue->tail = 0;
     queue->phase = 1;
+    queue->last = 0;
     queue->vaddr = vaddr;
     queue->ioaddr = ioaddr;
     queue->db = cq ? CQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd) : SQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd);
@@ -41,12 +42,13 @@ nvm_cmd_t* sq_enqueue(nvm_queue_t* sq)
     // Increase tail pointer and wrap around if necessary
     if (++sq->tail >= sq->max_entries)
     {
+        sq->phase = !sq->phase;
         sq->tail = 0;
     }
 
     // Set command identifier to equal tail pointer
     // The caller may override this by manually setting the CID field in DWORD0
-    *CMD_CID(ptr) = sq->tail;
+    *CMD_CID(ptr) = sq->tail + (!sq->phase) * sq->max_entries;
 
     return ptr;
 }
@@ -99,15 +101,33 @@ nvm_cpl_t* cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout)
 }
 
 
-void sq_submit(const nvm_queue_t* sq)
+void sq_submit(nvm_queue_t* sq)
 {
-    *((volatile uint32_t*) sq->db) = sq->tail;
+    if (sq->last != sq->tail)
+    {
+        *((volatile uint32_t*) sq->db) = sq->tail;
+        sq->last = sq->tail;
+    }
 }
 
 
-void cq_update(const nvm_queue_t* cq)
+void cq_update(nvm_queue_t* cq)
 {
-    *((volatile uint32_t*) cq->db) = cq->head; // FIXME: Check that it only moves forward
+    if (cq->last != cq->head)
+    {
+        *((volatile uint32_t*) cq->db) = cq->head;
+        cq->last = cq->head;
+    }
+}
+
+
+void sq_update_unchecked(nvm_queue_t* sq)
+{
+    // Update head pointer of submission queue
+    if (++sq->head >= sq->max_entries)
+    {
+        sq->head = 0;
+    }
 }
 
 
@@ -118,13 +138,12 @@ int sq_update(nvm_queue_t* sq, const nvm_cpl_t* cpl)
         return EAGAIN;
     }
 
-    if (sq->no == *CPL_SQID(cpl))
+    if (sq->no != *CPL_SQID(cpl))
     {
-        // Update head pointer of submission queue
-        sq->head = *CPL_SQHD(cpl); // FIXME: Check that it only moves forward
-        return 0;
+        return EBADF;
     }
 
-    return EBADF;
+    sq_update_unchecked(sq);
+    return 0;
 }
 

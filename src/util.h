@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
+//#include <pthread.h>
 
 #ifndef NDEBUG
 #include <string.h>
@@ -40,6 +41,7 @@ static inline uint64_t _nvm_delay_remain(uint64_t remaining_nanoseconds)
     ts.tv_sec = 0;
     ts.tv_nsec = _MIN(1000000UL, remaining_nanoseconds);
 
+    //pthread_yield();
     clock_nanosleep(CLOCK_REALTIME, 0, &ts, NULL);
 
     remaining_nanoseconds -= _MIN(1000000UL, remaining_nanoseconds);

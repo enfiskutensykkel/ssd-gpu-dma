@@ -186,8 +186,10 @@ static int ref_put(struct inode* inode, struct file* file)
     ref = find_ref(dev, current);
     if (ref == NULL)
     {
+        // TODO: Find a way to look up reference anyway in order to remove it,
+        //       e.g. by finding out which pid we are acting on behalf of
         printk(KERN_WARNING "No controller references found for pid %d\n", current->pid);
-        return -EACCES;
+        return -EBADF;
     }
 
     ctrl_ref_put(ref);
@@ -204,6 +206,7 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
     struct nvm_ioctl_map request;
     struct map_descriptor* map = NULL;
     size_t max_pages = max_pages_per_map;
+    u64 addr;
 
     dev = find_dev_by_inode(file->f_inode);
     if (dev == NULL)
@@ -227,6 +230,7 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
             
             if (request.n_pages >= max_pages)
             {
+                printk(KERN_DEBUG "Requested more pages than available\n");
                 retval = -EINVAL;
                 break;
             }
@@ -246,6 +250,7 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 
             if (request.n_pages >= max_pages)
             {
+                printk(KERN_DEBUG "Requested more pages than available\n");
                 retval = -EINVAL;
                 break;
             }
@@ -260,8 +265,9 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 
         case NVM_UNMAP_MEMORY:
             printk(KERN_DEBUG "Unmapping request from pid %d\n", current->pid);
+            copy_from_user(&addr, (void __user*) arg, sizeof(u64));
 
-            map = find_user_page_map(ref, arg);
+            map = find_user_page_map(ref, addr);
             if (map != NULL)
             {
                 unmap_user_pages(map);
@@ -269,7 +275,7 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
             }
 
 #ifdef _CUDA
-            map = find_gpu_map(ref, arg);
+            map = find_gpu_map(ref, addr);
             if (map != NULL)
             {
                 unmap_gpu_memory(map);
@@ -278,7 +284,7 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 #endif
 
             retval = -EINVAL;
-            printk(KERN_WARNING "Mapping for address %lx not found\n", arg);
+            printk(KERN_WARNING "Mapping for address %llx not found\n", addr);
             break;
 
         default:

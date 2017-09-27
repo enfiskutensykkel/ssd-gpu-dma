@@ -80,7 +80,7 @@ struct nvm_completion* cq_dequeue_block(struct nvm_queue* cq, uint64_t timeout);
  * The caller must make sure that all commands are prepared before calling
  * this.
  */
-void sq_submit(const struct nvm_queue* sq);
+void sq_submit(struct nvm_queue* sq);
 
 
 /* 
@@ -91,6 +91,12 @@ void sq_submit(const struct nvm_queue* sq);
 int sq_update(struct nvm_queue* sq, const struct nvm_completion* cpl);
 
 
+/*
+ * Update SQ head pointer.
+ */
+void sq_update_unchecked(struct nvm_queue* sq);
+
+
 /* 
  * Update controller's CQ head pointer.
  *
@@ -98,7 +104,7 @@ int sq_update(struct nvm_queue* sq, const struct nvm_completion* cpl);
  * All completion pointers acquired before this must be discarded after
  * calling this.
  */
-void cq_update(const struct nvm_queue* cq); 
+void cq_update(struct nvm_queue* cq); 
 
 
 #ifdef __cplusplus

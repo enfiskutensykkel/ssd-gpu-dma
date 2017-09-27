@@ -144,6 +144,11 @@ static int map_memory(int ioctl_fd, int devptr, uint64_t vaddr_start, size_t n_p
 #ifdef _CUDA
     type = devptr ? NVM_MAP_DEVICE_MEMORY : NVM_MAP_HOST_MEMORY;
 #else
+    if (devptr != 0)
+    {
+        return EINVAL;
+    }
+
     type = NVM_MAP_HOST_MEMORY;
 #endif
 
@@ -170,7 +175,7 @@ static int map_memory(int ioctl_fd, int devptr, uint64_t vaddr_start, size_t n_p
  */
 static int unmap_memory(int ioctl_fd, uint64_t vaddr_start)
 {
-    int err = ioctl(ioctl_fd, NVM_UNMAP_MEMORY, vaddr_start);
+    int err = ioctl(ioctl_fd, NVM_UNMAP_MEMORY, &vaddr_start);
     if (err < 0)
     {
         dprintf("Unmap request failed: %s\n", strerror(errno));

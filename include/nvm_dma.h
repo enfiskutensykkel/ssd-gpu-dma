@@ -28,15 +28,16 @@ extern "C" {
  *
  * Addresses must be aligned to controller page size (MPS).
  */
+// TODO: rename to nvm_dma_map
 int nvm_dma_window_init(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* vaddr, size_t page_size, size_t n_pages, uint64_t* paddrs);
 
 
-
+// TODO: rename to nvm_dma_map_host
 int nvm_dma_window_host_map(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* vaddr, size_t size);
 
 
 
-#if defined( __CUDA__ )
+#if ( defined( __CUDA__ ) || defined( __CUDACC__ ) )
 
 int nvm_dma_window_device_map(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* devptr, size_t size);
 
@@ -56,6 +57,7 @@ int nvm_dma_window_device_map(nvm_dma_t* wnd, nvm_ctrl_t ctrl, void* devptr, siz
  * Note that the controller must "be alive" as long as DMA windows exists,
  * because the reference is used to unmap windows and release resources.
  */
+// TODO: rename to nvm_dis_dma_map
 int nvm_dis_dma_window_init(nvm_dma_t* wnd, nvm_ctrl_t ctrl, uint32_t dis_adapter, sci_local_segment_t segment, void* vaddr, size_t size);
 
 #endif
@@ -65,6 +67,7 @@ int nvm_dis_dma_window_init(nvm_dma_t* wnd, nvm_ctrl_t ctrl, uint32_t dis_adapte
  * Remove DMA window descriptor.
  *
  * Remove DMA descriptor, and unmap it for the controller if necessary.
+ * TODO: rename to nvm_dma_unmap
  */
 void nvm_dma_window_free(nvm_dma_t wnd);
 

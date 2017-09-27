@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <stdio.h>
 #include "device.h"
 #include "util.h"
 #include "regs.h"

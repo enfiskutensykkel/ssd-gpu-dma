@@ -19,12 +19,6 @@ enum nvm_io_command_set
 };
 
 
-/* 
- * Get error string.
- */
-const char* nvm_strerror(const struct nvm_completion* cpl);
-
-
 /*
  * Set command's DWORD0 and DWORD1
  */
@@ -35,6 +29,7 @@ void nvm_cmd_header(struct nvm_command* cmd, uint8_t opcode, uint32_t ns_id);
  * Set command's DPTR field (DWORD6-9)
  */
 void nvm_cmd_data_ptr(struct nvm_command* cmd, uint64_t prp1, uint64_t prp2);
+#define nvm_cmd_dptr(cmd, prp1, prp2) nvm_cmd_data_ptr((cmd), (prp1), (prp2))
 
 
 /*
@@ -47,6 +42,7 @@ size_t nvm_num_prp_pages(size_t page_size, size_t transfer_size);
  * Build a PRP list consisting of PRP entries.
  */
 size_t nvm_prp_list(void* list_vaddr, size_t page_size, size_t transfer_size, const uint64_t* list_pages, const uint64_t* data_pages);
+
 
 #ifdef __cplusplus
 }

@@ -80,8 +80,9 @@ typedef struct __align__(64) nvm_queue
     uint32_t                head;           // Queue's head pointer
     uint32_t                tail;           // Queue's tail pointer
     int16_t                 phase;          // Current phase bit
+    uint16_t                last;           // Used internally to check db writes
     volatile uint32_t*      db;             // Pointer to doorbell register (write only)
-    void*                   vaddr;          // Virtual address to start of queue memory
+    volatile void*          vaddr;          // Virtual address to start of queue memory
     uint64_t                ioaddr;         // Physical/IO address of the memory page
 } __attribute__((aligned (64))) nvm_queue_t;
 
@@ -100,6 +101,7 @@ typedef struct __align__(64) nvm_command
 {
     uint32_t                dword[16];
 } __attribute__((aligned (64))) nvm_cmd_t;
+
 
 
 /*

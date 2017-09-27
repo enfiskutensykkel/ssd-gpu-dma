@@ -1,8 +1,11 @@
 #ifndef __DIS_NVM_UTIL_H__
 #define __DIS_NVM_UTIL_H__
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stdint.h>
-
+struct nvm_completion;
 
 /* Convenience function for creating a bit mask */
 static inline uint64_t _nvm_bitmask(int hi, int lo)
@@ -20,6 +23,9 @@ static inline uint64_t _nvm_bitmask(int hi, int lo)
 
 /* Get minimum of two values */
 #define _MIN(a, b) ( (a) <= (b) ? (a) : (b) )
+
+/* Get the maximum of two values */
+#define _MAX(a, b) ( (a) > (b) ? (a) : (b) )
 
 
 /* Extract specific bits */
@@ -46,6 +52,9 @@ static inline uint64_t _nvm_bitmask(int hi, int lo)
 #define DMA_VADDR(vaddr, page_size, page) \
     ((void*) (((unsigned char*) (vaddr)) + ((page_size) * (page))))
 
+#define DMA_WND_VADDR(window, page) \
+    DMA_VADDR((window)->vaddr, (window)->page_size, (page))
+
 
 /* Standard fields in a command */
 #define CMD_CID(p)                  _REG(p, 2, 16)
@@ -65,4 +74,19 @@ static inline uint64_t _nvm_bitmask(int hi, int lo)
 
 #define CPL_OK(p)                   ( !SCT(p) && !SC(p) )
 
+// #define NVM_ERR_PACK(cpl)
+
+/* 
+ * Get error string.
+ */
+const char* nvm_status(const struct nvm_completion* cpl);
+
+#define nvm_strerror(cpl) nvm_status(cpl)
+
+// TODO: make RPC functions pack nvm error into int32_t
+//const char* nvm_strerror(int32_t error);
+
+#ifdef __cplusplus
+}
+#endif
 #endif

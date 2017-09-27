@@ -309,12 +309,13 @@ int nvm_rpc_sq_create(nvm_queue_t* handle, nvm_rpc_t ref, nvm_ctrl_t ctrl, const
 }
 
 
-int nvm_rpc_ctrl_info(nvm_ctrl_info_t* info, nvm_rpc_t ref, nvm_ctrl_t ctrl, const void* vaddr, uint64_t ioaddr)
+int nvm_rpc_ctrl_info(nvm_ctrl_info_t* info, nvm_rpc_t ref, nvm_ctrl_t ctrl, void* vaddr, uint64_t ioaddr)
 {
     int err;
     nvm_cmd_t command;
     nvm_cpl_t completion;
 
+    memset(vaddr, 0, 0x1000);
     memset(info, 0, sizeof(nvm_ctrl_info_t));
     info->nvme_version = (uint32_t) *VER(ctrl->mm_ptr);
     info->page_size = ctrl->page_size;
@@ -359,12 +360,13 @@ int nvm_rpc_ctrl_info(nvm_ctrl_info_t* info, nvm_rpc_t ref, nvm_ctrl_t ctrl, con
 }
 
 
-int nvm_rpc_ns_info(nvm_ns_info_t* info, nvm_rpc_t ref, uint32_t ns_id, const void* vaddr, uint64_t ioaddr)
+int nvm_rpc_ns_info(nvm_ns_info_t* info, nvm_rpc_t ref, uint32_t ns_id, void* vaddr, uint64_t ioaddr)
 {
     int err;
     nvm_cmd_t cmd;
     nvm_cpl_t cpl;
 
+    memset(vaddr, 0, 0x1000);
     memset(info, 0, sizeof(nvm_ns_info_t));
     info->ns_id = ns_id;
 

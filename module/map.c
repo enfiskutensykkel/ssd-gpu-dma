@@ -109,6 +109,7 @@ static long lock_user_pages(struct map_descriptor* map, struct task_struct* task
 static void free_callback(struct map_descriptor* map)
 {
     nvidia_p2p_free_page_table((nvidia_p2p_page_table_t*) map->pages);
+    map->pages = NULL;
     printk(KERN_NOTICE "Force released P2P page table\n");
 }
 #endif
@@ -203,7 +204,11 @@ void unmap_gpu_memory(struct map_descriptor* map)
 
     i = map->n_pages;
 
-    nvidia_p2p_put_pages(0, 0, map->list_head.vaddr, (nvidia_p2p_page_table_t*) map->pages);
+    if (map->pages != NULL)
+    {
+        printk(KERN_DEBUG "GPU pages were already removed\n");
+        nvidia_p2p_put_pages(0, 0, map->list_head.vaddr, (nvidia_p2p_page_table_t*) map->pages);
+    }
     kfree(map);
 
     printk(KERN_DEBUG "Released %lu GPU pages\n", i);

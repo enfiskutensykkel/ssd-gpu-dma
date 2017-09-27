@@ -29,11 +29,11 @@ void nvm_admin_sq_create(struct nvm_command* cmd, const struct nvm_queue* sq, co
 
 void nvm_admin_current_num_queues(struct nvm_command* cmd, int set, uint16_t n_cqs, uint16_t n_sqs)
 {
-    nvm_cmd_header(cmd, !!set ? NVM_ADMIN_SET_FEATURES : NVM_ADMIN_GET_FEATURES, 0);
+    nvm_cmd_header(cmd, set ? NVM_ADMIN_SET_FEATURES : NVM_ADMIN_GET_FEATURES, 0);
     nvm_cmd_data_ptr(cmd, 0, 0);
 
     cmd->dword[10] = (0x00 << 8) | 0x07;
-    cmd->dword[11] = !!set ? ((n_cqs - 1) << 16) | (n_sqs - 1) : 0;
+    cmd->dword[11] = set ? ((n_cqs - 1) << 16) | (n_sqs - 1) : 0;
 }
 
 

@@ -10,6 +10,7 @@ extern "C" {
 
 /*
  * Bind the manager reference to a local manager.
+ * TODO: rename to nvm_rpc_bind
  */
 int nvm_rpc_bind_local(nvm_rpc_t* ref, nvm_manager_t manager);
 
@@ -34,6 +35,10 @@ int nvm_dis_rpc_bind(nvm_rpc_t* ref, uint32_t remote_node_id, uint32_t remote_in
  */
 void nvm_rpc_unbind(nvm_rpc_t ref);
 
+// TODO: make all rpc commands return int32_t instead
+//       pack NVM status code and status type into returnval and 
+//       set higher bit to indicate nvm error or errno
+
 
 /*
  * Relay NVM admin command to the controller manager.
@@ -53,13 +58,13 @@ int nvm_rpc_raw_cmd(nvm_rpc_t ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl);
 /*
  * Get controller information.
  */
-int nvm_rpc_ctrl_info(nvm_ctrl_info_t* info, nvm_rpc_t ref, nvm_ctrl_t ctrl, const void* vaddr, uint64_t ioaddr);
+int nvm_rpc_ctrl_info(nvm_ctrl_info_t* info, nvm_rpc_t ref, nvm_ctrl_t ctrl, void* vaddr, uint64_t ioaddr);
 
 
 /* 
  * Get namespace information.
  */
-int nvm_rpc_ns_info(nvm_ns_info_t* info, nvm_rpc_t ref, uint32_t ns_id, const void* vaddr, uint64_t ioaddr);
+int nvm_rpc_ns_info(nvm_ns_info_t* info, nvm_rpc_t ref, uint32_t ns_id, void* vaddr, uint64_t ioaddr);
 
 
 /*
