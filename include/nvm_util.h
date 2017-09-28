@@ -46,6 +46,8 @@ static inline uint64_t _nvm_bitmask(int hi, int lo)
 #define DMA_ALIGN(vaddr, page_size) \
     ((vaddr) & ~((page_size) - 1))
 
+#define DMA_MASK(vaddr, page_size) DMA_ALIGN((vaddr), (page_size))
+
 #define DMA_SIZE(size, page_size) \
     (((size) + (page_size) - 1) & ~((page_size) - 1))
 
