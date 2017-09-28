@@ -41,7 +41,7 @@ size_t nvm_num_prp_pages(size_t page_size, size_t transfer_size);
 /* 
  * Build a PRP list consisting of PRP entries.
  */
-size_t nvm_prp_list(void* list_vaddr, size_t page_size, size_t transfer_size, const uint64_t* list_pages, const uint64_t* data_pages);
+size_t nvm_prp_list(void* list_vaddr, size_t page_size, size_t size, const uint64_t* list_ioaddrs, const uint64_t* data_ioaddrs);
 
 
 #ifdef __cplusplus

@@ -156,24 +156,25 @@ const char* nvm_status(const nvm_cpl_t* cpl)
 }
 
 
-size_t nvm_prp_list(void* vaddr, size_t page_size, size_t transfer_size, const uint64_t* lists, const uint64_t* prps)
+size_t nvm_prp_list(void* vaddr, size_t page_size, size_t size, const uint64_t* lists, const uint64_t* prps)
 {
-    size_t n_prps = DMA_SIZE(transfer_size, page_size) / page_size;
+    size_t prps_per_page = page_size / sizeof(uint64_t);
+    size_t n_prps = DMA_SIZE(size, page_size) / page_size;
 
     size_t i_list = 0;
     size_t i_prp = 0;
+    size_t pos = 0;
 
-    uint64_t* start_ptr = (uint64_t*) vaddr;
-    uint64_t* entry_ptr = (uint64_t*) vaddr;
+    uint64_t* entries = (uint64_t*) vaddr;
 
     while (i_prp < n_prps)
     {
-        *entry_ptr++ = prps[i_prp++];
-
-        if (((entry_ptr - start_ptr) & (page_size - 1)) == 0)
+        if ((pos + 1) % prps_per_page == 0)
         {
-            *entry_ptr++ = lists[++i_list];
+            entries[pos++] = lists[++i_list];
         }
+
+        entries[pos++] = prps[i_prp++];
     }
 
     return i_prp;
