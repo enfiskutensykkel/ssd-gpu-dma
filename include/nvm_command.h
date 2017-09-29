@@ -14,8 +14,10 @@ struct nvm_completion;
 /* List of NVM IO command opcodes */
 enum nvm_io_command_set
 {
-    NVM_IO_READ                     = (0x00 << 7) | (0x00 << 2) | 0x02,
-    NVM_IO_WRITE                    = (0x00 << 7) | (0x00 << 2) | 0x01
+    NVM_IO_FLUSH                    = (0x00 << 7) | (0x00 << 2) | 0x00, // 00h
+    NVM_IO_WRITE                    = (0x00 << 7) | (0x00 << 2) | 0x01, // 01h
+    NVM_IO_READ                     = (0x00 << 7) | (0x00 << 2) | 0x02, // 02h
+    NVM_IO_WRITE_ZEROES             = (0x00 << 7) | (0x02 << 2) | 0x00  // 08h
 };
 
 
