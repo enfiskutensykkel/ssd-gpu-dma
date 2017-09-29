@@ -225,7 +225,6 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
     switch (cmd)
     {
         case NVM_MAP_HOST_MEMORY:
-            printk(KERN_DEBUG "Mapping user page request from pid %d\n", current->pid);
             copy_from_user(&request, (void __user*) arg, sizeof(request));
             
             if (request.n_pages >= max_pages)
@@ -245,7 +244,6 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 
 #ifdef _CUDA
         case NVM_MAP_DEVICE_MEMORY:
-            printk(KERN_DEBUG "Mapping device memory request from pid %d\n", current->pid);
             copy_from_user(&request, (void __user*) arg, sizeof(request));
 
             if (request.n_pages >= max_pages)
@@ -264,7 +262,6 @@ static long ref_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 #endif
 
         case NVM_UNMAP_MEMORY:
-            printk(KERN_DEBUG "Unmapping request from pid %d\n", current->pid);
             copy_from_user(&addr, (void __user*) arg, sizeof(u64));
 
             map = find_user_page_map(ref, addr);

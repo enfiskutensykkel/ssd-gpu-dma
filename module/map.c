@@ -98,9 +98,6 @@ static long lock_user_pages(struct map_descriptor* map, struct task_struct* task
     map->n_pages = retval;
     map->pages = (void*) pages;
 
-    printk(KERN_DEBUG "Locked %lu pages in memory starting at virtual address %llx\n",
-            map->n_pages, vaddr);
-
     return 0;
 }
 
@@ -179,7 +176,7 @@ long map_gpu_memory(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
     list_insert(&ref->gpu_page_maps, md);
 
     *map = md;
-    printk(KERN_INFO "Mapped %lu GPU pages for controller\n", md->n_addrs);
+    printk(KERN_INFO "Mapped %lu GPU pages (pid %d)\n", md->n_addrs, current->pid);
     return 0;
 }
 #endif
@@ -199,7 +196,6 @@ void unmap_gpu_memory(struct map_descriptor* map)
         dma_unmap_resource(map->dev, map->addrs[i], GPU_PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
     }
 
-    printk(KERN_DEBUG "Unmapped %lu GPU pages for controller\n", i);
 #endif
 
     i = map->n_pages;
@@ -211,7 +207,7 @@ void unmap_gpu_memory(struct map_descriptor* map)
     }
     kfree(map);
 
-    printk(KERN_DEBUG "Released %lu GPU pages\n", i);
+    printk(KERN_DEBUG "Unmapped %lu GPU pages (pid %d)\n", i, current->pid);
 }
 #endif
 
@@ -272,7 +268,7 @@ long map_user_pages(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
     list_insert(&ref->user_page_maps, md);
 
     *map = md;
-    printk(KERN_INFO "Mapped %lu host pages for controller\n", md->n_addrs);
+    printk(KERN_INFO "Mapped %lu host pages (pid %d)\n", md->n_addrs, current->pid);
     return 0;
 }
 
@@ -291,8 +287,6 @@ void unmap_user_pages(struct map_descriptor* map)
         dma_unmap_page(map->dev, map->addrs[i], PAGE_SIZE, DMA_BIDIRECTIONAL);
     }
 
-    printk(KERN_DEBUG "Unmapped %lu host pages for controller\n", i);
-
     // Unpin pages
     pages = (struct page**) map->pages;
     for (i = 0; i < map->n_pages; ++i)
@@ -303,7 +297,7 @@ void unmap_user_pages(struct map_descriptor* map)
     kfree(map->pages);
     kfree(map);
 
-    printk(KERN_DEBUG "Released %lu pages\n", i);
+    printk(KERN_DEBUG "Unmapped %lu host pages (pid %d)\n", i, current->pid);
 }
 
 
