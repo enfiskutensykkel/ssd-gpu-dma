@@ -15,109 +15,56 @@
 #include <getopt.h>
 #include <errno.h>
 #include <pthread.h>
+#include <unistd.h>
 #include "transfer.h"
 #include "util.h"
 
 
-struct cl_args
+static int load_transfer_info(struct transfer_info* ti, nvm_rpc_t ref, nvm_ctrl_t ctrl)
 {
-    uint64_t    ctrl_id;
-    uint32_t    namespace;
-    uint64_t    start_lba;
-    uint16_t    n_blks;
-    bool        write;
-};
-
-
-struct thread_args
-{
-    nvm_queue_t*    sq;
-    nvm_queue_t*    cq;
-    size_t*         remaining;
-    size_t          n_cpls;
-    uint64_t        timeout;
-};
-
-
-
-static int create_transfer_info(struct transfer_info* ti, nvm_rpc_t ref, nvm_ctrl_t ctrl, struct cl_args* args)
-{
+    int err;
     size_t page_size = _MAX(ctrl->page_size, 0x1000);
+    void* page_ptr = NULL;
+    nvm_dma_t page_dma = NULL;
 
-    void* page_ptr;
-    int err = posix_memalign(&page_ptr, ctrl->page_size, page_size);
+    err = posix_memalign(&page_ptr, ctrl->page_size, page_size);
     if (err != 0)
     {
         fprintf(stderr, "Failed to allocate page-sized buffer: %s\n", strerror(err));
-        return err;
+        goto out;
     }
 
-    nvm_dma_t page_dma;
     err = nvm_dma_window_host_map(&page_dma, ctrl, page_ptr, page_size);
     if (err != 0)
     {
-        free(page_ptr);
         fprintf(stderr, "Failed to map page buffer: %s\n", strerror(err));
-        return err;
+        goto out;
     }
 
     nvm_ctrl_info_t ci;
     err = nvm_rpc_ctrl_info(&ci, ref, ctrl, page_dma->vaddr, page_dma->ioaddrs[0]);
     if (err != 0)
     {
-        nvm_dma_window_free(page_dma);
-        free(page_ptr);
         fprintf(stderr, "Failed to get controller information: %s\n", strerror(err));
-        return err;
+        goto out;
     }
 
     nvm_ns_info_t ni;
-    err = nvm_rpc_ns_info(&ni, ref, args->namespace, page_dma->vaddr, page_dma->ioaddrs[0]);
+    err = nvm_rpc_ns_info(&ni, ref, ti->ns, page_dma->vaddr, page_dma->ioaddrs[0]);
     if (err != 0)
     {
-        nvm_dma_window_free(page_dma);
-        free(page_ptr);
         fprintf(stderr, "Failed to get namespace information: %s\n", strerror(err));
-        return err;
+        goto out;
     }
 
+    ti->page_size = ctrl->page_size;
+    ti->blk_size = ni.lba_data_size;
+    ti->chunk_size = ci.max_transfer_size;
+
+out:
     nvm_dma_window_free(page_dma);
     free(page_ptr);
-
-    ti->ns = args->namespace;
-    ti->start_lba = args->start_lba;
-    ti->page_size = ci.page_size;
-    ti->blk_size = ni.lba_data_size;
-    ti->total_size = args->n_blks * ti->blk_size;
-    ti->chunk_size = _MIN(ci.max_transfer_size, ti->total_size);
-    ti->n_prp_lists = DMA_SIZE(ti->total_size, ti->chunk_size) / ti->chunk_size;
-    ti->n_prp_pages = nvm_num_prp_pages(ti->page_size, ti->total_size);
-
-    void* prp_lists;
-    err = posix_memalign(&prp_lists, ctrl->page_size, ti->n_prp_lists * ti->n_prp_pages * ti->page_size);
-    if (err != 0)
-    {
-        fprintf(stderr, "Failed to allocate PRP list memory: %s\n", strerror(err));
-        return err;
-    }
-
-    err = nvm_dma_window_host_map(&ti->prp_list, ctrl, prp_lists, ti->n_prp_lists * ti->n_prp_pages * ti->page_size);
-    if (err != 0)
-    {
-        free(prp_lists);
-        fprintf(stderr, "Failed to map PRP list: %s\n", strerror(err));
-        return err;
-    }
-
-    return 0;
-}
-
-
-static void remove_transfer_info(struct transfer_info* ti)
-{
-    void* ptr = ti->prp_list->vaddr;
-    nvm_dma_window_free(ti->prp_list);
-    free(ptr);
+    return err;
 }
 
 
@@ -143,22 +90,25 @@ static int create_queues(nvm_ctrl_t ctrl, nvm_rpc_t ref, nvm_dma_t qdma, nvm_que
     if (err != 0)
     {
         fprintf(stderr, "Failed to create SQ: %s\n", strerror(err));
+        return err;
     }
 
     return 0;
 }
 
 
-static void parse_args(int argc, char** argv, struct cl_args* args);
+static void parse_args(int argc, char** argv, struct transfer_info* ti, uint64_t* ctrl_id, bool* write);
 
 
 int main(int argc, char** argv)
 {
-    struct cl_args args;
-    parse_args(argc, argv, &args);
+    struct transfer_info ti;
+    uint64_t ctrl_id = 0;
+    bool write = false;
+    parse_args(argc, argv, &ti, &ctrl_id, &write);
 
     nvm_ctrl_t ctrl;
-    int err = nvm_ctrl_init(&ctrl, args.ctrl_id);
+    int err = nvm_ctrl_init(&ctrl, ctrl_id);
     if (err != 0)
     {
         fprintf(stderr, "Failed to get controller reference: %s\n", strerror(err));
@@ -208,27 +158,22 @@ int main(int argc, char** argv)
         goto out;
     }
 
-
-    struct transfer_info ti;
-    err = create_transfer_info(&ti, ref, ctrl, &args);
+    err = load_transfer_info(&ti, ref, ctrl);
     if (err != 0)
     {
         goto out;
     }
 
-    if (args.write)
+    if (write)
     {
         err = write_zeros(ctrl, &cq, &sq, &ti);
         if (err != 0)
         {
-            remove_transfer_info(&ti);
             goto out;
         }
     }
-
+    
     err = read_pages(ctrl, &cq, &sq, &ti);
-
-    remove_transfer_info(&ti);
 
 out:
     nvm_rpc_unbind(ref);
@@ -242,7 +187,7 @@ out:
 
 static void give_usage(const char* name)
 {
-    fprintf(stderr, "Usage: %s --ctrl=<ctrl id> --namespace=<ns id> --blocks=<num> [--start=<block>] [--write]\n", name);
+    fprintf(stderr, "Usage: %s --ctrl=<ctrl id> --namespace=<ns id> --blocks=<num> [--start=<block>] [--zero]\n", name);
 }
 
 
@@ -254,13 +199,13 @@ static void show_help(const char* name)
             "    --namespace    <ns id>     Set namespace (default is 1).\n"
             "    --blocks       <num>       Number of blocks (default is 1).\n"
             "    --start        <block>     Start block (default is 0).\n"
-            "    --write                    Write 0s first and read back.\n"
+            "    --zero                     Write 0s first and read back.\n"
             "    --help                     Show this information.\n");
 }
 
 
 
-static void parse_args(int argc, char** argv, struct cl_args* args)
+static void parse_args(int argc, char** argv, struct transfer_info* ti, uint64_t* ctrl_id, bool* write)
 {
     static struct option opts[] = {
         { "help", no_argument, NULL, 'h' },
@@ -268,18 +213,18 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
         { "namespace", required_argument, NULL, 'n' },
         { "blocks", required_argument, NULL, 'b' },
         { "start", required_argument, NULL, 's' },
-        { "write", no_argument, NULL, 'w' },
+        { "zero", no_argument, NULL, 'z' },
         { NULL, 0, NULL, 0 }
     };
 
     int opt;
     int idx;
     
-    memset(args, 0, sizeof(struct cl_args));
-    args->namespace = 1;
-    args->n_blks = 1;
+    memset(ti, 0, sizeof(struct transfer_info));
+    ti->ns = 1;
+    ti->n_blks = 1;
 
-    while ((opt = getopt_long(argc, argv, ":hc:n:b:s:w", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, ":hc:n:b:s:z", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -294,7 +239,7 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
                 exit(':');
 
             case 'c': // device identifier
-                if (parse_u64(optarg, &args->ctrl_id, 10) != 0)
+                if (parse_u64(optarg, ctrl_id, 10) != 0)
                 {
                     fprintf(stderr, "Invalid controller identifier: `%s'\n", optarg);
                     give_usage(argv[0]);
@@ -303,30 +248,31 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
                 break;
 
             case 'n': // set namespace
-                if (parse_u32(optarg, &args->namespace, 0) != 0 || args->namespace == 0)
+                if (parse_u32(optarg, &ti->ns, 0) != 0 || ti->ns == 0)
                 {
                     fprintf(stderr, "Not a valid namespace: `%s'\n", optarg);
                     exit('n');
                 }
                 break;
 
-            case 'b':
-                if (parse_u16(optarg, &args->n_blks, 0) != 0 || args->n_blks == 0)
+            case 'b': // set number of blocks
+                if (parse_u64(optarg, &ti->n_blks, 0) != 0 || ti->n_blks == 0)
                 {
+                    fprintf(stderr, "Invalid number of blocks: `%s'\n", optarg);
                     exit('s');
                 }
                 break;
 
             case 's': // set start block
-                if (parse_u64(optarg, &args->start_lba, 0) != 0)
+                if (parse_u64(optarg, &ti->start_lba, 0) != 0)
                 {
-                    fprintf(stderr, "Not a valid number: %s\n", optarg);
+                    fprintf(stderr, "Not a valid number: `%s'\n", optarg);
                     exit('s');
                 }
                 break;
 
-            case 'w':
-                args->write = true;
+            case 'z':
+                *write = true;
                 break;
 
             case 'h':

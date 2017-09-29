@@ -201,7 +201,7 @@ endmacro ()
 # Add individual samples
 add_subdirectory ("${samples_root}/dis-rpc")
 add_subdirectory ("${samples_root}/dis-rw")
-add_subdirectory ("${samples_root}/rw-example")
+add_subdirectory ("${samples_root}/read-example")
 add_subdirectory ("${samples_root}/identify")
 
 # Build all samples
