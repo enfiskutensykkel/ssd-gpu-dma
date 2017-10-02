@@ -37,13 +37,17 @@ void nvm_cmd_data_ptr(struct nvm_command* cmd, uint64_t prp1, uint64_t prp2);
 /*
  * Calculate number of pages needed to build a PRP list.
  */
-size_t nvm_num_prp_pages(size_t page_size, size_t transfer_size);
+size_t nvm_prp_num_pages(size_t page_size, size_t max_transfer_size);
+#define nvm_num_prp_pages(page_size, max_transfer_size) nvm_prp_num_pages((page_size), (max_transfer_size))
 
 
 /* 
  * Build a PRP list consisting of PRP entries.
  */
 size_t nvm_prp_list(void* list_vaddr, size_t page_size, size_t size, const uint64_t* list_ioaddrs, const uint64_t* data_ioaddrs);
+
+
+size_t nvm_prp_list_size(size_t page_size, size_t total_transfer_size, size_t max_transfer_size);
 
 
 #ifdef __cplusplus

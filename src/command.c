@@ -181,7 +181,7 @@ size_t nvm_prp_list(void* vaddr, size_t page_size, size_t size, const uint64_t* 
 }
 
 
-size_t nvm_num_prp_pages(size_t page_size, size_t transfer_size)
+size_t nvm_prp_num_pages(size_t page_size, size_t transfer_size)
 {
     size_t prps_per_page = page_size / sizeof(uint64_t) - 1;
     size_t n_prps = DMA_SIZE(transfer_size, page_size) / page_size;
@@ -193,6 +193,16 @@ size_t nvm_num_prp_pages(size_t page_size, size_t transfer_size)
     }
 
     return n_prp_pages;
+}
+
+
+size_t nvm_prp_list_size(size_t page_size, size_t transfer_size, size_t mdts)
+{
+    size_t n_pages = nvm_prp_num_pages(page_size, mdts);
+    size_t n_full_lists = transfer_size / mdts;
+    size_t n_overflow = (transfer_size % mdts) >= 2 * page_size;
+
+    return (n_full_lists + n_overflow) * n_pages * page_size;
 }
 
 

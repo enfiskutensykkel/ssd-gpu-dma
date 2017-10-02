@@ -6,4 +6,4 @@ find_package (Threads REQUIRED)
 
 find_package (CUDA 8.0 REQUIRED)
 
-make_benchmark (simple-rdma simple-rdma "main.cu;manager.cc;queue.cc;benchmark.cu")
+make_benchmark (simple-rdma simple-rdma "main.cu;dma.cu;queue.cc;transfer.cc")

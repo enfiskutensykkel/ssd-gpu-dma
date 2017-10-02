@@ -24,10 +24,10 @@ set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra" CACHE INTERNAL "" FORCE)
 set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -Wall -Wextra -pedantic -g -DDEBUG" CACHE INTERNAL "" FORCE)
 set (CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra" CACHE INTERNAL "" FORCE)
-set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -Wextra -pedantic -g -DDEBUG" CACHE INTERNAL "" FORCE)
+set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -Wextra -g -DDEBUG" CACHE INTERNAL "" FORCE)
 set (CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
 set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D__CUDA__")
-set (CUDA_NVCC_FLAGS_RELEASE "${CMAKE_NVCC_FLAGS_RELEASE} -O2")
+set (CUDA_NVCC_FLAGS_RELEASE "${CMAKE_NVCC_FLAGS_RELEASE} -D__CUDA__ -O2")
 
 
 
@@ -212,5 +212,6 @@ add_custom_target (examples DEPENDS samples)
 # Add individual benchmarks
 if (CUDA_FOUND)
     add_subdirectory ("${benchmarks_root}/simple-rdma")
+    add_custom_target (benchmarks DEPENDS ${benchmark_targets})
 endif ()
 

@@ -74,13 +74,13 @@ typedef struct __align__(32) nvm_dma_window
  */
 typedef struct __align__(64) nvm_queue
 {
-    uint64_t                no;             // Queue number (must be unique per SQ/CQ pair)
+    uint16_t                no;             // Queue number (must be unique per SQ/CQ pair)
     uint16_t                max_entries;    // Maximum number of queue entries supported
     uint16_t                entry_size;     // Queue entry size
     uint32_t                head;           // Queue's head pointer
     uint32_t                tail;           // Queue's tail pointer
     int16_t                 phase;          // Current phase bit
-    uint16_t                last;           // Used internally to check db writes
+    uint32_t                last;           // Used internally to check db writes
     volatile uint32_t*      db;             // Pointer to doorbell register (write only)
     volatile void*          vaddr;          // Virtual address to start of queue memory
     uint64_t                ioaddr;         // Physical/IO address of the memory page

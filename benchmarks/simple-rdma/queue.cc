@@ -1,83 +1,60 @@
-#include "queue.h"
-#include "manager.h"
 #include <nvm_util.h>
 #include <nvm_types.h>
-#include <nvm_dma.h>
 #include <nvm_rpc.h>
-#include <nvm_queue.h>
 #include <stdexcept>
-#include <cstdint>
-#include <cstddef>
-#include <cstdlib>
-#include <cstring>
+#include <vector>
+#include <memory>
+#include "queue.h"
+#include "dma.h"
 
 
-QueueManager::QueueManager(ManagerPtr manager, int cq_id, int sq_id_start, int num_queues)
-    : queue_map(nullptr)
+using std::runtime_error;
+
+
+void createQueues(nvm_rpc_t rpc, nvm_ctrl_t ctrl, DmaPtr queueMem, QueueList& queues)
 {
-    int err;
-    nvm_rpc_t ref;
+    uint16_t numQueues = (*queueMem)->n_ioaddrs - 1;
 
-    void* queue_memory = nullptr;
-    size_t queue_memory_size = (1 + num_queues) * manager->ctrl->page_size;
-
-    if ((err = nvm_rpc_bind_local(&ref, manager->manager)) != 0)
+    if (numQueues == 0)
     {
-        throw std::runtime_error("Could not bind local reference");
+        throw runtime_error("Invalid argument");
     }
 
-    err = posix_memalign(&queue_memory, manager->ctrl->page_size, queue_memory_size);
+    uint16_t cqs = 1;
+    uint16_t sqs = numQueues;
+    int err = nvm_rpc_request_num_queues(rpc, &cqs, &sqs);
     if (err != 0)
     {
-        nvm_rpc_unbind(ref);
-        throw std::runtime_error("Could not allocate queue memory");
+        throw runtime_error("Failed to set number of SQs");
     }
 
-    err = nvm_dma_window_host_map(&queue_map, manager->ctrl, queue_memory, queue_memory_size);
+    if (sqs < numQueues)
+    {
+        throw runtime_error("Requested more queues than available");
+    }
+
+    nvm_queue_t cq;
+    void* ptr = (*queueMem)->vaddr;
+    size_t page_size = (*queueMem)->page_size;
+    uint64_t* ioaddrs = (*queueMem)->ioaddrs;
+
+    err = nvm_rpc_cq_create(&cq, rpc, ctrl, 1, DMA_VADDR(ptr, page_size, 0), ioaddrs[0]);
     if (err != 0)
     {
-        free(queue_memory);
-        nvm_rpc_unbind(ref);
-        throw std::runtime_error("Failed to map queue memory");
+        throw runtime_error("Failed to create CQ");
     }
 
-    err = nvm_rpc_cq_create(&completion_queue, ref, manager->ctrl, cq_id, queue_memory, queue_map->ioaddrs[0]);
-    if (err != 0)
-    {
-        nvm_dma_window_free(queue_map);
-        free(queue_memory);
-        nvm_rpc_unbind(ref);
-        throw std::runtime_error("Failed to create CQ");
-    }
+    queues.push_back(cq);
 
-    for (int i = 0; i < num_queues; ++i)
+    for (uint16_t i = 0; i < numQueues; ++i)
     {
         nvm_queue_t sq;
-
-        uint16_t id = sq_id_start + i;
-        void* ptr = DMA_VADDR(queue_memory, queue_map->page_size, 1 + i);
-        uint64_t addr = queue_map->ioaddrs[1 + i];
-
-        err = nvm_rpc_sq_create(&sq, ref, manager->ctrl, &completion_queue, id, ptr, addr);
+        err = nvm_rpc_sq_create(&sq, rpc, ctrl, &cq, 1 + i, DMA_VADDR(ptr, page_size, 1 + i), ioaddrs[1 + i]);
         if (err != 0)
         {
-            nvm_dma_window_free(queue_map);
-            free(queue_memory);
-            nvm_rpc_unbind(ref);
-            throw std::runtime_error("Failed to create SQ number " + std::to_string(i));
+            throw runtime_error("Failed to create SQ");
         }
-
-        submission_queues.push_back(sq);
+        queues.push_back(sq);
     }
-
-    nvm_rpc_unbind(ref);
-}
-
-
-QueueManager::~QueueManager()
-{
-    void* ptr = queue_map->vaddr;
-    nvm_dma_window_free(queue_map);
-    free(ptr);
 }
 

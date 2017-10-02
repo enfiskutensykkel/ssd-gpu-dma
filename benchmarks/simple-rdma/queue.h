@@ -3,21 +3,20 @@
 
 #include <nvm_types.h>
 #include <vector>
-#include <memory>
-#include "manager.h"
+#include "dma.h"
 
-struct QueueManager;
-typedef std::shared_ptr<QueueManager> QueueManagerPtr;
+#ifndef __CUDACC__
+#define __host__
+#endif
+
+typedef std::vector<nvm_queue_t> QueueList;
 
 
-struct QueueManager
-{
-    nvm_dma_t                   queue_map;
-    nvm_queue_t                 completion_queue;
-    std::vector<nvm_queue_t>    submission_queues;
 
-    QueueManager(ManagerPtr manager, int cq_id, int sq_id_start, int num_queues);
-    ~QueueManager() noexcept;
-};
+__host__
+void createQueues(nvm_rpc_t reference, 
+                  nvm_ctrl_t controller, 
+                  DmaPtr queueMemory, 
+                  QueueList& queues);
 
 #endif
