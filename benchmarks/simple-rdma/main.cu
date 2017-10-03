@@ -7,6 +7,7 @@
 #include <string>
 #include <stdexcept>
 #include <algorithm>
+#include <limits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #include "queue.h"
 #include "transfer.h"
 #include "benchmark.h"
+#include "report.h"
 
 
 static void showUsage(const std::string& str)
@@ -164,7 +166,7 @@ static void parseOptions(int argc, char** argv, Settings& settings)
             case 'r': // Set number of repeat loops for calculating average
                 endptr = nullptr;
                 settings.repeatLoops = strtoul(optarg, &endptr, 0);
-                if (endptr == nullptr || *endptr == '\0' || settings.repeatLoops == 0)
+                if (endptr == nullptr || *endptr != '\0' || settings.repeatLoops == 0)
                 {
                     fprintf(stderr, "Invalid number of repeat loops: `%s'\n", optarg);
                     exit(1);
@@ -223,28 +225,91 @@ static void identify(nvm_rpc_t rpc, nvm_ctrl_t ctrl, Settings& settings)
 }
 
 
-static void launch_benchmark(nvm_ctrl_t controller, QueueList& queues, DmaPtr hostBuffer, DmaPtr deviceBuffer, const Settings& settings)
+static void launch_benchmark(nvm_ctrl_t controller, QueueList& queues, const Settings& settings, std::vector<uint64_t>& bounce, std::vector<uint64_t>& direct)
 {
-        TransferList bouncedTransfers;
-        prepareTransfers(bouncedTransfers, controller, queues, hostBuffer, settings);
+    report("Creating host buffer");
+    auto buffer(createHostBuffer(controller, settings.numBlocks * settings.blockSize));
+    report(true);
 
-        TransferList directTransfers;
-        prepareTransfers(directTransfers, controller, queues, deviceBuffer, settings);
+    auto devbuffer(createDeviceBuffer(controller, settings.numBlocks * settings.blockSize, settings.cudaDevice));
 
-//        double bounceTimes[settings.repeatLoops];
-//        double directTimes[settings.repeatLoops];
-//
-//        for (size_t i = 0; i < settings.repeatLoops; ++i)
-//        {
-//            bounceTimes[i] = benchmark(queues, bouncedTransfers, hostBuffer, deviceBuffer);
-//            fprintf(stdout, "Bounce %.3f MiB/s\n", bounceTimes[i]);
-//        }
-//
-//        for (size_t i = 0; i < settings.repeatLoops; ++i)
-//        {
-//            directTimes[i] = benchmark(queues, directTransfers, deviceBuffer);
-//            fprintf(stdout, "Direct %.3f MiB/s\n", directTimes[i]);
-//        }
+//    report("Creating device buffer");
+//    cudaError_t err = cudaSetDevice(settings.cudaDevice);
+//    if (err != cudaSuccess)
+//    {
+//        throw std::runtime_error("Failed to set CUDA device");
+//    }
+
+//    void* devicePointer = nullptr;
+//    err = cudaMalloc(&devicePointer, settings.numBlocks * settings.blockSize);
+//    if (err != cudaSuccess)
+//    {
+//        throw std::runtime_error("Failed to allocate device buffer: " + std::string(cudaGetErrorString(err)));
+//    }
+//    report(true);
+
+    report("Preparing transfer descriptors via RAM");
+    TransferList transfers;
+    prepareTransfers(transfers, controller, queues, buffer, settings);
+    report(true);
+
+    report("Running transfers via RAM");
+    for (size_t i = 0; i < settings.repeatLoops; ++i)
+    {
+        uint64_t t = benchmark(queues, transfers, buffer, (*devbuffer)->vaddr);
+//        uint64_t t = benchmark(queues, transfers, buffer, devicePointer);
+        bounce.push_back(t);
+    }
+    report(true);
+
+    report("Freeing resources");
+    //cudaFree(devicePointer);
+    transfers.clear();
+    buffer.reset();
+    report(true);
+}
+
+
+static void showStatistics(const Settings& settings, const std::string& title, const std::vector<uint64_t>& times)
+{
+    double totalSize = times.size() * settings.numBlocks * settings.blockSize;
+    double totalTime = 0;
+
+    auto printline = [](char c) {
+        for (size_t i = 0; i < 80; ++i)
+        {
+            fputc(c, stdout);
+        }
+        fprintf(stdout, "\n");
+    };
+
+    uint64_t minTime = std::numeric_limits<uint64_t>::max();
+    uint64_t maxTime = std::numeric_limits<uint64_t>::min();
+
+    double minBw = std::numeric_limits<double>::max();
+    double maxBw = std::numeric_limits<double>::min();
+
+    double avgBw = 0;
+
+    for (const uint64_t time: times)
+    {
+        totalTime += time;
+        minTime = std::min(time, minTime);
+        maxTime = std::max(time, maxTime);
+
+        double bw = (settings.numBlocks * settings.blockSize) / ((double) time);
+        minBw = std::min(bw, minBw);
+        maxBw = std::max(bw, maxBw);
+        avgBw += bw;
+    }
+    avgBw /= times.size();
+
+    printline('=');
+    fprintf(stdout, "%s\n", title.c_str());
+    printline('-');
+    fprintf(stdout, "%10.3f MiB/s\n", totalSize / totalTime);
+    fprintf(stdout, "%10.3f MiB/s\n", avgBw);
+    printline('=');
 }
 
 
@@ -253,19 +318,21 @@ int main(int argc, char** argv)
     Settings settings;
     parseOptions(argc, argv, settings);
 
+    report("Setting CUDA device");
     cudaError_t err = cudaSetDevice(settings.cudaDevice);
+    report(err);
     if (err != cudaSuccess)
     {
-        fprintf(stderr, "Failed to set CUDA device: %s\n", cudaGetErrorString(err));
         return 1;
     }
 
     // Create NVM controller reference
     nvm_ctrl_t controller;
+    report("Getting controller reference");
     int nvmerr = nvm_ctrl_init(&controller, settings.controllerId);
+    report(nvmerr);
     if (err != 0)
     {
-        fprintf(stderr, "Failed to create controller reference: %s\n", strerror(nvmerr));
         return 2;
     }
 
@@ -273,22 +340,25 @@ int main(int argc, char** argv)
     DmaPtr adminQueues;
     try
     {
+        report("Creating admin queues");
         adminQueues = createHostBuffer(controller, 2 * controller->page_size);
+        report(true);
     }
     catch (const std::runtime_error& err)
     {
         nvm_ctrl_free(controller);
-        fprintf(stderr, "%s\n", err.what());
+        report(err);
         return 2;
     }
 
     // Reset NVM controller and configure admin queues
     nvm_manager_t manager = nullptr;
+    report("Resetting controller");
     nvmerr = nvm_manager_register(&manager, controller, *adminQueues.get());
+    report(nvmerr);
     if (nvmerr != 0)
     {
         nvm_ctrl_free(controller);
-        fprintf(stderr, "Failed to initialize admin queue manager: %s\n", strerror(nvmerr));
         return 2;
     }
 
@@ -301,11 +371,15 @@ int main(int argc, char** argv)
     DmaPtr queueMemory;
     try
     {
+        report("Identifying controller and namespace");
         identify(rpcRef, controller, settings);
+        report(true);
 
+        report("Creating IO queues");
         queueMemory = createHostBuffer(controller, (settings.numQueues + 1) * controller->page_size);
         
         createQueues(rpcRef, controller, queueMemory, queues);
+        report(true);
     }
     catch (const std::runtime_error& err)
     {
@@ -313,29 +387,30 @@ int main(int argc, char** argv)
         nvm_manager_unregister(manager);
         nvm_ctrl_free(controller);
 
-        fprintf(stderr, "%s\n", err.what());
+        report(err);
         return 2;
     }
 
     // Run benchmark
+    std::vector<uint64_t> bounceTimes;
+    std::vector<uint64_t> directTimes;
     try
     {
-        auto hostBuffer = createHostBuffer(controller, settings.numBlocks * settings.blockSize);
-
-        auto deviceBuffer = createDeviceBuffer(controller, settings.numBlocks * settings.blockSize, settings.cudaDevice);
-
-        launch_benchmark(controller, queues, hostBuffer, deviceBuffer, settings);
-
+        launch_benchmark(controller, queues, settings, bounceTimes, directTimes);
     }
     catch (const std::runtime_error& err)
     {
         nvm_rpc_unbind(rpcRef);
         nvm_manager_unregister(manager);
         nvm_ctrl_free(controller);
-
-        fprintf(stderr, "%s\n", err.what());
+        
+        report(err);
         return 3;
     }
+
+    fprintf(stdout, "\n");
+    showStatistics(settings, "Transfer via RAM", bounceTimes);
+    fprintf(stdout, "\n");
     
     // Release stuff and quit
     nvm_rpc_unbind(rpcRef);

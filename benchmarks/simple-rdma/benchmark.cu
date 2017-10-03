@@ -137,8 +137,13 @@ static uint64_t timeTransfer(QueueList& queueList, const TransferList& transfers
         enqueuers[transfer->queue->no - 1] = std::thread(enqueueCommands, &barrier, transfer);
     }
     
-    uint64_t before = currentTime();
+    // Synchronize all threads
     barrier.wait();
+    uint64_t before = currentTime();
+
+    // We assume that once the completion dequeuer is done, transfer is done
+    dequeuer.join();
+    uint64_t after = currentTime();
 
     // Wait for all threads to complete
     for (size_t i = 0; i < transfers.size(); ++i)
@@ -146,15 +151,11 @@ static uint64_t timeTransfer(QueueList& queueList, const TransferList& transfers
         enqueuers[i].join();
     }
 
-    uint64_t after = currentTime();
-
-    dequeuer.join();
-    
     return after - before;
 }
 
 
-double benchmark(QueueList& queueList, const TransferList& transfers, DmaPtr hostBuffer, DmaPtr deviceBuffer)
+uint64_t benchmark(QueueList& queueList, const TransferList& transfers, DmaPtr hostBuffer, void* deviceBuffer)
 {
     // Count total number of commands and transfer size
     size_t totalCommands = 0;
@@ -169,40 +170,35 @@ double benchmark(QueueList& queueList, const TransferList& transfers, DmaPtr hos
         }
     });
 
+    // Transfer to disk
     uint64_t transferTime = timeTransfer(queueList, transfers, totalCommands);
 
     // Copy from host memory to device
+    // We expect cudaMemcpy to be blocking (it should be for CUDA 8)
     uint64_t before = currentTime();
-    cudaError_t err = cudaMemcpy((*deviceBuffer)->vaddr, (*hostBuffer)->vaddr, transferSize, cudaMemcpyHostToDevice);
+    cudaError_t err = cudaMemcpy(deviceBuffer, (*hostBuffer)->vaddr, transferSize, cudaMemcpyHostToDevice);
     uint64_t after = currentTime();
     if (err != cudaSuccess)
     {
-        throw std::runtime_error("Failed to copy to device");
+        throw std::runtime_error(cudaGetErrorString(err));
     }
 
     transferTime += after - before;
-
-    return transferSize / (double) transferTime;
+    return transferTime;
 }
 
 
-double benchmark(QueueList& queueList, const TransferList& transfers, DmaPtr deviceBuffer)
+uint64_t benchmark(QueueList& queueList, const TransferList& transfers)
 {
     // Count total number of commands and transfer size
     size_t totalCommands = 0;
-    size_t transferSize = 0;
 
-    std::for_each(transfers.begin(), transfers.end(), [&transferSize,&totalCommands](const TransferPtr& transfer) {
+    std::for_each(transfers.begin(), transfers.end(), [&totalCommands](const TransferPtr& transfer) {
         totalCommands += transfer->chunks.size();
-        
-        for (const auto& chunk: transfer->chunks)
-        {
-            transferSize += chunk.numBlocks * transfer->blockSize;
-        }
     });
 
     uint64_t transferTime = timeTransfer(queueList, transfers, totalCommands);
 
-    return transferSize / (double) transferTime;
+    return transferTime;
 }
 

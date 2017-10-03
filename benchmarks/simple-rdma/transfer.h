@@ -17,7 +17,6 @@
 
 struct Chunk
 {
-    DmaPtr          prpList;
     uint64_t        pageIoAddr;
     uint64_t        prpListIoAddr;
     uint64_t        startBlock;
@@ -28,6 +27,7 @@ struct Chunk
 struct Transfer
 {
     nvm_queue_t*        queue;
+    DmaPtr              prpList;
     uint32_t            nvmNamespace;
     size_t              pageSize;
     size_t              blockSize;

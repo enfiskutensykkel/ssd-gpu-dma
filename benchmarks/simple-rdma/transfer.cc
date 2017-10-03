@@ -24,8 +24,11 @@ static void controlMemory(const TransferList& list, const DmaPtr buffer)
 
     for (const TransferPtr& transfer: list)
     {
-        for (const Chunk& chunk: transfer->chunks)
+        for (size_t chunkNo = 0; chunkNo < transfer->chunks.size(); ++chunkNo)
         {
+            const Chunk& chunk = transfer->chunks[chunkNo];
+
+            size_t prpOffset = nvm_prp_num_pages(transfer->pageSize, transfer->chunkSize) * chunkNo;
             size_t chunkSize = chunk.numBlocks * transfer->blockSize;
             
             addrCounts[chunk.pageIoAddr]++;
@@ -40,7 +43,7 @@ static void controlMemory(const TransferList& list, const DmaPtr buffer)
                 continue;
             }
 
-            const uint64_t* prpPtr = (const uint64_t*) (*chunk.prpList)->vaddr;
+            const uint64_t* prpPtr = (const uint64_t*) DMA_WND_VADDR(*transfer->prpList, prpOffset);
             for (size_t i = 0; i < (chunkSize / transfer->pageSize) - 1; ++i)
             {
                 addrCounts[prpPtr[i]]++;
@@ -52,6 +55,7 @@ static void controlMemory(const TransferList& list, const DmaPtr buffer)
     {
         if (addr.second != 2)
         {
+            fprintf(stderr, "%lx %zu\n", addr.first, addr.second);
             throw std::runtime_error("Buffer is not entirely covered!");
         }
     }
@@ -71,7 +75,7 @@ constexpr static size_t blocksPerChunk(const Settings& settings)
 }
 
 
-static size_t setChunk(Chunk& chunk, nvm_ctrl_t ctrl, const TransferPtr& transfer, const uint64_t* bufferPages, uint64_t startBlock, uint64_t numBlocks)
+static size_t setChunk(Chunk& chunk, const TransferPtr& transfer, void* prpPtr, const uint64_t* prpPages, const uint64_t* bufferPages, uint64_t startBlock, uint64_t numBlocks)
 {
     chunk.pageIoAddr = bufferPages[0];
     chunk.prpListIoAddr = 0;
@@ -90,13 +94,8 @@ static size_t setChunk(Chunk& chunk, nvm_ctrl_t ctrl, const TransferPtr& transfe
         return 2;
     }
 
-    auto prpList(createHostBuffer(ctrl, nvm_prp_list_size(transfer->pageSize, chunkSize - transfer->pageSize, transfer->chunkSize)));
-
-    size_t bufferPageCount = nvm_prp_list((*prpList)->vaddr, transfer->pageSize, chunkSize - transfer->pageSize, 
-            (*prpList)->ioaddrs, &bufferPages[1]);
-
-    chunk.prpList = prpList;
-    chunk.prpListIoAddr = (*prpList)->ioaddrs[0];
+    size_t bufferPageCount = nvm_prp_list(prpPtr, transfer->pageSize, chunkSize - transfer->pageSize, prpPages, &bufferPages[1]);
+    chunk.prpListIoAddr = prpPages[0];
 
     return 1 + bufferPageCount;
 }
@@ -112,8 +111,11 @@ void prepareTransfers(TransferList& list, nvm_ctrl_t ctrl, QueueList& queues, co
     list.clear();
     for (auto queueIt = queues.begin() + 1; queueIt != queues.end(); ++queueIt)
     {
+        size_t transferSize = settings.numBlocks * settings.blockSize;
+
         TransferPtr transfer(new Transfer);
         transfer->queue = &*queueIt;
+        transfer->prpList = createHostBuffer(ctrl, nvm_prp_list_size((*buffer)->page_size, transferSize, settings.chunkSize));
         transfer->nvmNamespace = settings.nvmNamespace;
         transfer->pageSize = (*buffer)->page_size;
         transfer->blockSize = settings.blockSize;
@@ -137,9 +139,13 @@ void prepareTransfers(TransferList& list, nvm_ctrl_t ctrl, QueueList& queues, co
         const size_t numBlocks = std::min(remainingBlocks, blocksPerChunk(settings));
         
         TransferPtr& transfer = *transferIt;
-        
+
+        const size_t prpPage = transfer->chunks.size() * nvm_prp_num_pages(transfer->pageSize, transfer->chunkSize);
+        const uint64_t* prpPages = &(*transfer->prpList)->ioaddrs[prpPage];
+        void* prpPtr = DMA_WND_VADDR(*transfer->prpList, prpPage);
+
         Chunk chunk;
-        const size_t numPages = setChunk(chunk, ctrl, transfer, &bufferPages[bufferPage], startBlock, numBlocks);
+        const size_t numPages = setChunk(chunk, transfer, prpPtr, prpPages, &bufferPages[bufferPage], startBlock, numBlocks);
         transfer->chunks.push_back(chunk);
 
         bufferPage += numPages;
