@@ -18,6 +18,7 @@
 #include "dma.h"
 #include "queue.h"
 #include "transfer.h"
+#include "benchmark.h"
 
 
 static void showUsage(const std::string& str)
@@ -222,6 +223,31 @@ static void identify(nvm_rpc_t rpc, nvm_ctrl_t ctrl, Settings& settings)
 }
 
 
+static void launch_benchmark(nvm_ctrl_t controller, QueueList& queues, DmaPtr hostBuffer, DmaPtr deviceBuffer, const Settings& settings)
+{
+        TransferList bouncedTransfers;
+        prepareTransfers(bouncedTransfers, controller, queues, hostBuffer, settings);
+
+        TransferList directTransfers;
+        prepareTransfers(directTransfers, controller, queues, deviceBuffer, settings);
+
+//        double bounceTimes[settings.repeatLoops];
+//        double directTimes[settings.repeatLoops];
+//
+//        for (size_t i = 0; i < settings.repeatLoops; ++i)
+//        {
+//            bounceTimes[i] = benchmark(queues, bouncedTransfers, hostBuffer, deviceBuffer);
+//            fprintf(stdout, "Bounce %.3f MiB/s\n", bounceTimes[i]);
+//        }
+//
+//        for (size_t i = 0; i < settings.repeatLoops; ++i)
+//        {
+//            directTimes[i] = benchmark(queues, directTransfers, deviceBuffer);
+//            fprintf(stdout, "Direct %.3f MiB/s\n", directTimes[i]);
+//        }
+}
+
+
 int main(int argc, char** argv)
 {
     Settings settings;
@@ -292,13 +318,14 @@ int main(int argc, char** argv)
     }
 
     // Run benchmark
-    DmaPtr hostBuffer;
-    QueueTransferMap transferMap;
     try
     {
-        hostBuffer = createHostBuffer(controller, settings.numBlocks * settings.blockSize);
+        auto hostBuffer = createHostBuffer(controller, settings.numBlocks * settings.blockSize);
 
-        prepareTransfers(transferMap, controller, queues, hostBuffer, settings);
+        auto deviceBuffer = createDeviceBuffer(controller, settings.numBlocks * settings.blockSize, settings.cudaDevice);
+
+        launch_benchmark(controller, queues, hostBuffer, deviceBuffer, settings);
+
     }
     catch (const std::runtime_error& err)
     {

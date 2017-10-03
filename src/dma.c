@@ -162,7 +162,7 @@ static int map_memory(int ioctl_fd, int devptr, uint64_t vaddr_start, size_t n_p
     if (err < 0)
     {
         dprintf("Map request failed: %s\n", strerror(errno));
-        return EIO;
+        return errno;
     }
     
     return 0;

@@ -9,15 +9,14 @@
 #define __host__
 #endif
 
+
 typedef std::shared_ptr<nvm_dma_t> DmaPtr;
 
 
-__host__
-DmaPtr createHostBuffer(nvm_ctrl_t controller, size_t bufferSize);
+__host__ DmaPtr createHostBuffer(nvm_ctrl_t controller, size_t bufferSize);
 
 
-__host__
-DmaPtr createDeviceBuffer(nvm_ctrl_t controller, size_t bufferSize, int cudaDevice);
+__host__ DmaPtr createDeviceBuffer(nvm_ctrl_t controller, size_t bufferSize, int cudaDevice);
 
 
 #endif

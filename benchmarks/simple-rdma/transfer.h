@@ -2,7 +2,6 @@
 #define __SIMPLE_RDMA_TRANSFER_H__
 
 #include <nvm_types.h>
-#include <map>
 #include <vector>
 #include <memory>
 #include <cstddef>
@@ -16,34 +15,36 @@
 #endif
 
 
-struct TransferTuple
+struct Chunk
 {
+    DmaPtr          prpList;
     uint64_t        pageIoAddr;
     uint64_t        prpListIoAddr;
     uint64_t        startBlock;
     uint16_t        numBlocks;
 };
 
-struct QueueTransfer
+
+struct Transfer
 {
-    nvm_queue_t*                queue;
-    DmaPtr                      prpLists;
-    size_t                      totalSize;
-    size_t                      chunkSize;
-    std::vector<TransferTuple>  transfers;
+    nvm_queue_t*        queue;
+    uint32_t            nvmNamespace;
+    size_t              pageSize;
+    size_t              blockSize;
+    size_t              chunkSize;
+    std::vector<Chunk>  chunks;
 };
 
-typedef std::shared_ptr<QueueTransfer> QueueTransferPtr;
+
+typedef std::shared_ptr<Transfer> TransferPtr;
+
+typedef std::vector<TransferPtr> TransferList;
 
 
-typedef std::map<uint16_t, QueueTransferPtr> QueueTransferMap;
-
-
-__host__
-void prepareTransfers(QueueTransferMap& transfers,
-                      nvm_ctrl_t controller,
-                      QueueList& queues, 
-                      const DmaPtr buffer, 
-                      const Settings& settings);
+__host__ void prepareTransfers(TransferList& transfers,
+                               nvm_ctrl_t controller,
+                               QueueList& queues, 
+                               const DmaPtr buffer, 
+                               const Settings& settings);
 
 #endif

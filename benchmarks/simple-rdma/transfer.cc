@@ -13,111 +13,147 @@
 #include "queue.h"
 #include "settings.h"
 
-
-static void createTuples(std::vector<TransferTuple>& tuples, 
-                         size_t blockSize, 
-                         size_t pageSize, 
-                         size_t totalBlocks, 
-                         size_t blocksPerChunk,
-                         size_t startBlock,
-                         size_t prpPages,
-                         void* prpPtr,
-                         const uint64_t* prpListAddrs,
-                         const uint64_t* buffAddrs
-                         )
+#if (!defined( NDEBUG ) && defined( DEBUG ))
+static void controlMemory(const TransferList& list, const DmaPtr buffer)
 {
-
-    for (size_t blocks = 0, prpList = 0, buffPage = 0; blocks < totalBlocks; blocks += blocksPerChunk, ++prpList)
+    std::map<uint64_t, size_t> addrCounts;
+    for (size_t i = 0; i < (*buffer)->n_ioaddrs; ++i)
     {
-        size_t chunkBlocks = std::min((totalBlocks - blocks), blocksPerChunk);
-        size_t chunkSize = chunkBlocks * blockSize;
+        addrCounts[(*buffer)->ioaddrs[i]] = 1;
+    }
 
-        TransferTuple tuple;
-        tuple.pageIoAddr = buffAddrs[buffPage++];
+    for (const TransferPtr& transfer: list)
+    {
+        for (const Chunk& chunk: transfer->chunks)
+        {
+            size_t chunkSize = chunk.numBlocks * transfer->blockSize;
+            
+            addrCounts[chunk.pageIoAddr]++;
 
-        if (chunkSize <= pageSize)
-        {
-            tuple.prpListIoAddr = 0;
-        }
-        else if (chunkSize <= 2 * pageSize)
-        {
-            tuple.prpListIoAddr = buffAddrs[buffPage++];
-        }
-        else
-        {
-            if (prpPtr == nullptr || prpListAddrs == nullptr)
+            if (chunkSize <= transfer->pageSize)
             {
-                throw std::runtime_error("Invalid argument to createTuples");
+                continue;
+            }
+            else if (chunkSize <= 2 * transfer->pageSize)
+            {
+                addrCounts[chunk.prpListIoAddr]++;
+                continue;
             }
 
-            size_t prpOffset = prpList * prpPages;
-            tuple.prpListIoAddr = prpListAddrs[prpOffset];
-
-            buffPage += nvm_prp_list(DMA_VADDR(prpPtr, pageSize, prpOffset), pageSize,
-                    chunkSize - pageSize, &prpListAddrs[prpOffset], &buffAddrs[buffPage]);
+            const uint64_t* prpPtr = (const uint64_t*) (*chunk.prpList)->vaddr;
+            for (size_t i = 0; i < (chunkSize / transfer->pageSize) - 1; ++i)
+            {
+                addrCounts[prpPtr[i]]++;
+            }
         }
-
-        tuple.startBlock = startBlock + blocks;
-        tuple.numBlocks = chunkBlocks;
-
-        tuples.push_back(tuple);
     }
-}
 
-
-static QueueTransferPtr createTransfer(nvm_ctrl_t ctrl, size_t totalBlocks, uint64_t startBlock, const DmaPtr buffer, const Settings& settings, nvm_queue_t* sq)
-{
-    const size_t totalSize = totalBlocks * settings.blockSize;
-    const size_t blocksPerChunk = settings.chunkSize / settings.blockSize;
-    const uint64_t* buffAddrs = (*buffer)->ioaddrs;
-
-    // Initialize transfer descriptor
-    QueueTransferPtr transfer(new QueueTransfer);
-    transfer->queue = sq;
-    transfer->totalSize = totalSize;
-    transfer->chunkSize = settings.chunkSize;
-
-    // Create PRP list (if necessary)
-    const size_t prpListSize = nvm_prp_list_size((*buffer)->page_size, totalSize, settings.chunkSize);
-    const size_t prpPages = nvm_prp_num_pages((*buffer)->page_size, settings.chunkSize);
-
-    void* prpListVaddr = nullptr;
-    const uint64_t* prpListAddrs = nullptr;
-
-    if (prpListSize > 0)
+    for (const auto& addr: addrCounts)
     {
-        DmaPtr prpLists = createHostBuffer(ctrl, prpListSize);
-        transfer->prpLists = prpLists;
-        prpListVaddr = (*prpLists)->vaddr;
-        prpListAddrs = (*prpLists)->ioaddrs;
+        if (addr.second != 2)
+        {
+            throw std::runtime_error("Buffer is not entirely covered!");
+        }
     }
+}
+#endif
 
-    // Fill out PRP lists and create transfer tuples
-    createTuples(transfer->transfers, settings.blockSize, (*buffer)->page_size, totalBlocks, blocksPerChunk,
-            startBlock, prpPages, prpListVaddr, prpListAddrs, buffAddrs);
 
-    return transfer;
+constexpr static size_t transferPages(size_t numBlocks, size_t blockSize, size_t pageSize)
+{
+    return (numBlocks * blockSize) / pageSize;
 }
 
 
-void prepareTransfers(QueueTransferMap& transfers, nvm_ctrl_t ctrl, QueueList& queues, const DmaPtr buffer, const Settings& settings)
+constexpr static size_t blocksPerChunk(const Settings& settings)
 {
-    const size_t totalBlocks = settings.numBlocks / (queues.size() - 1);
+    return settings.chunkSize / settings.blockSize + (settings.chunkSize % settings.blockSize != 0);
+}
+
+
+static size_t setChunk(Chunk& chunk, nvm_ctrl_t ctrl, const TransferPtr& transfer, const uint64_t* bufferPages, uint64_t startBlock, uint64_t numBlocks)
+{
+    chunk.pageIoAddr = bufferPages[0];
+    chunk.prpListIoAddr = 0;
+    chunk.startBlock = startBlock;
+    chunk.numBlocks = numBlocks;
+
+    size_t chunkSize = numBlocks * transfer->blockSize;
+
+    if (chunkSize <= transfer->pageSize)
+    {
+        return 1;
+    }
+    else if (chunkSize <= 2 * transfer->pageSize)
+    {
+        chunk.prpListIoAddr = bufferPages[1];
+        return 2;
+    }
+
+    auto prpList(createHostBuffer(ctrl, nvm_prp_list_size(transfer->pageSize, chunkSize - transfer->pageSize, transfer->chunkSize)));
+
+    size_t bufferPageCount = nvm_prp_list((*prpList)->vaddr, transfer->pageSize, chunkSize - transfer->pageSize, 
+            (*prpList)->ioaddrs, &bufferPages[1]);
+
+    chunk.prpList = prpList;
+    chunk.prpListIoAddr = (*prpList)->ioaddrs[0];
+
+    return 1 + bufferPageCount;
+}
+
+
+void prepareTransfers(TransferList& list, nvm_ctrl_t ctrl, QueueList& queues, const DmaPtr buffer, const Settings& settings)
+{
+    if (transferPages(settings.numBlocks, settings.blockSize, (*buffer)->page_size) > (*buffer)->n_ioaddrs)
+    {
+        throw std::runtime_error("Transfer size is greater than buffer size");
+    }
+
+    list.clear();
+    for (auto queueIt = queues.begin() + 1; queueIt != queues.end(); ++queueIt)
+    {
+        TransferPtr transfer(new Transfer);
+        transfer->queue = &*queueIt;
+        transfer->nvmNamespace = settings.nvmNamespace;
+        transfer->pageSize = (*buffer)->page_size;
+        transfer->blockSize = settings.blockSize;
+        transfer->chunkSize = settings.chunkSize;
+
+        list.push_back(transfer);
+    }
+
+    const uint64_t* bufferPages = (*buffer)->ioaddrs;
+    size_t bufferPage = 0;
+
     uint64_t startBlock = settings.startBlock;
+    uint64_t remainingBlocks = settings.numBlocks;
 
-    for (size_t queueIdx = 1; queueIdx < queues.size(); ++queueIdx)
+    auto first = list.begin();
+    auto last = list.end();
+    auto transferIt = first;
+
+    while (remainingBlocks > 0)
     {
-        auto transfer = createTransfer(ctrl, totalBlocks, startBlock, buffer, settings, &queues[queueIdx]);
-        transfers.insert(std::make_pair(transfer->queue->no, transfer));
+        const size_t numBlocks = std::min(remainingBlocks, blocksPerChunk(settings));
+        
+        TransferPtr& transfer = *transferIt;
+        
+        Chunk chunk;
+        const size_t numPages = setChunk(chunk, ctrl, transfer, &bufferPages[bufferPage], startBlock, numBlocks);
+        transfer->chunks.push_back(chunk);
 
-        startBlock += totalBlocks;
+        bufferPage += numPages;
+        startBlock += numBlocks;
+        remainingBlocks -= numBlocks;
+
+        if (++transferIt == last)
+        {
+            transferIt = first;
+        }
     }
 
-    const size_t remainingBlocks = settings.numBlocks - (startBlock - settings.startBlock);
-    if (remainingBlocks > 0)
-    {
-        auto transfer = createTransfer(ctrl, remainingBlocks, startBlock, buffer, settings, &queues[1]);
-        transfers.insert(std::make_pair(0, transfer));
-    }
+#if !defined(NDEBUG) && defined(DEBUG)
+    controlMemory(list, buffer);
+#endif
 }
 

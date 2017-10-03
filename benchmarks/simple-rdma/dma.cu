@@ -80,6 +80,7 @@ __host__ DmaPtr createDeviceBuffer(nvm_ctrl_t ctrl, size_t size, int cudaDevice)
         cudaFree(memoryPtr);
         throw runtime_error("Failed to get pointer attributes");
     }
+    void* devicePtr = attrs.devicePointer;
 
     nvm_dma_t* dma_window = new (std::nothrow) nvm_dma_t;
     if (dma_window == nullptr)
@@ -88,7 +89,7 @@ __host__ DmaPtr createDeviceBuffer(nvm_ctrl_t ctrl, size_t size, int cudaDevice)
         throw runtime_error("Failed to allocate DMA mapping handle");
     }
 
-    int nvmerr = nvm_dma_window_device_map(dma_window, ctrl, attrs.devicePointer, size);
+    int nvmerr = nvm_dma_window_device_map(dma_window, ctrl, devicePtr, size);
     if (nvmerr != 0)
     {
         delete dma_window;
@@ -97,7 +98,11 @@ __host__ DmaPtr createDeviceBuffer(nvm_ctrl_t ctrl, size_t size, int cudaDevice)
     }
     cudaMemset(memoryPtr, 0, size);
 
-    return DmaPtr(dma_window, [memoryPtr](nvm_dma_t* handle) {
+    // Ugly bugly hack, but it works...
+    (*dma_window)->vaddr = memoryPtr;
+
+    return DmaPtr(dma_window, [memoryPtr, devicePtr](nvm_dma_t* handle) {
+        (*handle)->vaddr = devicePtr;
         deleteHandle(handle);
         cudaFree(memoryPtr);
     });
