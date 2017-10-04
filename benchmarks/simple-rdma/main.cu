@@ -1,4 +1,5 @@
 #include <cuda.h>
+#include <nvm_util.h>
 #include <nvm_types.h>
 #include <nvm_ctrl.h>
 #include <nvm_manager.h>
@@ -232,7 +233,7 @@ static void identify(nvm_rpc_t rpc, nvm_ctrl_t ctrl, Settings& settings)
         settings.chunkSize = ci.max_transfer_size;
     }
 
-    settings.chunkSize = std::min(ctrl->page_size, DMA_SIZE(settings.chunkSize, ctrl->page_size));
+    settings.chunkSize = DMA_SIZE(settings.chunkSize, ctrl->page_size);
 
     settings.blockSize = ni.lba_data_size;
 }
@@ -337,7 +338,7 @@ int main(int argc, char** argv)
     report("Getting controller reference");
     int nvmerr = nvm_ctrl_init(&controller, settings.controllerId);
     report(nvmerr);
-    if (err != 0)
+    if (nvmerr != 0)
     {
         return 2;
     }
