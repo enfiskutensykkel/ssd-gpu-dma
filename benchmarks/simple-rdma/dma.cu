@@ -93,7 +93,7 @@ __host__ DmaPtr createDeviceBuffer(nvm_ctrl_t ctrl, size_t size, int cudaDevice)
     if (nvmerr != 0)
     {
         delete dma_window;
-        free(memoryPtr);
+        cudaFree(memoryPtr);
         throw runtime_error("Failed to map device memory for DMA");
     }
     cudaMemset(memoryPtr, 0, size);

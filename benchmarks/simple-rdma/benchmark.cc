@@ -84,7 +84,7 @@ static void dequeueCompletions(nvm_queue_t** queues, size_t totalCommands)
         }
 
         cq_update(cq);
-        //std::this_thread::yield();
+        std::this_thread::yield();
     }
 }
 
