@@ -226,13 +226,14 @@ static int initialize_and_map(nvm_dma_t* window, nvm_ctrl_t ctrl, int new_ioctl_
     }
     
     // Pin pages to memory and get IO addresses
-    if (map_memory(new_ioctl_fd, devptr, (uint64_t) vaddr, n_pages, ioaddrs) != 0)
+    int err = map_memory(new_ioctl_fd, devptr, (uint64_t) vaddr, n_pages, ioaddrs);
+    if (err != 0)
     {
         free(ioaddrs);
-        return EIO;
+        return err;
     }
 
-    int err = nvm_dma_window_init(window, ctrl, vaddr, page_size, n_pages, ioaddrs);
+    err = nvm_dma_window_init(window, ctrl, vaddr, page_size, n_pages, ioaddrs);
     free(ioaddrs);
     if (err != 0)
     {

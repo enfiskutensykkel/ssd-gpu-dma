@@ -118,6 +118,7 @@ typedef struct nvm_controller_info
     uint8_t                 pci_vendor[4];  // PCI vendor and subsystem vendor identifier
     char                    serial_no[20];  // Serial number (NB! not null terminated)
     char                    model_no[40];   // Model number (NB! not null terminated)
+    char                    firmware[8];    // Firmware revision
     size_t                  max_transfer_size;  // Maximum data transfer size (MDTS)
     size_t                  cq_entry_size;  // CQ entry size (CQES)
     size_t                  sq_entry_size;  // SQ entry size (SQES)

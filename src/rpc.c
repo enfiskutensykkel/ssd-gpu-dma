@@ -349,6 +349,7 @@ int nvm_rpc_ctrl_info(nvm_ctrl_info_t* info, nvm_rpc_t ref, nvm_ctrl_t ctrl, voi
     memcpy(info->pci_vendor, bytes, 4);
     memcpy(info->serial_no, bytes + 4, 20);
     memcpy(info->model_no, bytes + 24, 40);
+    memcpy(info->firmware, bytes + 64, 8);
 
     info->max_transfer_size = (1UL << bytes[77]) * (1UL << (12 + CAP$MPSMIN(ctrl->mm_ptr)));
     info->sq_entry_size = 1 << _RB(bytes[512], 3, 0);

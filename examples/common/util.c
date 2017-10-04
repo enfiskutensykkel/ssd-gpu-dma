@@ -90,6 +90,10 @@ void print_ctrl_info(FILE* fp, const nvm_ctrl_info_t* info)
     memset(model, 0, 41);
     memcpy(model, info->model_no, 40);
 
+    char revision[9];
+    memset(revision, 0, 9);
+    memcpy(revision, info->firmware, 8);
+
     fprintf(fp, "------------- Controller information -------------\n");
     fprintf(fp, "PCI Vendor ID           : %x %x\n", vendor[0], vendor[1]);
     fprintf(fp, "PCI Subsystem Vendor ID : %x %x\n", vendor[2], vendor[3]);
@@ -99,6 +103,7 @@ void print_ctrl_info(FILE* fp, const nvm_ctrl_info_t* info)
     fprintf(fp, "Max queue entries       : %u\n", info->max_entries);
     fprintf(fp, "Serial Number           : %s\n", serial);
     fprintf(fp, "Model Number            : %s\n", model);
+    fprintf(fp, "Firmware revision       : %s\n", revision);
     fprintf(fp, "Max data transfer size  : %zu\n", info->max_transfer_size);
     fprintf(fp, "Max outstanding commands: %zu\n", info->max_out_cmds);
     fprintf(fp, "Max number of namespaces: %zu\n", info->max_n_ns);
