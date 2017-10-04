@@ -16,6 +16,7 @@ struct Settings
     size_t      repeatLoops;
     size_t      chunkSize;
     size_t      blockSize;
+    bool        interleave;
 };
 
 

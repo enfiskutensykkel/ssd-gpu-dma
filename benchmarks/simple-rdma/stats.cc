@@ -4,6 +4,7 @@
 #include <limits>
 #include <cstdint>
 #include <cstdio>
+#include <nvm_types.h>
 #include "settings.h"
 #include "stats.h"
 
@@ -14,7 +15,7 @@ void showStatistics(const Settings& settings, const std::string& title, const st
     //double totalTime = 0;
 
     auto printline = [](char c) {
-        for (size_t i = 0; i < 80; ++i)
+        for (size_t i = 0; i < 70; ++i)
         {
             fputc(c, stdout);
         }
@@ -40,9 +41,12 @@ void showStatistics(const Settings& settings, const std::string& title, const st
     avgBw /= times.size();
 
     printline('=');
-    fprintf(stdout, "%s\n", title.c_str());
+    fprintf(stdout, " %s\n", title.c_str());
+    fprintf(stdout, " Queue depth: %zu x %zu, Transfer size: %zu KiB, Num blocks: %zu \n", 
+            settings.numQueues, 0x1000 / sizeof(nvm_cmd_t), settings.chunkSize >> 10, settings.numBlocks);
     printline('-');
-    fprintf(stdout, "%10.3f MB/s\t%10.3f MB/s\t%10.3f MB/s\n", minBw, avgBw, maxBw);
+    fprintf(stdout, " %-16s\t%-16s\t%-16s\n", "Minimum", "Mean", "Maximum");
+    fprintf(stdout, " %10.3f MiB/s\t%10.3f MiB/s\t%10.3f MiB/s\n", minBw, avgBw, maxBw);
     printline('=');
 }
 

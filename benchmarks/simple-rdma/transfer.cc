@@ -123,6 +123,8 @@ void prepareTransfers(TransferList& list, nvm_ctrl_t ctrl, QueueList& queues, co
         list.push_back(transfer);
     }
 
+    const size_t blocksPerQueue = std::max(settings.chunkSize, settings.numBlocks / list.size());
+
     const uint64_t* bufferPages = (*buffer)->ioaddrs;
     size_t bufferPage = 0;
 
@@ -151,9 +153,19 @@ void prepareTransfers(TransferList& list, nvm_ctrl_t ctrl, QueueList& queues, co
         startBlock += numBlocks;
         remainingBlocks -= numBlocks;
 
-        if (++transferIt == last)
+        if (settings.interleave)
         {
-            transferIt = first;
+            if (++transferIt == last)
+            {
+                transferIt = first;
+            }
+        }
+        else
+        {
+            if (transferIt + 1 != last && (startBlock - settings.startBlock) % blocksPerQueue == 0)
+            {
+                ++transferIt;
+            }
         }
     }
 }

@@ -47,6 +47,7 @@ static void parseOptions(int argc, char** argv, Settings& settings)
         { "start", required_argument, nullptr, 's' },
         { "repeat", required_argument, nullptr, 'r' },
         { "chunk", required_argument, nullptr, 't' },
+        { "interleave", no_argument, nullptr, 'i' },
         { nullptr, false, nullptr, 0 }
     };
 
@@ -70,6 +71,7 @@ static void parseOptions(int argc, char** argv, Settings& settings)
     settings.repeatLoops = 1000;
     settings.chunkSize = 0; // Use the controller's MDTS
     settings.blockSize = 0; // Figure this out later
+    settings.interleave = false;
 
     // Figure out how many CUDA devices available
     int numDevs = 0;
@@ -182,6 +184,10 @@ static void parseOptions(int argc, char** argv, Settings& settings)
                 }
                 break;
 
+            case 'i': // Make chunks interleaved between queues
+                settings.interleave = true;
+                break;
+
             default:
                 if (optionsIdx != 0)
                 {
@@ -215,11 +221,19 @@ static void identify(nvm_rpc_t rpc, nvm_ctrl_t ctrl, Settings& settings)
         throw std::runtime_error("Failed to identify namespace");
     }
 
+    if (ni.capacity < settings.numBlocks * ni.lba_data_size)
+    {
+        throw std::runtime_error("Number of blocks requested exceeds disk capacity");
+    }
+
     settings.chunkSize = std::min(ci.max_transfer_size, settings.chunkSize);
     if (settings.chunkSize == 0)
     {
         settings.chunkSize = ci.max_transfer_size;
     }
+
+    settings.chunkSize = std::min(ctrl->page_size, DMA_SIZE(settings.chunkSize, ctrl->page_size));
+
     settings.blockSize = ni.lba_data_size;
 }
 
@@ -391,15 +405,15 @@ int main(int argc, char** argv)
 
         bounce(controller, queues, settings, ramTimes, gpuTimes);
 
-        showStatistics(settings, "RAM", ramTimes);
+        showStatistics(settings, "SSD -> RAM", ramTimes);
         printf("\n");
 
-        showStatistics(settings, "Via RAM", gpuTimes);
+        showStatistics(settings, "SSD -> RAM -> GPU", gpuTimes);
         printf("\n");
 
         gpuTimes.clear();
         direct(controller, queues, settings, gpuTimes);
-        showStatistics(settings, "GPU direct", gpuTimes);
+        showStatistics(settings, "SSD -> GPU", gpuTimes);
     }
     catch (const std::runtime_error& err)
     {

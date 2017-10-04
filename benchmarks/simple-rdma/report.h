@@ -22,8 +22,7 @@ static inline void report(const std::string& str)
         lineLength = 0;
     }
 
-    fprintf(stdout, "%s%*.*s", str.c_str(), lineLength, lineLength, padding.c_str());
-    fflush(stdout);
+    fprintf(stderr, "%s%*.*s", str.c_str(), lineLength, lineLength, padding.c_str());
 }
 
 
@@ -35,8 +34,7 @@ static inline void report(const char* str)
 
 static inline void report(bool success)
 {
-    fprintf(stdout, "%-4s\n", success ? "OK" : "FAIL");
-    fflush(stdout);
+    fprintf(stderr, "%-4s\n", success ? "OK" : "FAIL");
 }
 
 
