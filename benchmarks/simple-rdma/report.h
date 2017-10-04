@@ -9,7 +9,7 @@
 
 static inline void report(const std::string& str)
 {
-    int lineLength = 40;
+    int lineLength = 70;
     std::string padding;
     for (int i = 0; i < lineLength; ++i)
     {

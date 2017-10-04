@@ -7,7 +7,7 @@
 #include "queue.h"
 
 
-uint64_t benchmark(QueueList& queues, const TransferList& transfers, DmaPtr hostBuffer, void* deviceBuffer);
+uint64_t currentTime();
 
 uint64_t benchmark(QueueList& queues, const TransferList& transfers);
 

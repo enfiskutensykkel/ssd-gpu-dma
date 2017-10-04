@@ -47,4 +47,8 @@ __host__ void prepareTransfers(TransferList& transfers,
                                const DmaPtr buffer, 
                                const Settings& settings);
 
+
+__host__ void controlTransferMemory(const TransferList& transfers,
+                                    const DmaPtr buffer);
+
 #endif

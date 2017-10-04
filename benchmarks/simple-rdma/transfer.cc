@@ -13,13 +13,13 @@
 #include "queue.h"
 #include "settings.h"
 
-#if (!defined( NDEBUG ) && defined( DEBUG ))
-static void controlMemory(const TransferList& list, const DmaPtr buffer)
+
+void controlTransferMemory(const TransferList& list, const DmaPtr buffer)
 {
-    std::map<uint64_t, size_t> addrCounts;
+    std::map<uint64_t, int64_t> addrCounts;
     for (size_t i = 0; i < (*buffer)->n_ioaddrs; ++i)
     {
-        addrCounts[(*buffer)->ioaddrs[i]] = 1;
+        addrCounts[(*buffer)->ioaddrs[i]] = 1; // We initialise it to one
     }
 
     for (const TransferPtr& transfer: list)
@@ -31,7 +31,7 @@ static void controlMemory(const TransferList& list, const DmaPtr buffer)
             size_t prpOffset = nvm_prp_num_pages(transfer->pageSize, transfer->chunkSize) * chunkNo;
             size_t chunkSize = chunk.numBlocks * transfer->blockSize;
             
-            addrCounts[chunk.pageIoAddr]++;
+            --addrCounts[chunk.pageIoAddr];
 
             if (chunkSize <= transfer->pageSize)
             {
@@ -39,28 +39,27 @@ static void controlMemory(const TransferList& list, const DmaPtr buffer)
             }
             else if (chunkSize <= 2 * transfer->pageSize)
             {
-                addrCounts[chunk.prpListIoAddr]++;
+                --addrCounts[chunk.prpListIoAddr];
                 continue;
             }
 
             const uint64_t* prpPtr = (const uint64_t*) DMA_WND_VADDR(*transfer->prpList, prpOffset);
             for (size_t i = 0; i < (chunkSize / transfer->pageSize) - 1; ++i)
             {
-                addrCounts[prpPtr[i]]++;
+                --addrCounts[prpPtr[i]];
             }
         }
     }
 
     for (const auto& addr: addrCounts)
     {
-        if (addr.second != 2)
+        if (addr.second != 0)
         {
-            fprintf(stderr, "%lx %zu\n", addr.first, addr.second);
-            throw std::runtime_error("Buffer is not entirely covered!");
+            std::fprintf(stderr, "%lx %zu\n", addr.first, addr.second);
+            throw std::runtime_error("Memory pages are not contiguous");
         }
     }
 }
-#endif
 
 
 constexpr static size_t transferPages(size_t numBlocks, size_t blockSize, size_t pageSize)
@@ -157,9 +156,5 @@ void prepareTransfers(TransferList& list, nvm_ctrl_t ctrl, QueueList& queues, co
             transferIt = first;
         }
     }
-
-#if !defined(NDEBUG) && defined(DEBUG)
-    controlMemory(list, buffer);
-#endif
 }
 

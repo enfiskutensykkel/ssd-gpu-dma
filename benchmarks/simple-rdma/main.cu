@@ -6,8 +6,6 @@
 #include <memory>
 #include <string>
 #include <stdexcept>
-#include <algorithm>
-#include <limits>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -21,6 +19,7 @@
 #include "transfer.h"
 #include "benchmark.h"
 #include "report.h"
+#include "stats.h"
 
 
 static void showUsage(const std::string& str)
@@ -225,91 +224,57 @@ static void identify(nvm_rpc_t rpc, nvm_ctrl_t ctrl, Settings& settings)
 }
 
 
-static void launch_benchmark(nvm_ctrl_t controller, QueueList& queues, const Settings& settings, std::vector<uint64_t>& bounce, std::vector<uint64_t>& direct)
+static void bounce(nvm_ctrl_t controller, QueueList& queues, const Settings& settings, std::vector<uint64_t>& times)
 {
     report("Creating host buffer");
     auto buffer(createHostBuffer(controller, settings.numBlocks * settings.blockSize));
     report(true);
 
-    auto devbuffer(createDeviceBuffer(controller, settings.numBlocks * settings.blockSize, settings.cudaDevice));
+    report("Creating device buffer");
+    cudaError_t err = cudaSetDevice(settings.cudaDevice);
+    if (err != cudaSuccess)
+    {
+        throw std::runtime_error("Failed to set CUDA device");
+    }
 
-//    report("Creating device buffer");
-//    cudaError_t err = cudaSetDevice(settings.cudaDevice);
-//    if (err != cudaSuccess)
-//    {
-//        throw std::runtime_error("Failed to set CUDA device");
-//    }
-
-//    void* devicePointer = nullptr;
-//    err = cudaMalloc(&devicePointer, settings.numBlocks * settings.blockSize);
-//    if (err != cudaSuccess)
-//    {
-//        throw std::runtime_error("Failed to allocate device buffer: " + std::string(cudaGetErrorString(err)));
-//    }
-//    report(true);
+    void* devicePointer = nullptr;
+    err = cudaMalloc(&devicePointer, settings.numBlocks * settings.blockSize);
+    if (err != cudaSuccess)
+    {
+        throw std::runtime_error("Failed to allocate device buffer: " + std::string(cudaGetErrorString(err)));
+    }
+    report(true);
 
     report("Preparing transfer descriptors via RAM");
     TransferList transfers;
     prepareTransfers(transfers, controller, queues, buffer, settings);
     report(true);
 
-    report("Running transfers via RAM");
+#if (!defined(NDEBUG) && defined(DEBUG))
+    report("Verifying transfer descriptors");
+    controlTransferMemory(transfers, buffer);
+    report(true);
+#endif
+
+    report("Reading from disk to GPU via RAM");
     for (size_t i = 0; i < settings.repeatLoops; ++i)
     {
-        uint64_t t = benchmark(queues, transfers, buffer, (*devbuffer)->vaddr);
-//        uint64_t t = benchmark(queues, transfers, buffer, devicePointer);
-        bounce.push_back(t);
-    }
-    report(true);
+        uint64_t time = benchmark(queues, transfers);
 
-    report("Freeing resources");
-    //cudaFree(devicePointer);
-    transfers.clear();
-    buffer.reset();
-    report(true);
-}
+        uint64_t before = currentTime();
+        err = cudaMemcpy(devicePointer, (*buffer)->vaddr, settings.numBlocks * settings.blockSize, cudaMemcpyHostToDevice);
+        uint64_t after = currentTime();
 
-
-static void showStatistics(const Settings& settings, const std::string& title, const std::vector<uint64_t>& times)
-{
-    double totalSize = times.size() * settings.numBlocks * settings.blockSize;
-    double totalTime = 0;
-
-    auto printline = [](char c) {
-        for (size_t i = 0; i < 80; ++i)
+        if (err != cudaSuccess)
         {
-            fputc(c, stdout);
+            throw std::runtime_error("Failed to copy to device memory: " + std::string(cudaGetErrorString(err)));
         }
-        fprintf(stdout, "\n");
-    };
 
-    uint64_t minTime = std::numeric_limits<uint64_t>::max();
-    uint64_t maxTime = std::numeric_limits<uint64_t>::min();
+        time += after - before;
 
-    double minBw = std::numeric_limits<double>::max();
-    double maxBw = std::numeric_limits<double>::min();
-
-    double avgBw = 0;
-
-    for (const uint64_t time: times)
-    {
-        totalTime += time;
-        minTime = std::min(time, minTime);
-        maxTime = std::max(time, maxTime);
-
-        double bw = (settings.numBlocks * settings.blockSize) / ((double) time);
-        minBw = std::min(bw, minBw);
-        maxBw = std::max(bw, maxBw);
-        avgBw += bw;
+        times.push_back(time);
     }
-    avgBw /= times.size();
-
-    printline('=');
-    fprintf(stdout, "%s\n", title.c_str());
-    printline('-');
-    fprintf(stdout, "%10.3f MiB/s\n", totalSize / totalTime);
-    fprintf(stdout, "%10.3f MiB/s\n", avgBw);
-    printline('=');
+    report(true);
 }
 
 
@@ -392,11 +357,11 @@ int main(int argc, char** argv)
     }
 
     // Run benchmark
-    std::vector<uint64_t> bounceTimes;
-    std::vector<uint64_t> directTimes;
     try
     {
-        launch_benchmark(controller, queues, settings, bounceTimes, directTimes);
+        std::vector<uint64_t> times;
+        bounce(controller, queues, settings, times);
+        showStatistics(settings, "Transfer via RAM", times);
     }
     catch (const std::runtime_error& err)
     {
@@ -407,10 +372,6 @@ int main(int argc, char** argv)
         report(err);
         return 3;
     }
-
-    fprintf(stdout, "\n");
-    showStatistics(settings, "Transfer via RAM", bounceTimes);
-    fprintf(stdout, "\n");
     
     // Release stuff and quit
     nvm_rpc_unbind(rpcRef);

@@ -1,4 +1,3 @@
-#include <cuda.h>
 #include <nvm_types.h>
 #include <nvm_command.h>
 #include <nvm_queue.h>
@@ -13,6 +12,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <ctime>
+#include <cerrno>
+#include <cstring>
 #include "settings.h"
 #include "dma.h"
 #include "transfer.h"
@@ -47,7 +48,7 @@ struct Barrier
 };
 
 
-static uint64_t currentTime()
+uint64_t currentTime()
 {
     timespec ts;
 
@@ -83,6 +84,7 @@ static void dequeueCompletions(nvm_queue_t** queues, size_t totalCommands)
         }
 
         cq_update(cq);
+        std::this_thread::yield();
     }
 }
 
@@ -100,6 +102,7 @@ static void enqueueCommands(Barrier* barrier, const TransferPtr transfer)
         while ((cmd = sq_enqueue(sq)) == nullptr)
         {
             sq_submit(sq);
+            std::this_thread::yield();
             continue;
         }
 
@@ -152,39 +155,6 @@ static uint64_t timeTransfer(QueueList& queueList, const TransferList& transfers
     }
 
     return after - before;
-}
-
-
-uint64_t benchmark(QueueList& queueList, const TransferList& transfers, DmaPtr hostBuffer, void* deviceBuffer)
-{
-    // Count total number of commands and transfer size
-    size_t totalCommands = 0;
-    size_t transferSize = 0;
-
-    std::for_each(transfers.begin(), transfers.end(), [&transferSize,&totalCommands](const TransferPtr& transfer) {
-        totalCommands += transfer->chunks.size();
-        
-        for (const auto& chunk: transfer->chunks)
-        {
-            transferSize += chunk.numBlocks * transfer->blockSize;
-        }
-    });
-
-    // Transfer to disk
-    uint64_t transferTime = timeTransfer(queueList, transfers, totalCommands);
-
-    // Copy from host memory to device
-    // We expect cudaMemcpy to be blocking (it should be for CUDA 8)
-    uint64_t before = currentTime();
-    cudaError_t err = cudaMemcpy(deviceBuffer, (*hostBuffer)->vaddr, transferSize, cudaMemcpyHostToDevice);
-    uint64_t after = currentTime();
-    if (err != cudaSuccess)
-    {
-        throw std::runtime_error(cudaGetErrorString(err));
-    }
-
-    transferTime += after - before;
-    return transferTime;
 }
 
 
