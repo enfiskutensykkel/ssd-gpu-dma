@@ -84,7 +84,7 @@ static void dequeueCompletions(nvm_queue_t** queues, size_t totalCommands)
         }
 
         cq_update(cq);
-        std::this_thread::yield();
+        //std::this_thread::yield();
     }
 }
 
@@ -141,8 +141,8 @@ static uint64_t timeTransfer(QueueList& queueList, const TransferList& transfers
     }
     
     // Synchronize all threads
-    barrier.wait();
     uint64_t before = currentTime();
+    barrier.wait();
 
     // We assume that once the completion dequeuer is done, transfer is done
     dequeuer.join();

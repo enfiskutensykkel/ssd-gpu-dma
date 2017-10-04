@@ -224,7 +224,34 @@ static void identify(nvm_rpc_t rpc, nvm_ctrl_t ctrl, Settings& settings)
 }
 
 
-static void bounce(nvm_ctrl_t controller, QueueList& queues, const Settings& settings, std::vector<uint64_t>& times)
+static void direct(nvm_ctrl_t controller, QueueList& queues, const Settings& settings, std::vector<uint64_t>& times)
+{
+    report("Creating device buffer");
+    auto buffer(createDeviceBuffer(controller, settings.numBlocks * settings.blockSize, settings.cudaDevice));
+    report(true);
+
+    report("Preparing transfer descriptors directly to GPU");
+    TransferList transfers;
+    prepareTransfers(transfers, controller, queues, buffer, settings);
+    report(true);
+
+#if (!defined(NDEBUG) && defined(DEBUG))
+    report("Verifying transfer descriptors");
+    controlTransferMemory(transfers, buffer);
+    report(true);
+#endif
+
+    report("Reading from disk directly to GPU");
+    for (size_t i = 0; i < settings.repeatLoops; ++i)
+    {
+        uint64_t time = benchmark(queues, transfers);
+        times.push_back(time);
+    }
+    report(true);
+}
+
+
+static void bounce(nvm_ctrl_t controller, QueueList& queues, const Settings& settings, std::vector<uint64_t>& ramTimes, std::vector<uint64_t>& gpuTimes)
 {
     report("Creating host buffer");
     auto buffer(createHostBuffer(controller, settings.numBlocks * settings.blockSize));
@@ -270,9 +297,9 @@ static void bounce(nvm_ctrl_t controller, QueueList& queues, const Settings& set
             throw std::runtime_error("Failed to copy to device memory: " + std::string(cudaGetErrorString(err)));
         }
 
+        ramTimes.push_back(time);
         time += after - before;
-
-        times.push_back(time);
+        gpuTimes.push_back(time);
     }
     report(true);
 }
@@ -359,9 +386,20 @@ int main(int argc, char** argv)
     // Run benchmark
     try
     {
-        std::vector<uint64_t> times;
-        bounce(controller, queues, settings, times);
-        showStatistics(settings, "Transfer via RAM", times);
+        std::vector<uint64_t> gpuTimes;
+        std::vector<uint64_t> ramTimes;
+
+        bounce(controller, queues, settings, ramTimes, gpuTimes);
+
+        showStatistics(settings, "RAM", ramTimes);
+        printf("\n");
+
+        showStatistics(settings, "Via RAM", gpuTimes);
+        printf("\n");
+
+        gpuTimes.clear();
+        direct(controller, queues, settings, gpuTimes);
+        showStatistics(settings, "GPU direct", gpuTimes);
     }
     catch (const std::runtime_error& err)
     {
