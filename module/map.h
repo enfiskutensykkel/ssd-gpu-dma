@@ -17,10 +17,11 @@ struct ctrl_ref;
 struct map_descriptor
 {
     struct map_list_head        list_head;      /* Linked list header */
-    struct device*              dev;            /* PCI device mappings are mapped for */
+    struct pci_dev*             pdev;           /* PCI device mappings are mapped for */
     unsigned long               page_size;      /* Virtual/logical page size */
     unsigned long               n_pages;        /* Number of pages pinned (should equal n_addrs) */
     void*                       pages;          /* Reference to the pinned pages */
+    void*                       mappings;       /* Reference to mappings */
     unsigned long               n_addrs;        /* Number of bus addresses */
     dma_addr_t                  addrs[1];       /* Mapped bus addresses */
 };

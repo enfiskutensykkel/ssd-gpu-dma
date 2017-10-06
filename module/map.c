@@ -84,8 +84,10 @@ static long lock_user_pages(struct map_descriptor* map, struct task_struct* task
     // Pin pages in memory
 #if (LINUX_VERSION_CODE <= KERNEL_VERSION(4, 9, 0))
     retval = get_user_pages(task, task->mm, vaddr, n_pages, 1, 0, pages, NULL);
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0))
+    retval = get_user_pages(vaddr, n_pages, FOLL_WRITE, pages, NULL);
 #else
-    retval = get_user_pages(task, task->mm, vaddr_start, n_pages, FOLL_WRITE, pages, NULL);
+#error "Unsupported get_user_pages() symbol"
 #endif
 
     if (retval <= 0)
@@ -106,7 +108,14 @@ static long lock_user_pages(struct map_descriptor* map, struct task_struct* task
 static void free_callback(struct map_descriptor* map)
 {
     nvidia_p2p_free_page_table((nvidia_p2p_page_table_t*) map->pages);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
+    if (mappings != NULL)
+    {
+        nvidia_p2p_free_dma_mapping((nvidia_p2p_dma_mapping_t*) map->mappings);
+    }
+#endif
     map->pages = NULL;
+    map->mappings = NULL; 
     printk(KERN_NOTICE "Force released P2P page table\n");
 }
 #endif
@@ -118,7 +127,11 @@ long map_gpu_memory(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
     unsigned long i;
     long err;
     struct map_descriptor* md;
-    nvidia_p2p_page_table_t* pages;
+    nvidia_p2p_page_table_t* pages = NULL;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
+    nvidia_p2p_dma_mapping_t* mappings = NULL;
+#endif
+    //struct device* dev;
 
     *map = NULL;
 
@@ -136,7 +149,8 @@ long map_gpu_memory(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
 
     vaddr &= GPU_PAGE_MASK;
     md->page_size = GPU_PAGE_SIZE;
-    md->dev = &ref->ctrl->pdev->dev;
+    md->pdev = ref->ctrl->pdev;
+    //dev = &md->pdev->dev;
 
     list_init(md, vaddr);
 
@@ -151,21 +165,37 @@ long map_gpu_memory(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
     }
 
     pages = (nvidia_p2p_page_table_t*) md->pages;
+    
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
+    err = nvidia_p2p_dma_map_pages(md->pdev, pages, (nvidia_p2p_dma_mapping_t**) &md->mappings);
+    
+    if (err != 0)
+    {
+        nvidia_p2p_put_pages(0, 0, vaddr, pages);
+        kfree(md);
+        printk(KERN_ERR "nvidia_p2p_dma_map_pages() failed: %ld\n", err);
+        return err;
+    }
+
+    mappings = (nvidia_p2p_dma_mapping_t*) md->mappings;
+#endif
+
     md->n_pages = pages->entries;
     md->n_addrs = 0;
 
     for (i = 0; i < md->n_pages; ++i)
     {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-#warning "dma_map_resource() is not tested"
-        md->addrs[i] = dma_map_resource(md->dev, pages->pages[i]->physical_address, GPU_PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
-        
-        err = dma_mapping_errors(dev, md->addrs[i]);
-        if (err != 0)
-        {
-            printk(KERN_ERR "Failed to map page for some reason\n");
-            break;
-        }
+        md->addrs[i] = mappings->dma_addresses[i];
+        //md->addrs[i] = dma_map_resource(dev, mappings->dma_addresses[i], GPU_PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
+        //md->addrs[i] = dma_map_resource(dev, pages->pages[i]->physical_address, GPU_PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
+
+        //err = dma_mapping_error(dev, md->addrs[i]);
+        //if (err != 0)
+        //{
+        //    printk(KERN_ERR "Failed to map GPU page for some reason: %ld\n", err);
+        //    break;
+        //}
 #else
         md->addrs[i] = pages->pages[i]->physical_address;
 #endif
@@ -186,19 +216,23 @@ long map_gpu_memory(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
 void unmap_gpu_memory(struct map_descriptor* map)
 {
     unsigned long i;
+    //struct device* dev = NULL;
 
     list_remove(map);
+    i = map->n_pages;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-#warning "dma_unmap_resource() is not tested"
-    for (i = 0; i < map->n_addrs; ++i)
+    //dev = &map->pdev->dev;
+    //for (i = 0; i < map->n_addrs; ++i)
+    //{
+    //    dma_unmap_resource(dev, map->addrs[i], GPU_PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
+    //}
+
+    if (map->mappings != NULL)
     {
-        dma_unmap_resource(map->dev, map->addrs[i], GPU_PAGE_SIZE, DMA_BIDIRECTIONAL, 0);
+        nvidia_p2p_dma_unmap_pages(map->pdev, map->pages, map->mappings);
     }
-
 #endif
-
-    i = map->n_pages;
 
     if (map->pages != NULL)
     {
@@ -218,6 +252,7 @@ long map_user_pages(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
     long err;
     struct map_descriptor* md;
     struct page** pages;
+    struct device* dev;
 
     *map = NULL;
 
@@ -249,13 +284,14 @@ long map_user_pages(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, stru
     }
 
     // Traverse pages and map them for controller
-    md->dev = &ref->ctrl->pdev->dev;
+    md->pdev = ref->ctrl->pdev;
+    dev = &md->pdev->dev;
     pages = (struct page**) md->pages;
     for (i = 0; i < md->n_pages; ++i)
     {
-        md->addrs[i] = dma_map_page(md->dev, pages[i], 0, PAGE_SIZE, DMA_BIDIRECTIONAL);
+        md->addrs[i] = dma_map_page(dev, pages[i], 0, PAGE_SIZE, DMA_BIDIRECTIONAL);
 
-        err = dma_mapping_error(md->dev, md->addrs[i]);
+        err = dma_mapping_error(dev, md->addrs[i]);
         if (err != 0)
         {
             printk(KERN_ERR "Failed to map page for some reason\n");
@@ -277,14 +313,16 @@ void unmap_user_pages(struct map_descriptor* map)
 {
     unsigned long i;
     struct page** pages;
+    struct device* dev;
 
     // Remove from linked list
     list_remove(map);
 
     // Unmap pages for controller
+    dev = &map->pdev->dev;
     for (i = 0; i < map->n_addrs; ++i)
     {
-        dma_unmap_page(map->dev, map->addrs[i], PAGE_SIZE, DMA_BIDIRECTIONAL);
+        dma_unmap_page(dev, map->addrs[i], PAGE_SIZE, DMA_BIDIRECTIONAL);
     }
 
     // Unpin pages
