@@ -56,8 +56,10 @@ endif ()
 
 # Try to find SISCI
 find_path (sisci_include NAMES sisci_types.h sisci_api.h sisci_error.h PATHS "${DIS}")
-find_library (sisci_lib NAMES sisci PATHS "${DIS}/lib64" "${DIS}/lib")
-
+find_library (sisci_lib NAMES sisci PATHS "${DIS}/lib64" "${DIS}/lib" NO_DEFAULT_PATH)
+if (sisci_lib)
+    message(STATUS "Using DIS library ${sisci_lib}")
+endif ()
 
 # Library source files
 set (libnvme_root "${PROJECT_SOURCE_DIR}/src")
