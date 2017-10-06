@@ -89,7 +89,7 @@ static void dequeueCompletions(nvm_queue_t** queues, size_t totalCommands)
 }
 
 
-static void enqueueCommands(Barrier* barrier, const TransferPtr transfer)
+static void enqueueCommands(Barrier* barrier, const TransferPtr transfer, nvm_io_command_set opc)
 {
     nvm_cmd_t* cmd = nullptr;
     uint32_t ns = transfer->nvmNamespace;
@@ -106,7 +106,7 @@ static void enqueueCommands(Barrier* barrier, const TransferPtr transfer)
             continue;
         }
 
-        nvm_cmd_header(cmd, NVM_IO_READ, ns);
+        nvm_cmd_header(cmd, opc, ns);
         nvm_cmd_dptr(cmd, chunk.pageIoAddr, chunk.prpListIoAddr);
 
         cmd->dword[10] = chunk.startBlock;
@@ -118,7 +118,7 @@ static void enqueueCommands(Barrier* barrier, const TransferPtr transfer)
 }
 
 
-static uint64_t timeTransfer(QueueList& queueList, const TransferList& transfers, size_t totalCommands)
+static uint64_t timeTransfer(QueueList& queueList, const TransferList& transfers, size_t totalCommands, nvm_io_command_set opc)
 {
     // Create queue array
     nvm_queue_t* queues[queueList.size()];
@@ -137,7 +137,7 @@ static uint64_t timeTransfer(QueueList& queueList, const TransferList& transfers
     std::thread enqueuers[transfers.size()];
     for (const auto& transfer: transfers)
     {
-        enqueuers[transfer->queue->no - 1] = std::thread(enqueueCommands, &barrier, transfer);
+        enqueuers[transfer->queue->no - 1] = std::thread(enqueueCommands, &barrier, transfer, opc);
     }
     
     // Synchronize all threads
@@ -167,8 +167,20 @@ uint64_t benchmark(QueueList& queueList, const TransferList& transfers)
         totalCommands += transfer->chunks.size();
     });
 
-    uint64_t transferTime = timeTransfer(queueList, transfers, totalCommands);
+    uint64_t transferTime = timeTransfer(queueList, transfers, totalCommands, NVM_IO_READ);
 
     return transferTime;
 }
 
+
+uint64_t benchmarkWrite(QueueList& queues, const TransferList& transfers)
+{
+    size_t totalCommands = 0;
+
+    for (const auto& transfer: transfers)
+    {
+        totalCommands += transfer->chunks.size();
+    }
+
+    return timeTransfer(queues, transfers, totalCommands, NVM_IO_WRITE);
+}

@@ -49,6 +49,7 @@ static void parseOptions(int argc, char** argv, Settings& settings)
         { "repeat", required_argument, nullptr, 'r' },
         { "chunk", required_argument, nullptr, 't' },
         { "interleave", no_argument, nullptr, 'i' },
+        { "write", no_argument, nullptr, 'w' },
         { nullptr, false, nullptr, 0 }
     };
 
@@ -73,6 +74,7 @@ static void parseOptions(int argc, char** argv, Settings& settings)
     settings.chunkSize = 0; // Use the controller's MDTS
     settings.blockSize = 0; // Figure this out later
     settings.interleave = false;
+    settings.write = false;
 
     // Figure out how many CUDA devices available
     int numDevs = 0;
@@ -118,10 +120,14 @@ static void parseOptions(int argc, char** argv, Settings& settings)
             case 'd': // Set CUDA device
                 endptr = nullptr;
                 settings.cudaDevice = strtol(optarg, &endptr, 10);
-                if (endptr == nullptr || *endptr != '\0' || settings.cudaDevice < 0 || settings.cudaDevice >= numDevs)
+                if (endptr == nullptr || *endptr != '\0' || settings.cudaDevice >= numDevs)
                 {
                     fprintf(stderr, "Invalid CUDA device: `%s'\n", optarg);
                     exit(1);
+                }
+                else if (settings.cudaDevice < 0)
+                {
+                    fprintf(stderr, "No CUDA device specified!\n");
                 }
                 break;
 
@@ -189,6 +195,10 @@ static void parseOptions(int argc, char** argv, Settings& settings)
                 settings.interleave = true;
                 break;
 
+            case 'w':
+                settings.write = true;
+                break;
+
             default:
                 if (optionsIdx != 0)
                 {
@@ -224,6 +234,7 @@ static void identify(nvm_rpc_t rpc, nvm_ctrl_t ctrl, Settings& settings)
 
     if (ni.capacity < settings.numBlocks * ni.lba_data_size)
     {
+        fprintf(stderr, "%zu %zu\n", ni.capacity, settings.numBlocks * ni.lba_data_size);
         throw std::runtime_error("Number of blocks requested exceeds disk capacity");
     }
 
@@ -236,6 +247,23 @@ static void identify(nvm_rpc_t rpc, nvm_ctrl_t ctrl, Settings& settings)
     settings.chunkSize = DMA_SIZE(settings.chunkSize, ctrl->page_size);
 
     settings.blockSize = ni.lba_data_size;
+}
+
+
+static void writeDisk(nvm_ctrl_t ctrl, QueueList& queues, const Settings& settings)
+{
+    report("Creating host buffer");
+    auto buffer(createHostBuffer(ctrl, settings.numBlocks * settings.blockSize));
+    report(true);
+
+    report("Preparing transfer descriptors for writing to disk");
+    TransferList transfers;
+    prepareTransfers(transfers, ctrl, queues, buffer, settings);
+    report(true);
+
+    report("Writing to disk");
+    benchmarkWrite(queues, transfers);
+    report(true);
 }
 
 
@@ -268,24 +296,27 @@ static void direct(nvm_ctrl_t controller, QueueList& queues, const Settings& set
 
 static void bounce(nvm_ctrl_t controller, QueueList& queues, const Settings& settings, std::vector<uint64_t>& ramTimes, std::vector<uint64_t>& gpuTimes)
 {
+    void* devicePointer = nullptr;
     report("Creating host buffer");
     auto buffer(createHostBuffer(controller, settings.numBlocks * settings.blockSize));
     report(true);
 
-    report("Creating device buffer");
-    cudaError_t err = cudaSetDevice(settings.cudaDevice);
-    if (err != cudaSuccess)
+    if (settings.cudaDevice >= 0)
     {
-        throw std::runtime_error("Failed to set CUDA device");
-    }
+        report("Creating device buffer");
+        cudaError_t err = cudaSetDevice(settings.cudaDevice);
+        if (err != cudaSuccess)
+        {
+            throw std::runtime_error("Failed to set CUDA device");
+        }
 
-    void* devicePointer = nullptr;
-    err = cudaMalloc(&devicePointer, settings.numBlocks * settings.blockSize);
-    if (err != cudaSuccess)
-    {
-        throw std::runtime_error("Failed to allocate device buffer: " + std::string(cudaGetErrorString(err)));
+        err = cudaMalloc(&devicePointer, settings.numBlocks * settings.blockSize);
+        if (err != cudaSuccess)
+        {
+            throw std::runtime_error("Failed to allocate device buffer: " + std::string(cudaGetErrorString(err)));
+        }
+        report(true);
     }
-    report(true);
 
     report("Preparing transfer descriptors via RAM");
     TransferList transfers;
@@ -302,21 +333,30 @@ static void bounce(nvm_ctrl_t controller, QueueList& queues, const Settings& set
     for (size_t i = 0; i < settings.repeatLoops; ++i)
     {
         uint64_t time = benchmark(queues, transfers);
-
-        uint64_t before = currentTime();
-        err = cudaMemcpy(devicePointer, (*buffer)->vaddr, settings.numBlocks * settings.blockSize, cudaMemcpyHostToDevice);
-        uint64_t after = currentTime();
-
-        if (err != cudaSuccess)
-        {
-            throw std::runtime_error("Failed to copy to device memory: " + std::string(cudaGetErrorString(err)));
-        }
-
         ramTimes.push_back(time);
-        time += after - before;
-        gpuTimes.push_back(time);
+
+        if (settings.cudaDevice >= 0)
+        {
+            uint64_t before = currentTime();
+            cudaError_t err = cudaMemcpy(devicePointer, (*buffer)->vaddr, settings.numBlocks * settings.blockSize, cudaMemcpyHostToDevice);
+            uint64_t after = currentTime();
+
+            if (err != cudaSuccess)
+            {
+                cudaFree(devicePointer);
+                throw std::runtime_error("Failed to copy to device memory: " + std::string(cudaGetErrorString(err)));
+            }
+            
+            time += after - before;
+            gpuTimes.push_back(time);
+        }
     }
     report(true);
+
+    if (devicePointer != nullptr)
+    {
+        cudaFree(devicePointer);
+    }
 }
 
 
@@ -325,12 +365,15 @@ int main(int argc, char** argv)
     Settings settings;
     parseOptions(argc, argv, settings);
 
-    report("Setting CUDA device");
-    cudaError_t err = cudaSetDevice(settings.cudaDevice);
-    report(err);
-    if (err != cudaSuccess)
+    if (settings.cudaDevice >= 0)
     {
-        return 1;
+        report("Setting CUDA device");
+        cudaError_t err = cudaSetDevice(settings.cudaDevice);
+        report(err);
+        if (err != cudaSuccess)
+        {
+            return 1;
+        }
     }
 
     // Create NVM controller reference
@@ -404,17 +447,26 @@ int main(int argc, char** argv)
         std::vector<uint64_t> gpuTimes;
         std::vector<uint64_t> ramTimes;
 
+        if (settings.write)
+        {
+            writeDisk(controller, queues, settings);
+        }
+
         bounce(controller, queues, settings, ramTimes, gpuTimes);
 
         showStatistics(settings, "SSD -> RAM", ramTimes);
         printf("\n");
 
-        showStatistics(settings, "SSD -> RAM -> GPU", gpuTimes);
-        printf("\n");
+        if (settings.cudaDevice >= 0)
+        {
+            showStatistics(settings, "SSD -> RAM -> GPU", gpuTimes);
+            printf("\n");
 
-        gpuTimes.clear();
-        direct(controller, queues, settings, gpuTimes);
-        showStatistics(settings, "SSD -> GPU", gpuTimes);
+            gpuTimes.clear();
+            direct(controller, queues, settings, gpuTimes);
+
+            showStatistics(settings, "SSD -> GPU", gpuTimes);
+        }
     }
     catch (const std::runtime_error& err)
     {

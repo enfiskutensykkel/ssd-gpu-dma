@@ -17,6 +17,7 @@ struct Settings
     size_t      chunkSize;
     size_t      blockSize;
     bool        interleave;
+    bool        write;
 };
 
 

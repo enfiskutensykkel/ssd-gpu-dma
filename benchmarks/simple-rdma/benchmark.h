@@ -11,4 +11,6 @@ uint64_t currentTime();
 
 uint64_t benchmark(QueueList& queues, const TransferList& transfers);
 
+uint64_t benchmarkWrite(QueueList& queues, const TransferList& transfers);
+
 #endif
