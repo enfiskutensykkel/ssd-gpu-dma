@@ -21,13 +21,13 @@ set (no_cuda false CACHE BOOL "Do not build with CUDA")
 
 # Set global compiler flags
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra" CACHE INTERNAL "" FORCE)
-set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -Wall -Wextra -pedantic -g -DDEBUG" CACHE INTERNAL "" FORCE)
+set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG} -g -DDEBUG" CACHE INTERNAL "" FORCE)
 set (CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra" CACHE INTERNAL "" FORCE)
-set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -Wextra -g -DDEBUG" CACHE INTERNAL "" FORCE)
+set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -g -DDEBUG" CACHE INTERNAL "" FORCE)
 set (CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
-set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D__CUDA__")
-set (CUDA_NVCC_FLAGS_RELEASE "${CMAKE_NVCC_FLAGS_RELEASE} -D__CUDA__ -O2")
+set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D__CUDA__;-std=c++11;-gencode arch=compute_50,code=sm_50")
+set (CUDA_NVCC_FLAGS_RELEASE "${CMAKE_NVCC_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
 
 
 
@@ -116,7 +116,6 @@ install (TARGETS libnvme DESTINATION "lib")
 
 
 
-
 # Create kernel module makefile
 if (NOT no_module)
     if (CUDA_FOUND AND NOT no_nvidia_driver AND EXISTS "${driver_dir}/Module.symvers")
@@ -128,6 +127,8 @@ if (NOT no_module)
 
     set (kdir "/lib/modules/${CMAKE_SYSTEM_VERSION}/build")
     configure_file ("${module_root}/Makefile.in" "${module_output}/Makefile" @ONLY)
+
+    add_custom_target (module "${CMAKE_MAKE_PROGRAM}" WORKING_DIRECTORY "${module_output}")
 endif ()
 
 
@@ -158,15 +159,8 @@ macro (set_sisci target)
         target_sources (${target} PRIVATE ${samples_common_sisci})
         target_compile_definitions (${target} PRIVATE _REENTRANT __DIS_CLUSTER__)
     else ()
-        if (sample_targets)
-            list (REMOVE_ITEM sample_targets "${target}")
-            set (sample_targets "${sample_targets}" PARENT_SCOPE)
-        endif ()
-
-        if (benchmark_targets)
-            list (REMOVE_ITEM benchmark_targets "${target}")
-            set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
-        endif ()
+        list (REMOVE_ITEM sample_targets "${target}")
+        set (sample_targets "${sample_targets}" PARENT_SCOPE)
         set_target_properties (${target} PROPERTIES EXCLUDE_FROM_ALL 1)
     endif ()
 endmacro ()
@@ -184,11 +178,25 @@ endmacro ()
 # We assume all benchmarks are CUDA programs
 macro (make_benchmark target binary_name files)
     if (CUDA_FOUND AND NOT no_cuda)
-        cuda_add_executable (${target} ${files} OPTIONS -O3 -gencode arch=compute_50,code=sm_50 -D__CUDA__ -std=c++11) # Ugly bugly
+        cuda_add_executable (${target} ${files} OPTIONS ) # Ugly bugly
 
         add_dependencies (${target} libnvme)
         target_link_libraries (${target} libnvme)
+        set_target_properties (${target} PROPERTIES OUTPUT_NAME "${binary_name}")
 
+        list (APPEND benchmark_targets "${target}")
+        set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
+
+        install (TARGETS ${target} DESTINATION "bin")
+    endif ()
+endmacro ()
+
+macro (make_sisci_benchmark target binary_name files)
+    if (CUDA_FOUND AND sisci_include AND sisci_lib AND NOT (no_cuda OR no_sisci))
+        cuda_add_executable (${target} ${files} OPTIONS -gencode arch=compute_50,code=sm_50 -D__DIS_CLUSTER__ -D_REENTRANT)
+
+        add_dependencies (${target} libnvme)
+        target_link_libraries (${target} libnvme ${sisci_lib})
         set_target_properties (${target} PROPERTIES OUTPUT_NAME "${binary_name}")
 
         list (APPEND benchmark_targets "${target}")
@@ -214,6 +222,7 @@ add_custom_target (examples DEPENDS samples)
 # Add individual benchmarks
 if (CUDA_FOUND)
     add_subdirectory ("${benchmarks_root}/simple-rdma")
+    add_subdirectory ("${benchmarks_root}/dis-latency")
     add_custom_target (benchmarks DEPENDS ${benchmark_targets})
 endif ()
 
