@@ -13,7 +13,7 @@
 
 using std::runtime_error;
 
-const size_t GPU_BOUND_SIZE = 0x10000;
+static const size_t GPU_BOUND_SIZE = 0x10000;
 
 
 __host__ static void deleteHandle(nvm_dma_t* handle)
