@@ -109,7 +109,7 @@ static void free_callback(struct map_descriptor* map)
 {
     nvidia_p2p_free_page_table((nvidia_p2p_page_table_t*) map->pages);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-    if (mappings != NULL)
+    if (map->mappings != NULL)
     {
         nvidia_p2p_free_dma_mapping((nvidia_p2p_dma_mapping_t*) map->mappings);
     }
