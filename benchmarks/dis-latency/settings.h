@@ -27,7 +27,7 @@ struct Settings
         nvmNamespace = 1;
         repetitions = 10000;
         blockSize = 512;
-        maxSize = 512 * 1000000;
+        maxSize = 512 * 10000;
 
         for (size_t i = 512; i < 64*1024; i *= 2)
         {
