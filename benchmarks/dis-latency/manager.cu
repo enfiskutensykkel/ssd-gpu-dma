@@ -66,9 +66,9 @@ static uint64_t currentTime()
 }
 
 
-static void transferChunks(nvm_queue_t& cq, nvm_queue_t& sq, const ChunkList& chunks, const Settings& settings)
+static void transferChunks(nvm_queue_t& cq, nvm_queue_t& sq, const ChunkDescriptor& chunk, const Settings& settings, size_t size)
 {
-    for (const auto& chunk: chunks)
+    for (size_t i = 0; i < settings.repetitions; ++i)
     {
         nvm_cmd_t* cmd = sq_enqueue(&sq);
         nvm_cmd_header(cmd, NVM_IO_READ, settings.nvmNamespace);
@@ -95,7 +95,7 @@ static void transferChunks(nvm_queue_t& cq, nvm_queue_t& sq, const ChunkList& ch
         sq_update_unchecked(&sq);
         cq_update(&cq);
 
-        cout << (after - before) << endl;
+        cout << size << "\t" << (after - before) << "\t" << block << endl;
     }
 }
 
@@ -131,20 +131,12 @@ static void runManager(nvm_ctrl_t controller, nvm_rpc_t rpc, const Settings& set
 
     for (size_t size: settings.transferSizes)
     {
-        cout << "Size: " << size << endl;
-
         SegmentPtr segment(createSegment(randomId(), size));
         DmaPtr dma(createDmaMapping(segment, controller, settings.ctrlAdapter));
 
-        ChunkList chunks;
-        for (auto i = settings.repetitions; i > 0; --i)
-        {
-            ChunkDescriptor chunk;
-            setChunk(chunk, controller, dma, settings, randomId(), size);
-            chunks.push_back(chunk);
-        }
-
-        transferChunks(cq, sq, chunks, settings);
+        ChunkDescriptor chunk;
+        setChunk(chunk, controller, dma, settings, randomId(), size);
+        transferChunks(cq, sq, chunk, settings, size);
     }
 }
 

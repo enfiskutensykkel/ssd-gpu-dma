@@ -19,9 +19,6 @@ struct ChunkDescriptor
     uint64_t            dptr2;
 };
 
-typedef std::vector<ChunkDescriptor> ChunkList;
-
-
 void setChunk(ChunkDescriptor& chunk, nvm_ctrl_t controller, DmaPtr target, const Settings& settings, uint32_t id, size_t size);
 
 

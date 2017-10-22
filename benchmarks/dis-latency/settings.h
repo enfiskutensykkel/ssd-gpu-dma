@@ -25,9 +25,9 @@ struct Settings
         ctrlId = 0x10000;
         ctrlAdapter = 0;
         nvmNamespace = 1;
-        repetitions = 1000;
+        repetitions = 10000;
         blockSize = 512;
-        maxSize = 512 * 10000;
+        maxSize = 512 * 1000000;
 
         for (size_t i = 512; i < 64*1024; i *= 2)
         {
