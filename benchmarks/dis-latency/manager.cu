@@ -62,7 +62,7 @@ static uint64_t currentTime()
         throw runtime_error(strerror(errno));
     }
 
-    return ts.tv_sec * 1e6 + ts.tv_nsec / 1e3;
+    return ts.tv_sec * 1e9 + ts.tv_nsec;
 }
 
 
@@ -144,7 +144,12 @@ static void runManager(nvm_ctrl_t controller, nvm_rpc_t rpc, const Settings& set
         throw runtime_error("Failed to create SQ");
     }
 
+    cerr << "Waiting..." << endl;
+    //sleep(30);
+    cerr << "Warming up" << endl;
     transfer(cq, sq, controller, settings, true);
+    
+    cerr << "running" << endl;
     transfer(cq, sq, controller, settings, false);
 }
 
