@@ -49,7 +49,7 @@ static uint16_t randomId()
 
 static uint64_t randomBlock(size_t max)
 {
-    return rand() % max;
+    return rand() & (max - 1);
 }
 
 
@@ -66,36 +66,51 @@ static uint64_t currentTime()
 }
 
 
-static void transferChunks(nvm_queue_t& cq, nvm_queue_t& sq, const ChunkDescriptor& chunk, const Settings& settings, size_t size)
+static void transfer(nvm_queue_t& cq, nvm_queue_t& sq, nvm_ctrl_t controller, const Settings& settings, bool warmup)
 {
-    for (size_t i = 0; i < settings.repetitions; ++i)
+    auto dataSegment(createSegment(randomId(), 128 * controller->page_size));
+    auto prpListSegment(createSegment(randomId(), controller->page_size));
+
+    DmaPtr dataMap(createDmaMapping(dataSegment, controller, settings.ctrlAdapter));
+    DmaPtr prpMap(createDmaMapping(prpListSegment, controller, settings.ctrlAdapter));
+
+    for (size_t size: settings.transferSizes)
     {
-        nvm_cmd_t* cmd = sq_enqueue(&sq);
-        nvm_cmd_header(cmd, NVM_IO_READ, settings.nvmNamespace);
-        nvm_cmd_dptr(cmd, chunk.dptr1, chunk.dptr2);
-
-        uint64_t block = randomBlock(settings.maxSize);
-        cmd->dword[10] = block;
-        cmd->dword[11] = block >> 32;
-        cmd->dword[12] = chunk.numBlocks - 1;
-
-        uint64_t before = currentTime();
-        sq_submit(&sq);
-
-        nvm_cpl_t* cpl = nullptr;
-        while ((cpl = cq_dequeue(&cq)) == nullptr);
-
-        uint64_t after = currentTime();
-
-        if (!CPL_OK(cpl))
+        for (size_t i = 0; i < settings.repetitions; ++i)
         {
-            throw runtime_error("Command failed");
+            nvm_cmd_t* cmd = sq_enqueue(&sq);
+            nvm_cmd_header(cmd, NVM_IO_READ, settings.nvmNamespace);
+
+            setDataPointer(cmd, dataMap, prpMap, settings.blockSize, size);
+
+            uint16_t numBlocks = (size / settings.blockSize) + (size % settings.blockSize != 0);
+
+            uint64_t block = randomBlock(settings.maxSize); 
+            cmd->dword[10] = block;
+            cmd->dword[11] = block >> 32;
+            cmd->dword[12] = numBlocks - 1;
+
+            uint64_t before = currentTime();
+            sq_submit(&sq);
+
+            nvm_cpl_t* cpl = nullptr;
+            while ((cpl = cq_dequeue(&cq)) == nullptr);
+
+            uint64_t after = currentTime();
+
+            if (!CPL_OK(cpl))
+            {
+                throw runtime_error("Command failed");
+            }
+
+            sq_update_unchecked(&sq);
+            cq_update(&cq);
+
+            if (!warmup)
+            {
+                cout << size << "\t" << (after - before) << "\t" << block << "\t" << numBlocks << endl;
+            }
         }
-
-        sq_update_unchecked(&sq);
-        cq_update(&cq);
-
-        cout << size << "\t" << (after - before) << "\t" << block << endl;
     }
 }
 
@@ -129,15 +144,8 @@ static void runManager(nvm_ctrl_t controller, nvm_rpc_t rpc, const Settings& set
         throw runtime_error("Failed to create SQ");
     }
 
-    for (size_t size: settings.transferSizes)
-    {
-        SegmentPtr segment(createSegment(randomId(), size));
-        DmaPtr dma(createDmaMapping(segment, controller, settings.ctrlAdapter));
-
-        ChunkDescriptor chunk;
-        setChunk(chunk, controller, dma, settings, randomId(), size);
-        transferChunks(cq, sq, chunk, settings, size);
-    }
+    transfer(cq, sq, controller, settings, true);
+    transfer(cq, sq, controller, settings, false);
 }
 
 

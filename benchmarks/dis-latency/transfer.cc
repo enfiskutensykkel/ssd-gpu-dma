@@ -1,41 +1,53 @@
 #include <nvm_util.h>
 #include <nvm_types.h>
 #include <nvm_command.h>
-#include <algorithm>
-#include <map>
-#include <vector>
-#include <memory>
 #include <stdexcept>
 #include <cstddef>
 #include <cstdint>
 #include "transfer.h"
-#include "settings.h"
+#include "segment.h"
+
+using std::runtime_error;
 
 
-void setChunk(ChunkDescriptor& chunk, nvm_ctrl_t ctrl, DmaPtr target, const Settings& settings, uint32_t id, size_t size)
+void setDataPointer(nvm_cmd_t* cmd, DmaPtr target, DmaPtr prpList, size_t blockSize, size_t chunkSize)
 {
-    if (size > (*target)->n_ioaddrs * (*target)->page_size)
+    if (chunkSize > (*target)->n_ioaddrs * (*target)->page_size)
     {
-        throw std::runtime_error("Invalid argument");
+        throw runtime_error("Invalid argument");
     }
 
-    chunk.dptr1 = (*target)->ioaddrs[0];
-    chunk.dptr2 = 0;
-    chunk.numBlocks = size / settings.blockSize;
+    size_t numTransferPages = (chunkSize / (*target)->page_size) + (chunkSize % (*target)->page_size != 0);
 
-    if (size <= 2 * (*target)->page_size)
+    //size_t startPage = (*target)->n_ioaddrs - numTransferPages;
+    size_t startPage = 0;
+    nvm_cmd_dptr(cmd, (*target)->ioaddrs[startPage], 0);
+
+    if (chunkSize <= (*target)->page_size)
     {
-        chunk.dptr2 = (*target)->ioaddrs[1];
         return;
     }
+    else if (chunkSize <= 2 * (*target)->page_size)
+    {
+        nvm_cmd_dptr(cmd, (*target)->ioaddrs[startPage], (*target)->ioaddrs[startPage + 1]);
+    }
 
-    
+    size_t numPrpPages = nvm_prp_num_pages((*target)->page_size, chunkSize);
+    if (numPrpPages > (*prpList)->n_ioaddrs)
+    {
+        throw runtime_error("Invalid argument");
+    }
 
-    chunk.prpList = createSegment(id, 0x1000);
-    chunk.prpListMap = createDmaMapping(chunk.prpList, ctrl, settings.ctrlAdapter);
+    //size_t startPrp = (*prpList)->n_ioaddrs - numPrpPages;
+    size_t startPrp = 0;
 
-    const uint64_t* bufferPages = (*target)->ioaddrs;
-    chunk.dptr2 = (*chunk.prpListMap)->ioaddrs[0];
+    nvm_prp_list((*prpList)->vaddr, (*target)->page_size, chunkSize - (*target)->page_size,
+            &(*prpList)->ioaddrs[startPrp], &(*target)->ioaddrs[startPage + 1]);
 
-    nvm_prp_list((*chunk.prpListMap)->vaddr, ctrl->page_size, size - ctrl->page_size, (*chunk.prpListMap)->ioaddrs, bufferPages);
+    nvm_cmd_dptr(cmd, (*target)->ioaddrs[startPage], (*prpList)->ioaddrs[startPrp]);
 }
+
+
+
+
+

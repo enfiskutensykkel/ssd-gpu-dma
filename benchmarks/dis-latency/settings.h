@@ -27,12 +27,16 @@ struct Settings
         nvmNamespace = 1;
         repetitions = 10000;
         blockSize = 512;
-        maxSize = 512 * 10000;
+        maxSize = 262144;
 
-        for (size_t i = 512; i < 64*1024; i *= 2)
-        {
-            transferSizes.push_back(i);
-        }
+        transferSizes.push_back(1 << 9);
+        transferSizes.push_back(1 << 10);
+        transferSizes.push_back(1 << 11);
+        transferSizes.push_back(1 << 12);
+        transferSizes.push_back(1 << 13);
+        transferSizes.push_back(1 << 14);
+        transferSizes.push_back(1 << 15);
+        transferSizes.push_back(1 << 16);
     }
 };
 
