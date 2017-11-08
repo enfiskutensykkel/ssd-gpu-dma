@@ -89,7 +89,10 @@ set (module_output "${CMAKE_BINARY_DIR}/module")
 
 
 # Set include directories
-include_directories ("${PROJECT_BINARY_DIR}/include" "${PROJECT_SOURCE_DIR}/include" "${sisci_include}" "${sisci_include}/dis") 
+include_directories ("${PROJECT_BINARY_DIR}/include" "${PROJECT_SOURCE_DIR}/include")
+if (sisci_include)
+    include_directories ("${PROJECT_BINARY_DIR}/include" "${PROJECT_SOURCE_DIR}/include" "${sisci_include}" "${sisci_include}/dis")
+endif ()
 
 
 # Create NVME library target
