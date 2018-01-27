@@ -22,9 +22,10 @@ any data, it is important that you back this up before proceeding.
 
 Make sure that the following is installed on your system:
   * CMake 3.1 or newer.
-  * GCC version 5.4.0 or newer (compiler must compile C99 and C++11).
+  * GCC version 5.4.0 or newer (compiler must support GNU99 for library and 
+    examples, and C++11 for benchmarks and CUDA programs).
   * CUDA 8.0 or newer (optional)
-  * Dolphin SISCI API 5.5 or newer (optional)
+  * Dolphin SISCI API 5.5.0 or newer (optional)
 
 If you plan on using CUDA, you must use the kernel module or Dolphin SmartIO.
 See [Kernel module](#using-kernel-module) or [Dolphin SmartIO](#dolphin-smartio).
@@ -51,7 +52,7 @@ $ echo -n "0000:05:00.0" > /sys/bus/pci/devices/0000\:05\:00.0/driver/unbind
 Then run the identify sample (standing in the build directory). It should
 look something like this:
 ```
-$ samples/userspace_identify --ctrl=05:00.0
+$ bin/identify-userspace --ctrl=05:00.0
 Resetting controller and setting up admin queues...
 ------------- Controller information -------------
 PCI Vendor ID           : 86 80
@@ -101,3 +102,77 @@ $ echo -n "0000:05:00.0" > /sys/bus/pci/drivers/disnvm/bind
 
 After doing this, the file `/dev/disnvm0` should show up, representing the
 disk's BAR0.
+
+
+Dolphin SmartIO
+------------------------------------------------------------------------------
+If you have an NTB adapter from Dolphin Interconnect Solutions and are 
+familiar with their [SISCI API](http://ww.dolphinics.no/download/ci/docs-master/),
+it is possible to use _libnvm_ in conjunction with the SmartIO extension to SISCI.
+This provides the user with a flexible method of concurrently sharing one or more
+NVMe drives in a PCIe cluster. When using SmartIO, IOMMU is supported but may 
+affect PCIe peer-to-peer transfers.
+
+If you have both CUDA and at least SISCI 5.5.0 with SmartIO installed, you can
+verify that this works by running the latency benchmark test. You can even run
+it on a separate host. Assuming the disk resides on node 4 and is connected to
+node 8, do the following on node 4:
+```
+$ smartio_tool add 05:00.0        # adds the NVMe drive to SmartIO resource pool
+$ smartio_tool connect 4          # if you want to run it on the local node as well
+$ smartio_tool connect 8          # allow node 8 to borrow devices
+$ smartio_tool available 05:00.0  # indicates that the device is available
+```
+
+Then do the following on node 8.
+```
+$ smartio_tool list		  # should show the NVMe disk
+80000: Non-Volatile memory controller Intel Corporation Device f1a5 [available]
+$ mkdir -p build; cd build
+$ make libnvm
+$ make latency-benchmark
+```
+
+Now run the latency benchmark with the specified controller and for 1000 blocks:
+```
+$ ./bin/nvm-latency-bench --ctrl=0x80000 --blocks=1000 --pattern=sequential
+Resetting controller...
+Queue #01 remote qd=32 blocks=1000 offset=0 pattern=sequential (4 commands)
+Creating buffer (125 pages)...
+Running benchmark...
+Queue #01 total-blocks=1000000 count=1000 min=531.366 avg=534.049 max=541.388
+	0.99:        540.287
+	0.97:        539.424
+	0.95:        538.568
+	0.90:        535.031
+	0.75:        534.377
+	0.50:        534.046
+	0.25:        533.030
+	0.05:        532.025
+	0.01:        531.859
+OK!
+```
+
+You can also compare this with the performance of the disk locally:
+```
+$ ./bin/nvm-latency-bench --ctrl=0x80000 --blocks=1000 --pattern=sequential
+Resetting controller...
+Queue #01 remote qd=32 blocks=1000 offset=0 pattern=sequential (4 commands)
+Creating buffer (125 pages)...
+Running benchmark...
+Queue #01 total-blocks=1000000 count=1000 min=536.117 avg=541.190 max=549.240
+	0.99:        543.080
+	0.97:        542.053
+	0.95:        541.825
+	0.90:        541.677
+	0.75:        541.507
+	0.50:        541.346
+	0.25:        541.152
+	0.05:        539.600
+	0.01:        539.351
+OK!
+```
+
+In this configuration, reads actually have lower latency for the remote run
+than the local run, which is due to a switch in the topology allowing the
+disk to do PCIe peer-to-peer across the NTB.
