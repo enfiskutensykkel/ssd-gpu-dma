@@ -1,170 +1,259 @@
-#ifdef _SISCI
-#include <sisci_types.h>
-#include <sisci_error.h>
-#include <sisci_api.h>
-#ifndef __DIS_CLUSTER__
-#define __DIS_CLUSTER__
+#ifdef _CUDA
+#ifndef __CUDA__
+#define __CUDA__
 #endif
 #endif
 
 #include <nvm_types.h>
-#include <nvm_ctrl.h>
 #include <nvm_util.h>
 #include <nvm_dma.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include "ctrl.h"
+#include "dma.h"
 #include "ioctl.h"
-#include "device.h"
 #include "util.h"
 #include "regs.h"
 #include "dprintf.h"
 
 
-/* Forward declaration */
-struct mapped_segment;
 
-
-#ifdef _SISCI
 /*
- * Reference to reverse-mapped segment
- *
- * This structure is used to hold a SmartIO reference to the physical 
- * device as well as the local segment mapped for the controller.
+ * DMA handle container.
+ * 
+ * Note that this structure is of variable size due to the list of pages
+ * at the end of the DMA handle.
  */
-struct mapped_segment
+struct __attribute__((aligned (64))) dma
 {
-    struct nvm_device           device;
-    sci_local_segment_t         segment;
+    struct dma_map*         map;        // DMA mapping descriptor
+    dma_map_free_t          release;    // Free mapping descriptor
+    nvm_dma_t               handle;     // DMA mapping handle
 };
-#endif /* _SISCI */
 
 
-/*
- * DMA window handle container.
- */
-struct handle_container
-{
-    int                         ioctl_fd;   // ioctl file descriptor
-    struct mapped_segment*      mapped_seg; // Mapped segment descriptor
-    struct nvm_dma_window       window;     // Actual DMA window handle
-} __attribute__((aligned (32)));
 
 
 
 /*
- * Helper function to retrieve a window's surrounding container.
+ * Memory mapping using kernel module.
+ * Indicates type of memory we have mapped.
  */
-static inline struct handle_container* get_container(nvm_dma_t window)
+enum map_type
 {
-    return (struct handle_container*) (((unsigned char*) window) - offsetof(struct handle_container, window));
-}
+    _MAP_TYPE_HOST      = 0x01,
+    _MAP_TYPE_CUDA      = 0x02
+};
 
 
 
 /*
- * Calculate the number of controller logical pages needed.
+ * Memory mapping descriptor.
+ * Describes memory mapped using the kernel module.
  */
-static inline size_t calculate_ctrl_pages(const nvm_ctrl_t ctrl, size_t page_size, size_t n_pages)
+struct ioctl_mapping
 {
-    return (page_size * n_pages) / ctrl->page_size;
-}
+    struct dma_map      mapping;        // DMA mapping descriptor
+    enum map_type       type;           // Type of memory
+    int                 ioctl_fd;       // File descriptor to kernel module
+    bool                mapped;         // Indicates if memory is mapped
+};
 
 
 
-static struct handle_container* create_container(const nvm_ctrl_t ctrl, size_t page_size, size_t n_pages)
-{
-    // Size of the handle container
-    size_t container_size = sizeof(struct handle_container) + (calculate_ctrl_pages(ctrl, page_size, n_pages) - 1) * sizeof(uint64_t);
+/* Get handle container */
+#define container(m) \
+    ((struct dma*) (((unsigned char*) (m)) - offsetof(struct dma, handle)))
 
-    // Allocate handle container
-    struct handle_container* container = (struct handle_container*) malloc(container_size);
-    if (container == NULL)
-    {
-        dprintf("Failed to allocate DMA window handle: %s\n", strerror(errno));
-        return NULL;
-    }
 
-    container->ioctl_fd = -1;
-    container->mapped_seg = NULL;
-    return container;
-}
+
+/* Calculate number of controller pages */
+#define n_ctrl_pages(ctrl, page_size, n_pages) \
+    (((page_size) * (n_pages)) / (ctrl)->page_size)
 
 
 
 /* 
- * Initialize DMA window descriptor.
+ * Initialize the mapping handle.
+ * Sets handle members and populates page address list.
  */
-static int initialize_handle(nvm_dma_t window, nvm_ctrl_t ctrl, void* vaddr, size_t page_size, size_t n_pages, uint64_t* ioaddrs)
+void _nvm_dma_handle_populate(nvm_dma_t* handle, const nvm_ctrl_t* ctrl, const uint64_t* ioaddrs)
 {
+    const struct dma_map* md = container(handle)->map;
+
     size_t i_page;
+    size_t page_size = md->page_size;
     size_t ctrl_page_size = ctrl->page_size;
 
-    // Check if the supplied memory window aligns with controller pages
-    if ( (page_size * n_pages) % ctrl_page_size != 0 )
-    {
-        dprintf("Addresses do not align with controller pages");
-        return ERANGE;
-    }
-
-    // Number of logical pages
-    size_t n_ctrl_pages = calculate_ctrl_pages(ctrl, page_size, n_pages);
-
     // Set handle members
-    window->vaddr = vaddr;
-    window->page_size = ctrl->page_size;
-    window->n_ioaddrs = n_ctrl_pages;
+    handle->vaddr = md->vaddr;
+    handle->page_size = ctrl->page_size;
+    handle->n_ioaddrs = n_ctrl_pages(ctrl, page_size, md->n_pages);
 
     // Calculate logical page addresses
-    for (i_page = 0; i_page < n_ctrl_pages; ++i_page)
+    for (i_page = 0; i_page < handle->n_ioaddrs; ++i_page)
     {
         size_t current_page = (i_page * ctrl_page_size) / page_size;
         size_t offset_within_page = (i_page * ctrl_page_size) % page_size;
 
-        window->ioaddrs[i_page] = ioaddrs[current_page] + offset_within_page;
+        handle->ioaddrs[i_page] = ioaddrs[current_page] + offset_within_page;
+    }
+}
+
+
+
+/*
+ * Create a DMA handle container.
+ *
+ * Need to use the controller reference to calculate from local page size 
+ * to controller page size.
+ */
+int _nvm_dma_create(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, struct dma_map* md, dma_map_free_t release)
+{
+    *handle = NULL;
+
+    size_t page_size = md->page_size;
+    size_t n_pages = md->n_pages;
+
+    // Do some sanity checking
+    if (page_size == 0 || n_pages == 0 || (page_size * n_pages) % ctrl->page_size != 0)
+    {
+        dprintf("Addresses do not align with controller pages");
+        return EINVAL;
     }
 
+    // Size of the handle container
+    size_t container_size = sizeof(struct dma) + (n_ctrl_pages(ctrl, page_size, n_pages)) * sizeof(uint64_t);
+
+    // Allocate the container and set mapping
+    struct dma* container = (struct dma*) malloc(container_size);
+    if (container == NULL)
+    {
+        dprintf("Failed to allocate DMA descriptor: %s\n", strerror(errno));
+        return ENOMEM;
+    }
+
+    container->map = md;
+    container->release = release;
+    container->handle.vaddr = NULL;
+    container->handle.page_size = 0;
+    container->handle.n_ioaddrs = 0;
+
+    *handle = &container->handle;
     return 0;
 }
 
 
 
 /*
- * Request page-lock and IO addresses for a virtual memory range.
+ * Free DMA handle.
  */
-static int map_memory(int ioctl_fd, int devptr, uint64_t vaddr_start, size_t n_pages, uint64_t* ioaddrs)
+void _nvm_dma_remove(nvm_dma_t* handle)
 {
-    enum nvm_ioctl_type type;
+    struct dma* dma = container(handle);
 
-#ifdef _CUDA
-    type = devptr ? NVM_MAP_DEVICE_MEMORY : NVM_MAP_HOST_MEMORY;
-#else
-    if (devptr != 0)
+    if (dma->release != NULL)
     {
-        return EINVAL;
+        dma->release(dma->map);
+    }
+    free(dma);
+}
+
+
+
+/*
+ * Create DMA mapping descriptor from physical/bus addresses.
+ */
+int nvm_dma_map(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, size_t page_size, size_t n_pages, const uint64_t* ioaddrs)
+{
+    int status;
+    *handle = NULL;
+
+    struct dma_map* map = malloc(sizeof(struct dma_map));
+    if (map == NULL)
+    {
+        dprintf("Failed to allocate mapping descriptor: %s\n", strerror(errno));
+        return ENOMEM;
     }
 
-    type = NVM_MAP_HOST_MEMORY;
+    map->vaddr = vaddr;
+    map->page_size = page_size;
+    map->n_pages = n_pages;
+
+    status = _nvm_dma_create(handle, ctrl, map, (dma_map_free_t) free);
+    if (status != 0)
+    {
+        free(map);
+        return status;
+    }
+
+    _nvm_dma_handle_populate(*handle, ctrl, ioaddrs);
+    return 0;
+}
+
+
+
+/*
+ * Remove DMA mapping descriptor.
+ */
+void nvm_dma_unmap(nvm_dma_t* handle)
+{
+    if (handle != NULL)
+    {
+        _nvm_dma_remove(handle);
+    }
+}
+
+
+
+
+
+/*
+ * Helper function to lock pages and retrieve IO addresses for a 
+ * virtual memory range.
+ */
+static int map_memory(struct ioctl_mapping* md, uint64_t* ioaddrs)
+{
+    enum nvm_ioctl_type type;
+    
+    switch (md->type)
+    {
+        case _MAP_TYPE_HOST:
+            type = NVM_MAP_HOST_MEMORY;
+            break;
+
+#ifdef _CUDA
+        case _MAP_TYPE_CUDA:
+            type = NVM_MAP_DEVICE_MEMORY;
+            break;
 #endif
 
+        default:
+            dprintf("Unknown memory type\n");
+            return EINVAL;
+    }
+
     struct nvm_ioctl_map request = {
-        .vaddr_start = vaddr_start,
-        .n_pages = n_pages,
+        .vaddr_start = (uint64_t) md->mapping.vaddr,
+        .n_pages = md->mapping.n_pages,
         .ioaddrs = ioaddrs
     };
 
-    int err = ioctl(ioctl_fd, type, &request);
+    int err = ioctl(md->ioctl_fd, type, &request);
     if (err < 0)
     {
-        dprintf("Map request failed: %s\n", strerror(errno));
+        dprintf("Page mapping kernel request failed: %s\n", strerror(errno));
         return errno;
     }
     
+    md->mapped = true;
     return 0;
 }
 
@@ -173,117 +262,149 @@ static int map_memory(int ioctl_fd, int devptr, uint64_t vaddr_start, size_t n_p
 /*
  * Release locked pages.
  */
-static int unmap_memory(int ioctl_fd, uint64_t vaddr_start)
+static int unmap_memory(const struct ioctl_mapping* md)
 {
-    int err = ioctl(ioctl_fd, NVM_UNMAP_MEMORY, &vaddr_start);
+    uint64_t addr = (uint64_t) md->mapping.vaddr;
+
+    int err = ioctl(md->ioctl_fd, NVM_UNMAP_MEMORY, &addr);
+
     if (err < 0)
     {
-        dprintf("Unmap request failed: %s\n", strerror(errno));
+        dprintf("Page unmapping kernel request failed: %s\n", strerror(errno));
+        return errno;
     }
 
-    return err;
-}
-
-
-
-int nvm_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t page_size, size_t n_pages, uint64_t* ioaddrs)
-{
-    int err;
-
-    *window = NULL;
-
-    // Create handle container
-    struct handle_container* container = create_container(ctrl, page_size, n_pages);
-    if (container == NULL)
-    {
-        return ENOMEM;
-    }
-
-    // Initialize DMA window handle
-    err = initialize_handle(&container->window, ctrl, vaddr, page_size, n_pages, ioaddrs);
-    if (err != 0)
-    {
-        free(container);
-        return err;
-    }
-
-    *window = &container->window;
     return 0;
 }
 
 
 
-static int initialize_and_map(nvm_dma_t* window, nvm_ctrl_t ctrl, int new_ioctl_fd, int devptr, size_t page_size, void* vaddr, size_t size)
+static int create_mapping(struct ioctl_mapping** handle, enum map_type type, int fd, void* vaddr, size_t size)
 {
-    vaddr = (void*) DMA_ALIGN((uint64_t) vaddr, page_size);
-    size = DMA_SIZE(size, page_size);
-    size_t n_pages = size / page_size;
+    size_t page_size = 0;
 
-    uint64_t* ioaddrs = calloc(n_pages, sizeof(uint64_t));
+    switch (type)
+    {
+        case _MAP_TYPE_HOST:
+            page_size = _nvm_host_page_size();
+            break;
+
+#ifdef _CUDA
+        case _MAP_TYPE_CUDA:
+            page_size = (1ULL << 16);
+            break;
+#endif
+
+        default:
+            dprintf("Unknown memory type\n");
+            return EINVAL;
+    }
+
+    size_t n_pages = NVM_PAGE_ALIGN(size, page_size) / page_size;
+
+    struct ioctl_mapping* md = malloc(sizeof(struct ioctl_mapping));
+
+    if (md == NULL)
+    {
+        dprintf("Failed to allocate mapping descriptor: %s\n", strerror(errno));
+        return ENOMEM;
+    }
+
+    md->mapping.vaddr = vaddr;
+    md->mapping.page_size = page_size;
+    md->mapping.n_pages = n_pages;
+    md->type = type;
+    md->mapped = false;
+
+    md->ioctl_fd = dup(fd);
+    if (md->ioctl_fd < 0)
+    {
+        dprintf("Failed to duplicate file descriptor: %s\n", strerror(errno));
+        free(md);
+        return EBADF;
+    }
+
+    *handle = md;
+    return 0;
+}
+
+
+
+/*
+ * Remove mapping descriptor.
+ */
+static void remove_mapping(struct ioctl_mapping* md)
+{
+    if (md->mapped)
+    {
+        unmap_memory(md);
+    }
+    close(md->ioctl_fd);
+    free(md);
+}
+
+
+
+/*
+ * Helper function to map an address range and initialize DMA handle.
+ */
+static int populate_handle(struct dma* container, const nvm_ctrl_t* ctrl)
+{
+    uint64_t* ioaddrs = calloc(container->map->n_pages, sizeof(uint64_t));
     if (ioaddrs == NULL)
     {
         return ENOMEM;
     }
-    
-    // Pin pages to memory and get IO addresses
-    int err = map_memory(new_ioctl_fd, devptr, (uint64_t) vaddr, n_pages, ioaddrs);
+
+    int err = map_memory((struct ioctl_mapping*) container->map, ioaddrs);
     if (err != 0)
     {
         free(ioaddrs);
         return err;
     }
 
-    err = nvm_dma_window_init(window, ctrl, vaddr, page_size, n_pages, ioaddrs);
+    _nvm_dma_handle_populate(&container->handle, ctrl, ioaddrs);
     free(ioaddrs);
-    if (err != 0)
-    {
-        return err;
-    }
-
-    struct handle_container* container = get_container(*window);
-    container->ioctl_fd = new_ioctl_fd;
-
+    
     return 0;
 }
 
 
 
-int nvm_dma_window_host_map(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t size)
+/*
+ * Create DMA mapping descriptor from virtual address using kernel module.
+ */
+int nvm_dma_map_host(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, size_t size)
 {
-    *window = NULL;
+    struct ioctl_mapping* md;
 
-    if (vaddr == NULL || size == 0)
-    {
-        return EINVAL;
-    }
+    *handle = NULL;
 
-    // Get RAM page size
-    long page_size = sysconf(_SC_PAGESIZE);
-    if (page_size < 0)
+    int fd = _nvm_fd_from_ctrl(ctrl);
+    if (fd < 0)
     {
-        dprintf("Unable to retrieve page size: %s\n", strerror(errno));
-        return EINVAL;
-    }
-
-    // Get ioctl descriptor
-    int ioctl_fd = _nvm_ioctl_fd_from_ctrl(ctrl);
-    if (ioctl_fd < 0)
-    {
-        return EINVAL;
-    }
-
-    // Duplicate file descriptor
-    int new_ioctl_fd = dup(ioctl_fd);
-    if (ioctl_fd < 0)
-    {
-        dprintf("Failed to copy ioctl handle: %s\n", strerror(errno));
         return EBADF;
     }
 
-    int err = initialize_and_map(window, ctrl, new_ioctl_fd, 0, page_size, vaddr, size);
+    int err = create_mapping(&md, _MAP_TYPE_HOST, fd, vaddr, size);
     if (err != 0)
     {
-        close(new_ioctl_fd);
+        return err;
+    }
+    
+    err = _nvm_dma_create(handle, ctrl, (struct dma_map*) md, (dma_map_free_t) remove_mapping);
+    if (err != 0)
+    {
+        remove_mapping(md);
+        return err;
+    }
+
+    err = populate_handle(container(*handle), ctrl);
+    if (err != 0)
+    {
+        _nvm_dma_remove(*handle);
+        remove_mapping(md);
+        *handle = NULL;
         return err;
     }
 
@@ -292,144 +413,43 @@ int nvm_dma_window_host_map(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, siz
 
 
 
-int nvm_dma_window_device_map(nvm_dma_t* window, nvm_ctrl_t ctrl, void* vaddr, size_t size)
+
+#ifdef _CUDA
+int nvm_dma_map_device(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* devptr, size_t size)
 {
-    *window = NULL;
+    struct ioctl_mapping* md;
 
-    if (vaddr == NULL || size == 0)
+    *handle = NULL;
+
+    int fd = _nvm_fd_from_ctrl(ctrl);
+    if (fd < 0)
     {
-        return EINVAL;
-    }
-
-    size_t page_size = (1ULL << 16);
-
-    // Get ioctl descriptor
-    int ioctl_fd = _nvm_ioctl_fd_from_ctrl(ctrl);
-    if (ioctl_fd < 0)
-    {
-        return EINVAL;
-    }
-
-    // Duplicate file descriptor
-    int new_ioctl_fd = dup(ioctl_fd);
-    if (ioctl_fd < 0)
-    {
-        dprintf("Failed to copy ioctl handle: %s\n", strerror(errno));
         return EBADF;
     }
 
-    int err = initialize_and_map(window, ctrl, new_ioctl_fd, 1, page_size, vaddr, size);
+    int err = create_mapping(&md, _MAP_TYPE_CUDA, fd, devptr, size);
     if (err != 0)
     {
-        close(new_ioctl_fd);
+        return err;
+    }
+    
+    err = _nvm_dma_create(handle, ctrl, (struct dma_map*) md, (dma_map_free_t) remove_mapping);
+    if (err != 0)
+    {
+        remove_mapping(md);
+        return err;
+    }
+
+    err = populate_handle(container(*handle), ctrl);
+    if (err != 0)
+    {
+        _nvm_dma_remove(*handle);
+        remove_mapping(md);
+        *handle = NULL;
         return err;
     }
 
     return 0;
 }
-
-
-
-#ifdef _SISCI
-
-int nvm_dis_dma_window_init(nvm_dma_t* window, nvm_ctrl_t ctrl, uint32_t adapter, sci_local_segment_t segment, void* vaddr, size_t size)
-{
-    sci_error_t err;
-    sci_ioaddr_t addr;
-
-    *window = NULL;
-
-    // Round size argument up to nearest controller page-aligned size
-    size = DMA_SIZE(size, ctrl->page_size);
-    if (size == 0)
-    {
-        return EINVAL;
-    }
-
-    // Retrieve SmartIO device reference
-    const struct nvm_device* dev_ref = _nvm_dev_from_ctrl(ctrl);
-    if (dev_ref == NULL)
-    {
-        dprintf("Controller was not initialized with a cluster device");
-        return EINVAL;
-    }
-
-    // Create segment map descriptor
-    struct mapped_segment* mapped_seg = (struct mapped_segment*) malloc(sizeof(struct mapped_segment));
-    if (mapped_seg == NULL)
-    {
-        dprintf("Failed to allocate descriptor: %s\n", strerror(errno));
-        return ENOMEM;
-    }
-
-    mapped_seg->segment = segment;
-
-    if (_nvm_dev_get(&mapped_seg->device, dev_ref->device_id, adapter) != 0)
-    {
-        dprintf("Failed to get device reference");
-        return ENODEV;
-    }
-
-    // Create handle container
-    struct handle_container* container = create_container(ctrl, size, 1);
-    if (container == NULL)
-    {
-        _nvm_dev_put(&mapped_seg->device);
-        free(mapped_seg);
-        return ENOMEM;
-    }
-
-    // Do the actual reverse mapping
-    SCIMapSegmentForDevice(segment, mapped_seg->device.device, mapped_seg->device.adapter, &addr, 0, &err);
-    if (err != SCI_ERR_OK)
-    {
-        dprintf("Failed to map DMA window for controller: %s\n", SCIGetErrorString(err));
-        _nvm_dev_put(&mapped_seg->device);
-        free(mapped_seg);
-        return EIO;
-    }
-
-    // Initialize DMA window handle
-    initialize_handle(&container->window, ctrl, vaddr, size, 1, (uint64_t*) &addr);
-
-    container->mapped_seg = mapped_seg;
-    *window = &container->window;
-    return 0;
-}
-
 #endif
-
-
-void nvm_dma_window_free(nvm_dma_t window)
-{
-    if (window != NULL)
-    {
-        struct handle_container* container = get_container(window);
-
-#ifdef _SISCI
-        if (container->mapped_seg != NULL)
-        {
-            sci_error_t err;
-            struct nvm_device* device = &container->mapped_seg->device;
-            
-            SCIUnmapSegmentForDevice(container->mapped_seg->segment, device->device, device->adapter, 0, &err);
-            if (err != SCI_ERR_OK)
-            {
-                dprintf("Failed to unmap DMA window for controller: %s\n", SCIGetErrorString(err));
-            }
-
-            _nvm_dev_put(&container->mapped_seg->device);
-            free(container->mapped_seg);
-        }
-#endif
-        
-        if (container->ioctl_fd >= 0)
-        {
-            unmap_memory(container->ioctl_fd, (uint64_t) window->vaddr);
-            close(container->ioctl_fd);
-        }
-
-        free(container);
-    }
-}
 

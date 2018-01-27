@@ -1,8 +1,8 @@
-#ifndef __DIS_NVM_INTERNAL_REGS_H__
-#define __DIS_NVM_INTERNAL_REGS_H__
+#ifndef __NVM_INTERNAL_REGS_H__
+#define __NVM_INTERNAL_REGS_H__
 
-#include <stdint.h>
 #include <nvm_util.h>
+#include <stdint.h>
 
 
 /* Controller registers */
@@ -46,4 +46,4 @@
 #define CQ_DBL(p, y, dstrd)    \
         ((volatile uint32_t*) (((volatile unsigned char*) (p)) + 0x1000 + ((2*(y) + 1) * (4 << (dstrd)))) )
 
-#endif /* __DIS_NVM_INTERNAL_REGS_H__ */
+#endif /* __NVM_INTERNAL_REGS_H__ */

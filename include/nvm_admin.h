@@ -1,86 +1,79 @@
-#ifndef __DIS_NVM_ADMIN_H__
-#define __DIS_NVM_ADMIN_H__
+#ifndef __NVM_ADMIN_H__
+#define __NVM_ADMIN_H__
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#include <nvm_types.h>
 #include <stddef.h>
 #include <stdint.h>
-
-struct nvm_queue;
-struct nvm_command;
-
-
-/* List of NVM admin command opcodes */
-enum nvm_admin_command_set
-{
-    NVM_ADMIN_DELETE_SUBMISSION_QUEUE   = (0x00 << 7) | (0x00 << 2) | 0x00,
-    NVM_ADMIN_CREATE_SUBMISSION_QUEUE   = (0x00 << 7) | (0x00 << 2) | 0x01,
-    NVM_ADMIN_DELETE_COMPLETION_QUEUE   = (0x00 << 7) | (0x01 << 2) | 0x00,
-    NVM_ADMIN_CREATE_COMPLETION_QUEUE   = (0x00 << 7) | (0x01 << 2) | 0x01,
-    NVM_ADMIN_IDENTIFY                  = (0x00 << 7) | (0x01 << 2) | 0x02,
-    NVM_ADMIN_ABORT                     = (0x00 << 7) | (0x02 << 2) | 0x00,
-    NVM_ADMIN_SET_FEATURES              = (0x00 << 7) | (0x02 << 2) | 0x01,
-    NVM_ADMIN_GET_FEATURES              = (0x00 << 7) | (0x02 << 2) | 0x02
-};
+#include <stdbool.h>
 
 
 
 /*
- * Create IO completion queue (CQ).
- *
- * Build an NVM admin command for creating a CQ.
+ * Get controller information.
  */
-void nvm_admin_cq_create(struct nvm_command* cmd, const struct nvm_queue* cq);
+int nvm_admin_ctrl_info(nvm_aq_ref ref,               // AQ pair reference
+                        struct nvm_ctrl_info* info,   // Controller information structure
+                        void* buffer,                 // Temporary buffer (must be at least 4 KB)
+                        uint64_t ioaddr);             // Bus address of buffer as seen by the controller
+
 
 
 /* 
- * Create IO submission queue (SQ).
- *
- * Build an NVM admin command for creating an SQ. Note that the associated
- * CQ must have been created first.
+ * Get namespace information.
  */
-void nvm_admin_sq_create(struct nvm_command* cmd, const struct nvm_queue* sq, const struct nvm_queue* cq);
+int nvm_admin_ns_info(nvm_aq_ref ref,                 // AQ pair reference
+                      struct nvm_ns_info* info,       // NVM namespace information
+                      uint32_t ns_id,                 // Namespace identifier
+                      void* buffer,                   // Temporary buffer (must be at least 4 KB)
+                      uint64_t ioaddr);               // Bus address of buffer as seen by controller
+
 
 
 /*
- * Delete IO submission queue (SQ).
- *
- * Build an NVM admin command for deleting an SQ.
+ * Make controller allocate and reserve queues.
  */
-void nvm_admin_sq_delete(struct nvm_command* cmd, const struct nvm_queue* sq, const struct nvm_queue* cq);
+int nvm_admin_set_num_queues(nvm_aq_ref ref, uint16_t n_cqs, uint16_t n_sqs);
 
 
 /*
- * Delete IO completion queue (CQ).
- *
- * Build an NVM admin command for deleting a CQ. Note that the associated
- * SQ must have been deleted first.
+ * Retrieve the number of allocated queues.
  */
-void nvm_admin_cq_delete(struct nvm_command* cmd, const struct nvm_queue*cq);
-
-
-/* 
- * Identify controller.
- *
- * Build an NVM admin command for identifying the controller.
- */
-void nvm_admin_identify_ctrl(struct nvm_command* cmd, uint64_t ioaddr);
+int nvm_admin_get_num_queues(nvm_aq_ref ref, uint16_t* n_cqs, uint16_t* n_sqs);
 
 
 /*
- * Identify namespace.
+ * Make controller allocate number of queues before issuing them.
  */
-void nvm_admin_identify_ns(struct nvm_command* cmd, uint32_t ns_id, uint64_t ioaddr);
+int nvm_admin_request_num_queues(nvm_aq_ref ref, uint16_t* n_cqs, uint16_t* n_sqs);
 
 
 /*
- * Set/get current number of queues.
+ * Create IO completion queue (CQ)
+ * Caller must set queue memory to zero manually.
  */
-void nvm_admin_current_num_queues(struct nvm_command* cmd, int set, uint16_t n_cqs, uint16_t n_sqs);
+int nvm_admin_cq_create(nvm_aq_ref ref,               // AQ pair reference
+                        nvm_queue_t* cq,              // CQ descriptor
+                        uint16_t id,                  // Queue identifier
+                        void* qmem,                   // Queue memory (virtual memory)
+                        uint64_t ioaddr);             // Bus address to queue memory as seen by controller
+
+
+/*
+ * Create IO submission queue (SQ)
+ * Caller must set queue memory to zero manually.
+ */
+int nvm_admin_sq_create(nvm_aq_ref ref,               // AQ pair reference
+                        nvm_queue_t* sq,              // SQ descriptor
+                        const nvm_queue_t* cq,        // Descriptor to paired CQ
+                        uint16_t id,                  // Queue identifier
+                        void* qmem,                   // Queue memory (virtual)
+                        uint64_t ioaddr);             // Bus address to queue as seen by controller
 
 
 #ifdef __cplusplus
 }
 #endif
-#endif /* #ifdef __DIS_NVM_ADMIN_H__ */
+#endif /* #ifdef __NVM_ADMIN_H__ */

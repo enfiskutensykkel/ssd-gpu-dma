@@ -1,6 +1,7 @@
-#ifndef __DIS_NVM_INTERNAL_UTIL_H__
-#define __DIS_NVM_INTERNAL_UTIL_H__
+#ifndef __NVM_INTERNAL_UTIL_H__
+#define __NVM_INTERNAL_UTIL_H__
 
+#include <nvm_util.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
@@ -12,6 +13,15 @@
 #include <errno.h>
 #include "dprintf.h"
 #endif
+
+
+/* Get minimum of two values */
+#define _MIN(a, b) ( (a) <= (b) ? (a) : (b) )
+
+
+/* Get the maximum of two values */
+#define _MAX(a, b) ( (a) > (b) ? (a) : (b) )
+
 
 
 /* Calculate the base-2 logarithm of a number n */
@@ -55,7 +65,7 @@ static inline size_t _nvm_host_page_size()
     long page_size = sysconf(_SC_PAGESIZE);
 
 #ifndef NDEBUG
-    if (page_size == -1)
+    if (page_size < 0)
     {
         dprintf("Failed to look up system page size: %s\n", strerror(errno));
         return 0;
@@ -66,4 +76,4 @@ static inline size_t _nvm_host_page_size()
 }
 
 
-#endif /* __DIS_NVM_INTERNAL_UTIL_H__ */
+#endif /* __NVM_INTERNAL_UTIL_H__ */

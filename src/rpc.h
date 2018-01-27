@@ -2,134 +2,86 @@
 #define __NVM_INTERNAL_RPC_H__
 
 #include <nvm_types.h>
-#include <nvm_manager.h>
-#include <stddef.h>
+#include <nvm_queue.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <pthread.h>
 
 
-#ifdef _SISCI
-#include <sisci_types.h>
-#define DIS_CLUSTER_TIMEOUT     2500
-#endif
-
-
-/*
- * RPC command message format.
- */
-struct __attribute__((packed)) rpc_cmd
-{
-    uint32_t                    node_id;    // Initiator DIS node ID
-    uint32_t                    intr_no;    // Initiator "callback" interrupt
-    unsigned char               cmd[64];    // Command to execute
-};
+/* Forward declaration */
+struct nvm_admin_reference;
 
 
 
 /*
- * RPC completion message format.
+ * Callback to delete custom instance data.
  */
-struct __attribute__((packed)) rpc_cpl
-{
-    int                         status;     // Status from the local routine
-    int                         accepted;   // Indicates whether or not command was accepted
-    unsigned char               cpl[16];    // Command completion
-};
-
-
-
-#ifdef _SISCI
-
-/* 
- * RPC handle descriptor.
- *
- * Descriptor to local interrupt other nodes can connect to.
- */
-struct rpc_handle
-{
-    sci_desc_t                  sd;         // SISCI virtual device
-    sci_local_data_interrupt_t  intr;       // Local data interrupt
-    uint32_t                    intr_no;    // Interrupt number
-    uint32_t                    adapter;    // Local DIS adapter
-    nvm_rpc_filter_t            filter;     // Filter callback
-};
+typedef void (*rpc_deleter_t)(void* data, uint32_t key, int remaining_handles);
 
 
 
 /*
- * RPC reference.
- *
- * Reference to a remote interrupt the node is connected to.
+ * RPC client-side stub definition.
+ * 
+ * Should perform the following actions.
+ *      - marshal command
+ *      - send command to remote host
+ *      - wait for completion (or timeout)
+ *      - unmarshal completion and return status
  */
-struct rpc_reference
-{
-    sci_desc_t                  sd;         // SISCI virtual device
-    sci_remote_data_interrupt_t intr;       // Remote data interrupt
-    uint32_t                    intr_no;    // Interrupt number
-    uint32_t                    node_id;    // Remote DIS node id
-    uint32_t                    adapter;    // Local DIS adapter number
-};
+typedef int (*rpc_stub_t)(void*, nvm_cmd_t*, nvm_cpl_t*);
 
 
 
 /*
- * List of RPC handle descriptor.
- *
- * Linked list of RPC handles.
+ * Get internal controller reference from RPC reference.
  */
-struct rpc_list
-{
-    struct rpc_list*    next;               // Pointer to the next in list
-    struct rpc_handle   handle;             // Actual handle
-};
+//const nvm_ctrl_t* _nvm_ctrl_from_aq_ref(const struct nvm_admin_reference*);
 
 
 
 /*
- * Initialize a RPC handle descriptor.
- * Open descriptor and create local data interrupt.
+ * Allocate a reference wrapper and increase controller reference.
  */
-int _nvm_rpc_handle_init(struct rpc_handle* handle, uint32_t adapter);
+int _nvm_ref_get(nvm_aq_ref* handle, const nvm_ctrl_t* ctrl);
 
 
 
 /*
- * Destroy an RPC handle descriptor.
- * Destroy local data interrupt and close descriptor.
+ * Free reference wrapper and decrease controller reference.
  */
-void _nvm_rpc_handle_free(struct rpc_handle* handle);
+void _nvm_ref_put(nvm_aq_ref ref);
 
 
 
 /*
- * Initialize a remote RPC reference.
- * Open descriptor and connect to remote data interrupt.
+ * Insert binding handle to server's list of handles.
+ * If key is already found, this function will fail.
  */
-int _nvm_rpc_ref_init(struct rpc_reference* ref, uint32_t node_id, uint32_t intr_no, uint32_t adapter);
+int _nvm_rpc_handle_insert(nvm_aq_ref ref, uint32_t key, void* data, rpc_deleter_t release);
 
 
 
 /*
- * Destroy RPC reference.
- * Disconnect from remote data interrupt and close descriptor.
+ * Remove local binding handle.
+ * This function will call the release callback.
  */
-void _nvm_rpc_ref_free(struct rpc_reference* ref);
+void _nvm_rpc_handle_remove(nvm_aq_ref ref, uint32_t key);
 
 
 
 /*
- * Trigger remote interrupt with data.
+ * Bind reference to remote handle.
  */
-int _nvm_rpc_ref_send(struct rpc_reference* ref, void* data, size_t length);
-
-
-#endif
+int _nvm_rpc_bind(nvm_aq_ref ref, void* data, rpc_deleter_t deleter, rpc_stub_t stub);
 
 
 
 /*
- * Execute an NVM admin command using a local manager.
+ * Execute a local admin command.
  */
-int _nvm_rpc_local(nvm_manager_t mngr, const struct rpc_cmd* cmd, struct rpc_cpl* cpl);
+int _nvm_local_admin(nvm_aq_ref ref, const nvm_cmd_t* cmd, nvm_cpl_t* cpl);
+
 
 
 #endif /* __NVM_INTERNAL_RPC_H__ */

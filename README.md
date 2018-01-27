@@ -1,7 +1,5 @@
-libdisnvme = Dolphin + Nvidia CUDA + NVM Express
+libnvm: A library for building userspace NVM Express drivers
 ==============================================================================
-Build custom userspace NVM Express drivers with CUDA support.
-
 This library is intended to allow userspace programs to control and manage 
 NVM Express (NVMe) disk controllers through an easy-to-use API. The motivation 
 is to provide a userspace library your CUDA applications and other programs 
@@ -95,11 +93,11 @@ $ make unload   # unloads the kernel module
 ```
 
 You want to unload the default nvme driver for the NVMe disk, and bind 
-the disnvme driver to it (replace `05:00.0` with disk BDF):
+the disnvm driver to it (replace `05:00.0` with disk BDF):
 ```
 $ echo -n "0000:05:00.0" > /sys/bus/pci/devices/0000\:05\:00.0/driver/unbind
-$ echo -n "0000:05:00.0" > /sys/bus/pci/drivers/disnvme/bind
+$ echo -n "0000:05:00.0" > /sys/bus/pci/drivers/disnvm/bind
 ```
 
-After doing this, the file `/dev/disnvme0` should show up, representing the
+After doing this, the file `/dev/disnvm0` should show up, representing the
 disk's BAR0.

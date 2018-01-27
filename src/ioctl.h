@@ -4,10 +4,8 @@
 #include <linux/types.h>
 #include <asm/ioctl.h>
 
-struct nvm_controller;
-
-
 #define NVM_IOCTL_TYPE          0x80
+
 
 
 /* Memory map request */
@@ -30,13 +28,6 @@ enum nvm_ioctl_type
     NVM_UNMAP_MEMORY            = _IOW(NVM_IOCTL_TYPE, 3, uint64_t)
 };
 
-
-#ifndef __KERNEL__
-/*
- * Get the IOCTL file descriptor from the controller reference.
- */
-int _nvm_ioctl_fd_from_ctrl(const struct nvm_controller* ctrl);
-#endif
 
 
 #endif /* __NVM_INTERNAL_IOCTL_H__ */

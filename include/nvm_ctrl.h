@@ -1,5 +1,5 @@
-#ifndef __DIS_NVM_CTRL_H__
-#define __DIS_NVM_CTRL_H__
+#ifndef __NVM_CTRL_H__
+#define __NVM_CTRL_H__
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -8,47 +8,53 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-#define NVM_CTRL_MEM_MINSIZE   0x2000
-
-
-/* 
- * Initialize controller reference.
- *
- * Read from PCI device registers and initialize controller reference.
- *
- * Note: ctrl_mem must be at least NVM_CTRL_MEM_MINSIZE large and mapped
- *       as IO memory. See arguments for mmap() for more info.
- *
- * Note: This function should only be called directly if SISCI is not available,
- *       otherwise it is called implicitly.
- */
-int nvm_ctrl_init_userspace(nvm_ctrl_t* ctrl, volatile void* ctrl_mem, size_t ctrl_mem_size);
-
-
-/*
- * Initialize controller reference.
- *
- * Read from device registers and initialize controller reference.
- */
-int nvm_ctrl_init(nvm_ctrl_t* ctrl, uint64_t dev_id);
-
-
 #ifdef __DIS_CLUSTER__
-
-/* 
- * Initialize controller reference.
- *
- * Read from device registers and initialize controller reference.
- */
-int nvm_dis_ctrl_init(nvm_ctrl_t* ctrl, uint64_t smartio_dev_id, uint32_t dis_adapter);
-
+#include <sisci_types.h>
 #endif
 
 
-/*
- * Release controller reference.
+
+/* 
+ * Minimum size of mapped controller memory.
  */
-void nvm_ctrl_free(nvm_ctrl_t ctrl);
+#define NVM_CTRL_MEM_MINSIZE                        0x2000
+
+
+
+/*
+ * Initialize NVM controller handle.
+ *
+ * Read from controller registers and initialize controller handle. 
+ * This function should be used when using the kernel module or to manually
+ * read from sysfs.
+ *
+ * Note: fd must be opened with O_RDWR and O_NONBLOCK
+ */
+int nvm_ctrl_init(nvm_ctrl_t** ctrl, int fd);
+
+
+
+/* 
+ * Initialize NVM controller handle.
+ *
+ * Read from controller registers and initialize the controller handle using
+ * a memory-mapped pointer to the PCI device BAR.
+ *
+ * This function should be used when neither SmartIO nor the disnvme kernel
+ * module are used.
+ *
+ * Note: ctrl_mem must be at least NVM_CTRL_MEM_MINSIZE large and mapped
+ *       as IO memory. See arguments for mmap() for more info.
+ */
+int nvm_raw_ctrl_init(nvm_ctrl_t** ctrl, volatile void* mm_ptr, size_t mm_size);
+
+
+
+/*
+ * Release controller handle.
+ */
+void nvm_ctrl_free(nvm_ctrl_t* ctrl);
+
 
 
 /* 
@@ -57,14 +63,29 @@ void nvm_ctrl_free(nvm_ctrl_t ctrl);
  * The queue memory must be memset to zero and be exactly one page size large.
  * IO addresses must align to the controller page size. 
  *
- * Note: The controller must be unbound from any driver first.
+ * Note: The controller must be unbound from any driver before attempting to
+ *       reset the controller.
  *
- * Note: This function is implicitly called by the controller manager.
+ * Note: This function is implicitly called by the controller manager, so it
+ *       should not be necessary to call it directly.
  */
-int nvm_ctrl_reset(nvm_ctrl_t ctrl, uint64_t acq_ioaddr, uint64_t asq_ioaddr);
+int nvm_raw_ctrl_reset(const nvm_ctrl_t* ctrl, uint64_t acq_ioaddr, uint64_t asq_ioaddr);
+
+
+
+#ifdef __DIS_CLUSTER__
+/* 
+ * Initialize NVM controller handle.
+ *
+ * Read from device registers and initialize controller handle. 
+ * This function should be used when SmartIO is being used.
+ */
+int nvm_dis_ctrl_init(nvm_ctrl_t** ctrl, uint64_t smartio_dev_id, uint32_t dis_adapter);
+#endif
+
 
 
 #ifdef __cplusplus
 }
 #endif
-#endif /* __DIS_NVM_CTRL_H__ */
+#endif /* __NVM_CTRL_H__ */

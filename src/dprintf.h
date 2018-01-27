@@ -1,11 +1,12 @@
-#ifndef __DIS_NVM_INTERNAL_DPRINTF_H__
-#define __DIS_NVM_INTERNAL_DPRINTF_H__
+#ifndef __NVM_INTERNAL_DPRINTF_H__
+#define __NVM_INTERNAL_DPRINTF_H__
 
 #ifndef NDEBUG
 
+#include <nvm_util.h>
+#include <nvm_error.h>
 #include <stdio.h>
 #include <stdarg.h>
-
 
 /* Debug printf */
 static void _nvm_dprintf(const char* func, const char* format, ...)
@@ -17,14 +18,25 @@ static void _nvm_dprintf(const char* func, const char* format, ...)
     va_end(args);
 }
 
+#define dprintf(...)            _nvm_dprintf(__func__, __VA_ARGS__)
 
-#define dprintf(...)        _nvm_dprintf(__func__, __VA_ARGS__)
+#define _nvm_strerror(status)   nvm_strerror(status)
 
 #endif /* ! NDEBUG */
+
+
 
 /* If no debug print, just swallow message */
 #ifndef dprintf
 #define dprintf(...)
 #endif
 
-#endif /* __DIS_NVM_INTERNAL_DPRINTF_H__ */
+
+
+/* If no debug print, don't lookup completions */
+#ifndef _nvm_strerror
+#define _nvm_strerror(status)
+#endif
+
+
+#endif /* __NVM_INTERNAL_DPRINTF_H__ */
