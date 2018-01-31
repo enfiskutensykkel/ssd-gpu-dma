@@ -178,6 +178,13 @@ static void verify(const Controller& ctrl, const QueueList& queues, const Buffer
         fprintf(stderr, "WARNING: Verification file differs in size!\n");
     }
 
+    void* bufferPtr = buffer->vaddr;
+    if (settings.cudaDevice != -1)
+    {
+        cudaHostAlloc(&bufferPtr, fileSize, cudaHostAllocDefault);
+        cudaMemcpy(bufferPtr, buffer->vaddr, actualSize, cudaMemcpyDeviceToHost);
+    }
+
     switch (settings.pattern)
     {
         case AccessPattern::SEQUENTIAL:
@@ -185,29 +192,46 @@ static void verify(const Controller& ctrl, const QueueList& queues, const Buffer
             {
                 const auto& start = *queue->transfers.begin();
 
-                if (memcmp(ptr, NVM_DMA_OFFSET(buffer, start.startPage), actualSize) != 0)
+                //if (memcmp(ptr, NVM_DMA_OFFSET(buffer, start.startPage), actualSize) != 0)
+                if (memcmp(ptr, NVM_PTR_OFFSET(bufferPtr, buffer->page_size, start.startPage), actualSize) != 0)
                 {
                     free(ptr);
+                    if (settings.cudaDevice != -1)
+                    {
+                        cudaFree(bufferPtr);
+                    }
                     throw runtime_error("File differs!");
                 }
             }
             break;
 
         case AccessPattern::LINEAR:
-            if (memcmp(ptr, buffer->vaddr, actualSize) != 0)
+            if (memcmp(ptr, bufferPtr, actualSize) != 0)
             {
                 free(ptr);
+                if (settings.cudaDevice != -1)
+                {
+                    cudaFree(bufferPtr);
+                }
                 throw runtime_error("File differs!");
             }
             break;
 
         case AccessPattern::RANDOM:
             free(ptr);
+            if (settings.cudaDevice != -1)
+            {
+                cudaFree(bufferPtr);
+            }
             throw runtime_error("Unable to verify random blocks!");
             break;
     }
 
     free(ptr);
+    if (settings.cudaDevice != -1)
+    {
+        cudaFree(bufferPtr);
+    }
 }
 
 
@@ -375,6 +399,7 @@ static void measure(QueuePtr queue, const BufferPtr buffer, Times* times, const 
 }
 
 
+
 static double percentile(const std::vector<double>& values, double p)
 {
     double index = ceil(p * values.size());
@@ -441,15 +466,30 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
 
 static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Settings& settings, size_t blockSize)
 {
-    Times times[queues.size()];
+    std::vector<Times> times;
     thread threads[queues.size()];
 
-    memset(buffer->vaddr, 0x00, buffer->page_size * buffer->n_ioaddrs);
+    if (settings.cudaDevice == -1)
+    {
+        memset(buffer->vaddr, 0x00, buffer->page_size * buffer->n_ioaddrs);
+    }
+    else
+    {
+        cudaMemset(buffer->vaddr, 0x00, buffer->page_size * buffer->n_ioaddrs);
+    }
+
     Barrier barrier(queues.size());
 
     for (size_t i = 0; i < queues.size(); ++i)
     {
-        threads[i] = thread(measure, queues[i], buffer, &times[i], settings, &barrier);
+        Times t;
+        times.push_back(t);
+        QueuePtr q = queues[i];
+
+        //threads[i] = thread(measure, &queues[i], &buffer, &times[i], &settings, &barrier);
+        threads[i] = thread([&q, &buffer, &t, &settings, &barrier] {
+            measure(q, buffer, &t, settings, &barrier);
+        });
     }
 
     fprintf(stderr, "Running benchmark...\n");

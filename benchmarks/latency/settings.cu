@@ -174,6 +174,7 @@ Settings::Settings()
     filename = nullptr;
     write = false;
     remote = true;
+    stats = false;
 }
 
 

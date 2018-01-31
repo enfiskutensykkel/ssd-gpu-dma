@@ -6,4 +6,4 @@ find_package (Threads REQUIRED)
 
 find_package (CUDA 8.0 REQUIRED)
 
-make_sisci_benchmark (latency-benchmark latency-bench "main.cc;settings.cu;buffer.cu;ctrl.cc;queue.cc;barrier.cc;transfer.cc")
+make_sisci_benchmark (latency-benchmark latency-bench "main.cu;settings.cu;buffer.cu;ctrl.cc;queue.cc;barrier.cc;transfer.cc")
