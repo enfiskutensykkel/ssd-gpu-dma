@@ -4,9 +4,13 @@
 #include <nvm_types.h>
 #include <stdint.h>
 
+#ifndef __CUDACC__
+#define __device__
+#define __host__
+#endif
 
 /* Convenience function for creating a bit mask */
-static inline
+static inline __device__ __host__
 uint64_t _nvm_bitmask(int hi, int lo)
 {
     uint64_t mask = 0;
