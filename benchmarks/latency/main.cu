@@ -224,7 +224,6 @@ static void verify(const Controller& ctrl, const QueueList& queues, const Buffer
                 cudaFree(bufferPtr);
             }
             throw runtime_error("Unable to verify random blocks!");
-            break;
     }
 
     free(ptr);
@@ -369,8 +368,7 @@ static void flush(QueuePtr& queue, uint32_t ns)
 
     nvm_sq_submit(&queue->sq);
 
-    nvm_cpl_t* cpl;
-    while ((cpl = nvm_cq_dequeue(&queue->cq)) == nullptr)
+    while (nvm_cq_dequeue(&queue->cq) == nullptr)
     {
         std::this_thread::yield();
     }
@@ -466,7 +464,7 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
 
 static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Settings& settings, size_t blockSize)
 {
-    std::vector<Times> times;
+    Times times[queues.size()];
     thread threads[queues.size()];
 
     if (settings.cudaDevice == -1)
@@ -482,13 +480,12 @@ static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Se
 
     for (size_t i = 0; i < queues.size(); ++i)
     {
-        Times t;
-        times.push_back(t);
+        Times* t = &times[i];
         QueuePtr q = queues[i];
 
         //threads[i] = thread(measure, &queues[i], &buffer, &times[i], &settings, &barrier);
-        threads[i] = thread([&q, &buffer, &t, &settings, &barrier] {
-            measure(q, buffer, &t, settings, &barrier);
+        threads[i] = thread([&q, &buffer, t, &settings, &barrier] {
+            measure(q, buffer, t, settings, &barrier);
         });
     }
 
