@@ -25,8 +25,23 @@ from Dolphin Interconnect Solutions, which allows the programmer to set up
 arbitrary configurations of devices and NVMe disks _anywhere_ in a PCIe
 cluster, achieving minimal latency in the I/O path.
 
+
+Outline
+------------------------------------------------------------------------------
 This README document is organised as follows:
-  * The [Quick start](#quick-start) section provides 
+
+  * The [Quick start](#quick-start) section provides a quick overview of
+    build requirements and build steps.
+
+  * [Technical overview](#technical-overview) goes a bit into detail about
+    the technical aspects of NVMe and how this library works.
+
+  * [The API](#the-api) section provides an structural overview of the
+    library.
+
+  * The [Build steps](#build-steps) section goes somewhat more into details
+    about the different configurations the API supports.
+
 
 Quick start
 ------------------------------------------------------------------------------
@@ -188,22 +203,8 @@ Note that in this configuration, reads actually have lower latency for the
 remote run than for the local run.
 
 
-Technical Overview
-------------------------------------------------------------------------------
 
-### Non-Volatile Memory Express ###
-
-
-#### Queue pairs and doorbells
-
-#### Physical Region Pages
-
-### Nvidia GPUDirect ###
-
-### PCIe NTBs and Dolphin SmartIO ###
-
-
-Library
+Technical overview
 ------------------------------------------------------------------------------
 `libnvm` is a userspace library implemented in C for writing custom storage 
 applications and/or custom NVMe drivers. By exploiting the memory addressing 
@@ -223,67 +224,92 @@ CPU architectures, we are able to provide a lock-less interface to the disk
 which can be shared by multiple process instances, even running on _separate_
 machines(!).
 
-### Header file description ###
+### Non-Volatile Memory Express ###
 
 
-  * `nvm_types.h` contains type definitions for the most commonly
-    used types. The most interesting types are:
-    	
-	- `nvm_ctrl_t`: This is the controller reference type.
-	  Holds basic information about a controller and a memory
-	  map of its doorbell registers.
+#### Queue pairs and doorbells
 
-	- `nvm_dma_t`: DMA descriptor. This is a convenience type
-	  for describing memory regions that are mapped for a
-          controller.
+#### Physical Region Pages
 
-	- `nvm_queue_t`: Queue descriptor. Used to keep state about
-	  I/O queues. Note that the same type is used to represent
-	  submission queues (SQs) and completion queues (CQs).
+### Nvidia GPUDirect ###
 
-	- `nvm_cmd_t`: Definition of an NVM IO command (SQ entry).
+### PCIe NTBs and Dolphin SmartIO ###
 
-	- `nvm_cpl_t`: Definition of an NVM IO completion (CQ entry).
 
-	- `nvm_aq_ref`: This is a reference to the controller's admin 
-	  queue-pair. Used for RPC-like calls to the process that "owns"
-	  the admin queue-pair.
+### What `libnvm` is ###
 
-  * `nvm_ctrl.h` contains functions for creating and releasing
-    a controller reference. It also contains functions for resetting a
-    controller.
+### What `libnvm` is'nt ###
 
-  * `nvm_dma.h` has helper functions for creating DMA buffer descriptors
-    aligned to controller pages. It also has functions for creating mappings
-    to memory for the controller.
- 
-  * `nvm_aq.h` contains the necessary functions for setting up an admin
-    queue-pair and creating a reference to this.
-    
-  * `nvm_rpc.h` contains functions for binding an admin queue-pair reference
-    to the actual (remote) admin queue-pair.
 
-  * `nvm_queue.h` consists of "header-only" functions for enqueuing and
-    submitting I/O commands as well as polling for completions.
 
-  * `nvm_cmd.h` contains helper functions for building NVM IO commands.
+The API
+------------------------------------------------------------------------------
 
-  * `nvm_admin.h` consists of a series of convenience functions for common
-    admin commands, such as reserving IO queues and retrieving controller
-    and namespace information.
+### Types ###
 
-  * `nvm_util.h` is a bunch of convenience macros.
+* `nvm_ctrl_t`: This is the controller reference type.
+  Holds basic information about a controller and a memory
+  map of its doorbell registers.
 
-  * `nvm_error.h` deals with packing and unpacking error information.
-    Also contains a function similar to `strerror()` to retrieve 
-    a human readable error description.
+* `nvm_dma_t`: DMA descriptor. This is a convenience type
+  for describing memory regions that are mapped for a
+  controller.
+
+* `nvm_queue_t`: Queue descriptor. Used to keep state about
+  I/O queues. Note that the same type is used to represent
+  submission queues (SQs) and completion queues (CQs).
+
+* `nvm_cmd_t`: Definition of an NVM IO command (SQ entry).
+
+* `nvm_cpl_t`: Definition of an NVM IO completion (CQ entry).
+
+* `nvm_aq_ref`: This is a reference to the controller's admin 
+  queue-pair. Used for RPC-like calls to the process that "owns"
+  the admin queue-pair.
+
+
+### Header files ###
+
+
+* `nvm_types.h` contains type definitions for the most commonly
+used types. The most interesting types are:
+
+* `nvm_ctrl.h` contains functions for creating and releasing
+a controller reference. It also contains functions for resetting a
+controller.
+
+* `nvm_dma.h` has helper functions for creating DMA buffer descriptors
+aligned to controller pages. It also has functions for creating mappings
+to memory for the controller.
+
+* `nvm_aq.h` contains the necessary functions for setting up an admin
+queue-pair and creating a reference to this.
+
+* `nvm_rpc.h` contains functions for binding an admin queue-pair reference
+to the actual (remote) admin queue-pair.
+
+* `nvm_queue.h` consists of "header-only" functions for enqueuing and
+submitting I/O commands as well as polling for completions.
+
+* `nvm_cmd.h` contains helper functions for building NVM IO commands.
+
+* `nvm_admin.h` consists of a series of convenience functions for common
+admin commands, such as reserving IO queues and retrieving controller
+and namespace information.
+
+* `nvm_util.h` is a bunch of convenience macros.
+
+* `nvm_error.h` deals with packing and unpacking error information.
+Also contains a function similar to `strerror()` to retrieve 
+a human readable error description.
 
 
 ### Typical mode of operation ###
 
 Please refer to section 7 of the NVM Express specification.
 
-### Example programs ###
 
-### Benchmarks and workloads ###
+
+Build steps
+------------------------------------------------------------------------------
 
