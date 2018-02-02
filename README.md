@@ -1,7 +1,7 @@
 libnvm: An API for building userspace NVMe drivers and storage applications
 ===============================================================================
 This library is intended to allow userspace programs to control and manage 
-NVM Express (NVMe) [NVMe1.3] disk controllers through an easy-to-use API. 
+NVM Express ([NVMe]) disk controllers through an easy-to-use API. 
 The motivation is to provide a userspace library your CUDA applications and 
 other programs can easily link against, in order to build custom drivers and 
 high-performance storage applications.
@@ -40,9 +40,9 @@ The above is sufficient for building the userspace library and most of the
 example programs.
 
 For linking with CUDA programs, you need the following:
-* An Nvidia GPU capable of GPUDirect RDMA and GPUDirect Async [GPUDirect].
+* An Nvidia GPU capable of [GPUDirect RDMA] and [GPUDirect Async]
   This means either a Quadro or Tesla workstation model using the Kepler 
-  architecture or newer [GPUDirect Async].
+  architecture or newer.
 * An architecture that supports PCIe peer-to-peer, for example the Intel Xeon
   family of processors.
 * The _FindCUDA_ package for CMake.
@@ -115,13 +115,15 @@ Max number of namespaces: 1
 If you are using SISCI SmartIO, you need to use the SmartIO utility program to
 configure the disk for device sharing.
 ```
-$ smartio_tool add 05:00.0
-$ smartio_tool available 05:00.0
-$ smartio_tool connect <local node id>
-$ smartio_tool list
+$ /opt/DIS/sbin/smartio_tool add 05:00.0
+$ /opt/DIS/sbin/smartio_tool available 05:00.0
+$ /opt/DIS/sbin/dis_config -gn
+Card 1 - NodeId:  8       # use the local node id
+$ /opt/DIS/sbin/smartio_tool connect 8  # the local node id
+$ /opt/DIS/sbin/smartio_tool list       # find device id
 80000: Non-Volatile memory controller Intel Corporation Device f1a5 [available]
 $ make libnvm && make identify
-$ ./bin/nvm-identify --ctrl=0x80000
+$ ./bin/nvm-identify --ctrl=0x80000  # use the device id
 Resetting controller and setting up admin queues...
 ------------- Controller information -------------
 PCI Vendor ID           : 86 80
@@ -139,6 +141,36 @@ Current number of CQs   : 8
 Current number of SQs   : 8
 --------------------------------------------------
 ```
+
+
+### Using the libnvm helper kernel module ###
+If you are not using SISCI SmartIO, you must use the project's kernel module
+in order to map GPU memory for the NVMe disk.
+Currently the only version of Linux tested is Linux 4.11.0. Other versions
+may work, but you probably have to change the call to `get_user_pages()`
+as well as any calls to the DMA API.
+
+Repeating the requirements from the section above, you should make sure that 
+you use a processor that supports [PCIe peer-to-peer], and that you 
+have a GPU with [GPUDirect] support. Remember to disable the IOMMU.
+
+Loading and unloading the driver is done as follows:
+```
+$ cd build/module
+$ make
+$ make load     # will insert the kernel module
+$ make unload   # unloads the kernel module
+```
+
+You want to unload the default nvme driver for the NVMe disk, and bind 
+the helper driver to it:
+```
+$ echo -n "0000:05:00.0" > /sys/bus/pci/devices/0000\:05\:00.0/driver/unbind
+$ echo -n "0000:05:00.0" > /sys/bus/pci/drivers/disnvm/bind
+```
+
+After doing this, the file `/dev/libnvm0` should show up, representing the
+disk's BAR0.
 
 
 
@@ -193,96 +225,23 @@ set for admin commands.
 
 
 
-Quick start
+
+
+
+
+
+Nvidia GPUDirect
 ------------------------------------------------------------------------------
-You need a PCIe-attached NVMe disk (version 1.0 or newer). If the disk 
-contains any data, it is important that you back this up before proceeding. 
-It is also highly recommended that you read the NVMe specification, which can 
-be found at the following link: 
-<http://nvmexpress.org/resources/specifications/>
+
+Programs intended for running on GPUs or other computing accelerators that 
+support Remote DMA (RDMA), can use this library to enable direct disk access
+from the accelerators. Currently, the library supports setting up mappings
+for GPUDirect-capable Nvidia GPUs. 
 
 
-### Requirements and prerequisites
-Make sure that the following is installed on your system:
-  * Linux kernel version 4.11.0-14 or newer
-  * CMake 3.1 or newer.
-  * GCC version 5.4.0 or newer (compiler must support GNU99 for library and 
-    examples, and C++11 for benchmarks and CUDA programs).
-  * CUDA 8.0 or newer
-  * Dolphin SISCI API 5.5.0 or newer (optional)
 
-If you plan on using CUDA, you must use the kernel module or Dolphin SmartIO.
-See the sections on [using the kernel module](#using-kernel-module) or 
-[using Dolphin SmartIO](#using-dolphin-smartio).
-
-
-### How to build ###
-Clone repository and enter project root directory.
-
-
-### Checking that it works ###
-
-
-### Using kernel module ###
-Using the kernel module is not required, unless you plan on using the 
-library with CUDA support.
-Currently the only version of Linux supported is Linux 4.11.0. Older version
-may work, but you probably have to change the call to `get_user_pages()`
-and the DMA API.
-
-You should make sure that you use a processor that supports PCIe peer-to-peer,
-for example Intel Xeon, and that you have a GPU with GPUDirect support (Quadro
-or Tesla workstation GPUs). For best support, check that your GPU is Pascal 
-architecture or newer. Currently, IOMMU support is broken, so disable the
-IOMMU. 
-
-Loading and unloading the driver is done as follows:
-```
-$ cd build/module
-$ make
-$ make load     # will insert the kernel module
-$ make unload   # unloads the kernel module
-```
-
-You want to unload the default nvme driver for the NVMe disk, and bind 
-the disnvm driver to it (replace `05:00.0` with disk BDF):
-```
-$ echo -n "0000:05:00.0" > /sys/bus/pci/devices/0000\:05\:00.0/driver/unbind
-$ echo -n "0000:05:00.0" > /sys/bus/pci/drivers/disnvm/bind
-```
-
-After doing this, the file `/dev/disnvm0` should show up, representing the
-disk's BAR0.
-
-
-### Using Dolphin SmartIO ###
-If you have an NTB adapter from Dolphin Interconnect Solutions and are 
-familiar with their [SISCI API]
-it is possible to use _libnvm_ in conjunction with the SmartIO extension to SISCI.
-This provides the user with a flexible method of concurrently sharing one or more
-NVMe drives in a PCIe cluster. When using SmartIO, IOMMU is supported but may 
-affect PCIe peer-to-peer transfers.
-
-If you have both CUDA and at least SISCI 5.5.0 with SmartIO installed, you can
-verify that this works by running the latency benchmark test. You can even run
-it on a separate host. Assuming the disk resides on node 4 and is connected to
-node 8, do the following on node 4:
-```
-$ smartio_tool add 05:00.0        # adds the NVMe drive to SmartIO resource pool
-$ smartio_tool connect 4          # if you want to run it on the local node as well
-$ smartio_tool connect 8          # allow node 8 to borrow devices
-$ smartio_tool available 05:00.0  # indicates that the device is available
-```
-
-Then do the following on node 8.
-```
-$ smartio_tool list		  # should show the NVMe disk
-80000: Non-Volatile memory controller Intel Corporation Device f1a5 [available]
-$ mkdir -p build; cd build
-$ make libnvm
-$ make latency-benchmark
-```
-
+PCIe NTBs and Dolphin SmartIO
+------------------------------------------------------------------------------
 Now run the latency benchmark with the specified controller and for 1000 blocks:
 ```
 $ ./bin/nvm-latency-bench --ctrl=0x80000 --blocks=1000 --pattern=sequential
@@ -326,20 +285,6 @@ OK!
 Note that in this configuration, reads actually have lower latency for the 
 remote run than for the local run.
 
-
-
-Nvidia GPUDirect
-------------------------------------------------------------------------------
-
-Programs intended for running on GPUs or other computing accelerators that 
-support Remote DMA (RDMA), can use this library to enable direct disk access
-from the accelerators. Currently, the library supports setting up mappings
-for GPUDirect-capable Nvidia GPUs. 
-
-
-
-PCIe NTBs and Dolphin SmartIO
-------------------------------------------------------------------------------
 
 
 
@@ -443,14 +388,14 @@ a human readable error description.
 Please refer to section 7 of the NVM Express specification.
 
 
-References
-------------------------------------------------------------------------------
-[NVMe1.3]: http://nvmexpress.org/wp-content/uploads/NVM-Express-1_3a-20171024_ratified.pdf
+
+[NVMe]: http://nvmexpress.org/wp-content/uploads/NVM-Express-1_3a-20171024_ratified.pdf
 [SmartIO]: http://dolphinics.com/products/pcie_smart_io_device_lending.html
 [SISCI]: http://ww.dolphinics.no/download/ci/docs-master/
-[PCIe P2P]: https://www.dolphinics.com/download/WHITEPAPERS/Dolphin_Express_IX_Peer_to_Peer_whitepaper.pdf
+[PCIe peer-to-peer]: https://www.dolphinics.com/download/WHITEPAPERS/Dolphin_Express_IX_Peer_to_Peer_whitepaper.pdf
 [Device Lending]: http://dolphinics.com/download/WHITEPAPERS/PCI_Express_device_lending_may_2016.pdf
 [SPDK]: http://www.spdk.io/
 [3D XPoint]: https://en.wikipedia.org/wiki/3D_XPoint
-[GPUDirect]: http://docs.nvidia.com/cuda/gpudirect-rdma/index.html
+[GPUDirect]: https://developer.nvidia.com/gpudirect
+[GPUDirect RDMA]: http://docs.nvidia.com/cuda/gpudirect-rdma/index.html
 [GPUDirect Async]: http://on-demand.gputechconf.com/gtc/2016/presentation/s6264-davide-rossetti-GPUDirect.pdf
