@@ -1,10 +1,10 @@
-libnvm: A library for building userspace NVM Express drivers
+libnvm: A library for building NVM Express drivers and storage applications
 ==============================================================================
 This library is intended to allow userspace programs to control and manage 
 NVM Express (NVMe) disk controllers through an easy-to-use API. The motivation 
 is to provide a userspace library your CUDA applications and other programs 
-can easily link against, in order to build custom distributed drivers for 
-NVMe disk drives. 
+can easily link against, in order to build custom drivers and high-performance 
+storage applications.
 
 The library provides simple semantics and functions for mapping userspace
 buffers and device memory, providing a simple yet low-level mechanism suitable
@@ -25,6 +25,8 @@ from Dolphin Interconnect Solutions, which allows the programmer to set up
 arbitrary configurations of devices and NVMe disks _anywhere_ in a PCIe
 cluster, achieving minimal latency in the I/O path.
 
+This README document is organised as follows:
+  * The [Quick start](#quick-start) section provides 
 
 Quick start
 ------------------------------------------------------------------------------
@@ -182,13 +184,26 @@ Queue #01 total-blocks=1000000 count=1000 min=536.117 avg=541.190 max=549.240
 OK!
 ```
 
-In this configuration, reads actually have lower latency for the remote run
-than the local run, which is due to a switch in the topology allowing the
-disk to do PCIe peer-to-peer across the NTB.
+Note that in this configuration, reads actually have lower latency for the 
+remote run than for the local run.
 
 
+Technical Overview
+------------------------------------------------------------------------------
 
-Overview
+### Non-Volatile Memory Express ###
+
+
+#### Queue pairs and doorbells
+
+#### Physical Region Pages
+
+### Nvidia GPUDirect ###
+
+### PCIe NTBs and Dolphin SmartIO ###
+
+
+Library
 ------------------------------------------------------------------------------
 `libnvm` is a userspace library implemented in C for writing custom storage 
 applications and/or custom NVMe drivers. By exploiting the memory addressing 
@@ -199,21 +214,76 @@ enabling peer-to-peer I/O between devices and storage in architectures that
 support it.
 
 The library is in essence similar to [SPDK](http://www.spdk.io/), in that it
-moves driver code to user-space (which avoids syscalls and enables zero-copy
-access from the application) and relies on polling hardware rather than being
-interrupt driven (this eliminates both total latency and latency variance).
+moves driver code to user-space and relies on hardware polling rather than 
+being interrupt driven. This means that the application can avoid using 
+syscalls and has zero-copy data access, as well as getting predictable and
+extremely low latency for I/O operations.
 As NVMe is designed in a way that reflects the inherent parallelism in modern
 CPU architectures, we are able to provide a lock-less interface to the disk
 which can be shared by multiple process instances, even running on _separate_
 machines(!).
 
+### Header file description ###
 
-### Non-Volatile Memory Express ###
 
-### Dolphin SmartIO ###
+  * `nvm_types.h` contains type definitions for the most commonly
+    used types. The most interesting types are:
+    	
+	- `nvm_ctrl_t`: This is the controller reference type.
+	  Holds basic information about a controller and a memory
+	  map of its doorbell registers.
 
-### Header files ###
+	- `nvm_dma_t`: DMA descriptor. This is a convenience type
+	  for describing memory regions that are mapped for a
+          controller.
+
+	- `nvm_queue_t`: Queue descriptor. Used to keep state about
+	  I/O queues. Note that the same type is used to represent
+	  submission queues (SQs) and completion queues (CQs).
+
+	- `nvm_cmd_t`: Definition of an NVM IO command (SQ entry).
+
+	- `nvm_cpl_t`: Definition of an NVM IO completion (CQ entry).
+
+	- `nvm_aq_ref`: This is a reference to the controller's admin 
+	  queue-pair. Used for RPC-like calls to the process that "owns"
+	  the admin queue-pair.
+
+  * `nvm_ctrl.h` contains functions for creating and releasing
+    a controller reference. It also contains functions for resetting a
+    controller.
+
+  * `nvm_dma.h` has helper functions for creating DMA buffer descriptors
+    aligned to controller pages. It also has functions for creating mappings
+    to memory for the controller.
+ 
+  * `nvm_aq.h` contains the necessary functions for setting up an admin
+    queue-pair and creating a reference to this.
+    
+  * `nvm_rpc.h` contains functions for binding an admin queue-pair reference
+    to the actual (remote) admin queue-pair.
+
+  * `nvm_queue.h` consists of "header-only" functions for enqueuing and
+    submitting I/O commands as well as polling for completions.
+
+  * `nvm_cmd.h` contains helper functions for building NVM IO commands.
+
+  * `nvm_admin.h` consists of a series of convenience functions for common
+    admin commands, such as reserving IO queues and retrieving controller
+    and namespace information.
+
+  * `nvm_util.h` is a bunch of convenience macros.
+
+  * `nvm_error.h` deals with packing and unpacking error information.
+    Also contains a function similar to `strerror()` to retrieve 
+    a human readable error description.
+
+
+### Typical mode of operation ###
+
+Please refer to section 7 of the NVM Express specification.
 
 ### Example programs ###
 
 ### Benchmarks and workloads ###
+
