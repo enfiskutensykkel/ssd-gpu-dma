@@ -4,15 +4,26 @@ This library is intended to allow userspace programs to control and manage
 NVM Express (NVMe) disk controllers through an easy-to-use API. The motivation 
 is to provide a userspace library your CUDA applications and other programs 
 can easily link against, in order to build custom distributed drivers for 
-NVMe disk drives.
+NVMe disk drives. 
 
 The library provides simple semantics and functions for mapping userspace
 buffers and device memory, providing a simple yet low-level mechanism suitable
 for controlling an NVMe disk. By mapping buffers, an NVMe drive is able to 
 access these buffers directly (DMA), greatly increasing the IO performance
 compared to accessing the drive through normal filesystem abstractions 
-provided by the Linux kernel.
+provided by the Linux kernel. This eliminates the need to context switch to
+kernel space and enables zero-copy access from userspace, greatly reducing 
+latency. 
 
+Programs intended for running on GPUs or other computing accelerators that 
+support Remote DMA (RDMA), can use this library to enable direct disk access
+from the accelerators. Currently, the library supports setting up mappings
+for GPUDirect-capable Nvidia GPUs. 
+The library also (optionally) uses the 
+[SISCI SmartIO API](http://dolphinics.com/products/pcie_smart_io_device_lending.html)
+from Dolphin Interconnect Solutions, which allows the programmer to set up
+arbitrary configurations of devices and NVMe disks _anywhere_ in a PCIe
+cluster, achieving minimal latency in the I/O path.
 
 
 Quick start
@@ -70,8 +81,7 @@ Max number of namespaces: 1
 ```
 
 
-Using kernel module
-------------------------------------------------------------------------------
+### Using kernel module ###
 Using the kernel module is not required, unless you plan on using the 
 library with CUDA support.
 Currently the only version of Linux supported is Linux 4.11.0. Older version
@@ -80,10 +90,10 @@ and the DMA API.
 
 You should make sure that you use a processor that supports PCIe peer-to-peer,
 for example Intel Xeon, and that you have a GPU with GPUDirect support (Quadro
-or Tesla workstation). For best support, check that your GPU is Pascal 
+or Tesla workstation GPUs). For best support, check that your GPU is Pascal 
 architecture or newer. Currently, IOMMU support is broken, so disable the
-IOMMU. This is done by removing `iommu=on` and `intel_iommu=on` from the `CMDLINE`
-variable in `/etc/default/grub`. 
+IOMMU. This is done by removing `iommu=on` and `intel_iommu=on` from the 
+`CMDLINE` variable in `/etc/default/grub`. 
 
 Loading and unloading the driver is done as follows:
 ```
@@ -104,8 +114,7 @@ After doing this, the file `/dev/disnvm0` should show up, representing the
 disk's BAR0.
 
 
-Dolphin SmartIO
-------------------------------------------------------------------------------
+### Dolphin SmartIO ###
 If you have an NTB adapter from Dolphin Interconnect Solutions and are 
 familiar with their [SISCI API](http://ww.dolphinics.no/download/ci/docs-master/),
 it is possible to use _libnvm_ in conjunction with the SmartIO extension to SISCI.
@@ -176,3 +185,35 @@ OK!
 In this configuration, reads actually have lower latency for the remote run
 than the local run, which is due to a switch in the topology allowing the
 disk to do PCIe peer-to-peer across the NTB.
+
+
+
+Overview
+------------------------------------------------------------------------------
+`libnvm` is a userspace library implemented in C for writing custom storage 
+applications and/or custom NVMe drivers. By exploiting the memory addressing 
+scheme in NVMe, `libnvm` is able to provide a block-level interface with 
+extremely low latency in the I/O path. In addition, with minimal driver 
+support, it is possible to set up arbitrary memory mappings to device memory, 
+enabling peer-to-peer I/O between devices and storage in architectures that 
+support it.
+
+The library is in essence similar to [SPDK](http://www.spdk.io/), in that it
+moves driver code to user-space (which avoids syscalls and enables zero-copy
+access from the application) and relies on polling hardware rather than being
+interrupt driven (this eliminates both total latency and latency variance).
+As NVMe is designed in a way that reflects the inherent parallelism in modern
+CPU architectures, we are able to provide a lock-less interface to the disk
+which can be shared by multiple process instances, even running on _separate_
+machines(!).
+
+
+### Non-Volatile Memory Express ###
+
+### Dolphin SmartIO ###
+
+### Header files ###
+
+### Example programs ###
+
+### Benchmarks and workloads ###
