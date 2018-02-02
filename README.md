@@ -1,76 +1,90 @@
-libnvm: A library for building NVM Express drivers and storage applications
-==============================================================================
+libnvm: An API for building userspace NVMe drivers and storage applications
+===============================================================================
 This library is intended to allow userspace programs to control and manage 
-NVM Express (NVMe) disk controllers through an easy-to-use API. The motivation 
-is to provide a userspace library your CUDA applications and other programs 
-can easily link against, in order to build custom drivers and high-performance 
-storage applications.
+NVM Express (NVMe) [NVMe1.3] disk controllers through an easy-to-use API. 
+The motivation is to provide a userspace library your CUDA applications and 
+other programs can easily link against, in order to build custom drivers and 
+high-performance storage applications.
 
-The library provides simple semantics and functions for mapping userspace
+The library uses simple semantics and functions for mapping userspace memory
 buffers and device memory, providing a simple yet low-level mechanism suitable
-for controlling an NVMe disk. By mapping buffers, an NVMe drive is able to 
-access these buffers directly (DMA), greatly increasing the IO performance
-compared to accessing the drive through normal filesystem abstractions 
-provided by the Linux kernel. This eliminates the need to context switch to
-kernel space and enables zero-copy access from userspace, greatly reducing 
-latency. 
+for controlling an NVMe disk and performing IO operations. By mapping user-
+space memory directly, IO performance is greatly increased compared to 
+accessing storage through normal file system abstractions provided by the
+Linux kernel.
 
-Programs intended for running on GPUs or other computing accelerators that 
-support Remote DMA (RDMA), can use this library to enable direct disk access
-from the accelerators. Currently, the library supports setting up mappings
-for GPUDirect-capable Nvidia GPUs. 
-The library also (optionally) uses the 
-[SISCI SmartIO API](http://dolphinics.com/products/pcie_smart_io_device_lending.html)
-from Dolphin Interconnect Solutions, which allows the programmer to set up
-arbitrary configurations of devices and NVMe disks _anywhere_ in a PCIe
-cluster, achieving minimal latency in the I/O path.
+The API can also be linked with applications using the SISCI SmartIO API from 
+Dolphin Interconnect Solutions. This allows the programmer to set up arbitrary
+configurations of devices and NVMe disks in a PCIe cluster, and enables 
+concurrent low-latency access to one or more NVMe disks from multiple machines 
+in the cluster.
 
-
-Outline
-------------------------------------------------------------------------------
-This README document is organised as follows:
-
-  * The [Quick start](#quick-start) section provides a quick overview of
-    build requirements and build steps.
-
-  * [Technical overview](#technical-overview) goes a bit into detail about
-    the technical aspects of NVMe and how this library works.
-
-  * [The API](#the-api) section provides an structural overview of the
-    library.
-
-  * The [Build steps](#build-steps) section goes somewhat more into details
-    about the different configurations the API supports.
 
 
 Quick start
-------------------------------------------------------------------------------
-You need a PCIe-attached NVMe disk (rev 1.0 or newer). If the disk contains 
-any data, it is important that you back this up before proceeding.
+-------------------------------------------------------------------------------
+You need a PCIe-attached or M.2 NVMe disk (not the system disk!). If the disk 
+contains any data, you should back this up before proceeding. It is also highly 
+recommended that you  read the NVMe specification first, which can be found at 
+the following URL: <http://nvmexpress.org/resources/specifications/>
 
-Make sure that the following is installed on your system:
-  * CMake 3.1 or newer.
-  * GCC version 5.4.0 or newer (compiler must support GNU99 for library and 
-    examples, and C++11 for benchmarks and CUDA programs).
-  * CUDA 8.0 or newer (optional)
-  * Dolphin SISCI API 5.5.0 or newer (optional)
 
-If you plan on using CUDA, you must use the kernel module or Dolphin SmartIO.
-See [Kernel module](#using-kernel-module) or [Dolphin SmartIO](#dolphin-smartio).
+### Prerequisites and requirements ###
+Please make sure that the following is installed on your system:
+* A relatively new Linux kernel
+* CMake 3.1 or newer.
+* GCC version 5.4.0 or newer. Compiler must support GNU extensions
+  for C99 and linking with POSIX threads is required.
 
-### How to build ###
-Clone repository and enter project root directory.
+The above is sufficient for building the userspace library and most of the 
+example programs.
+
+For linking with CUDA programs, you need the following:
+* An Nvidia GPU capable of GPUDirect RDMA and GPUDirect Async [GPUDirect].
+  This means either a Quadro or Tesla workstation model using the Kepler 
+  architecture or newer [GPUDirect Async].
+* An architecture that supports PCIe peer-to-peer, for example the Intel Xeon
+  family of processors.
+* The _FindCUDA_ package for CMake.
+* GCC version 5.4.0 or newer. Compiler must be able to compile C++11.
+* CUDA 8.0 or newer with CUDA development toolkit.
+* Kernel module symbols and headers for your Nvidia driver.
+
+For linking with SISCI API, you additionally need the Dolphin 5.5.0 software
+base (or newer) with CUDA support and SmartIO enabled. If you are _not_ using
+Dolphin software, you need to explicitly disable IOMMU as current Nvidia GPUs
+do not currently fully support it. This is done by removing `iommu=on` and 
+`intel_iommu=on` from the `CMDLINE` variable in `/etc/default/grub` and then
+reconfiguring GRUB before rebooting. If you _are_ using SmartIO, the Dolphin 
+driver stack will handle this for you and it is recommended that you leave the 
+IOMMU on for memory protection.
+
+
+### Building the project ###
+From the project root directory, do the following:
 ```
 $ mkdir -p build; cd build
-$ cmake .. -DCMAKE_BUILD_TYPE=Release
-$ make libnvme     # builds library
-$ make examples    # builds example programs
-$ cd module; make  # builds kernel module (optional)
+$ cmake .. -DCMAKE_BUILD_TYPE=Release # use =Debug for debug build
+$ make libnvm                         # builds library
+$ make examples                       # builds example programs
+$ cd module; make                     # only required if no SISCI SmartIO
 ```
 
-### Checking that it works ###
-Find out the disk's BDF using `lspci`. For this README, we assume that the
-BDF is `05:00.0`.
+If you are going to use CUDA, you also need to locate the kernel module
+directory and manually run `make`. Locations will vary on different distros
+and based on installation type, but on Ubuntu the driver source can be found 
+in `/usr/src/nvidia-<major>-<major>.<minor>` if you install CUDA through the
+`.deb.` package.
+
+The CMake configuration is _supposed to_ autodetect the location of CUDA, 
+Nvidia driver and SISCI library. CUDA is located by the _FindCUDA_ package for
+CMake, while the location of both the Nvidia driver and SISCI can be manually
+set by overriding the `NVIDIA` and `DIS` defines for CMake 
+(`cmake .. -DNVIDIA=/usr/src/...` -DDIS=/opt/DIS/`).
+
+If you have disabled the IOMMU, you can run the _identify_ example to verify
+that your build is working. Find out your disk's PCI BDF by using `lspci`.
+In our example, assume that it is `05:00.0`.
 
 First unbind the default nvme driver from the disk:
 ```
@@ -80,22 +94,133 @@ $ echo -n "0000:05:00.0" > /sys/bus/pci/devices/0000\:05\:00.0/driver/unbind
 Then run the identify sample (standing in the build directory). It should
 look something like this:
 ```
-$ bin/identify-userspace --ctrl=05:00.0
+$ make libnvm && make identify
+$ ./bin/nvm-identify-userspace --ctrl=05:00.0
 Resetting controller and setting up admin queues...
 ------------- Controller information -------------
 PCI Vendor ID           : 86 80
 PCI Subsystem Vendor ID : 86 80
-NVM Express version     : 1.0.0
+NVM Express version     : 1.2.0
 Controller page size    : 4096
-Max queue entries       : 4096
-Serial Number           : CVCQ5251008G400AGN
-Model Number            : INTEL SSDPEDMW400G4
-Firmware revision       : 8EV101H0
+Max queue entries       : 256
+Serial Number           : BTPY74400DQ5256D
+Model Number            : INTEL SSDPEKKW256G7
+Firmware revision       :  PSF121C
 Max data transfer size  : 131072
 Max outstanding commands: 0
 Max number of namespaces: 1
 --------------------------------------------------
 ```
+
+If you are using SISCI SmartIO, you need to use the SmartIO utility program to
+configure the disk for device sharing.
+```
+$ smartio_tool add 05:00.0
+$ smartio_tool available 05:00.0
+$ smartio_tool connect <local node id>
+$ smartio_tool list
+80000: Non-Volatile memory controller Intel Corporation Device f1a5 [available]
+$ make libnvm && make identify
+$ ./bin/nvm-identify --ctrl=0x80000
+Resetting controller and setting up admin queues...
+------------- Controller information -------------
+PCI Vendor ID           : 86 80
+PCI Subsystem Vendor ID : 86 80
+NVM Express version     : 1.2.0
+Controller page size    : 4096
+Max queue entries       : 256
+Serial Number           : BTPY74400DQ5256D
+Model Number            : INTEL SSDPEKKW256G7
+Firmware revision       :  PSF121C
+Max data transfer size  : 131072
+Max outstanding commands: 0
+Max number of namespaces: 1
+Current number of CQs   : 8
+Current number of SQs   : 8
+--------------------------------------------------
+```
+
+
+
+Non-Volatile Memory Express (NVMe)
+-------------------------------------------------------------------------------
+NVMe [NVMe1.3] is a software specification for disk controllers (_drives_) that 
+provides storage on non-volatile media, for example flash memory or Intel's
+3D XPoint [3D XPoint].
+
+
+The specification is designed in a way that reflects the parallelism in modern
+CPU architectures: a controller can support up to 2^16 - 1 IO queues with up
+to 64K outstanding commands per queue. It does not require any register reads
+in the command or completion path, and it requires a maximum of a 32-bit 
+register write in the command submission path to a dedicated register.
+
+The specification assumes an underlying bus interface that conforms to PCIe.
+
+### NVM Namespaces 
+A namespace is a quantity of non-volatile memory that may be formatted into
+logical blocks. A NVMe controller may support multiple namespaces. 
+Many controllers may attach the same namespace. In many ways, a namespace
+can be regarded as an abstraction of traditional disk partitions.
+
+
+### Queue pairs and doorbells 
+NVMe is based on a paired submission and completiong queue mechanism.
+The software will enqueue commands on the submission queue (SQ), and
+completions are posted by the controller to the associated completion
+queue (CQ). Multiple SQs may use the same CQ, and queues are allocated
+in system memory. In other words, there are an N:M mapping of SQs and CQs.
+
+Typically the number of command queues are based on the number of CPU cores.
+For example, on a four core processor, there may be a queue pair per core to
+avoid locking and ensure that commands are local to the appropriate 
+processors' cache. 
+
+A SQ is a ring buffer with a fixed slot size that software uses to submit
+commands for execution by the controller. After the command structure is 
+updated in memory, the software updates the appropriate SQ tail doorbell
+register with the number of commands to execute. The controller fetches
+the SQ entries in order from the SQ, but may execute them in an arbitrary
+order. Each entry in the SQ is a command. Commands are 64 bytes in size. 
+
+An admin submission queue (ASQ) and completion queue (ACQ) exists for the 
+purpose of controller management and control. There is a dedicated command
+set for admin commands.
+
+
+### Physical Region Pages and Scatter-Gather Lists 
+
+
+
+
+Quick start
+------------------------------------------------------------------------------
+You need a PCIe-attached NVMe disk (version 1.0 or newer). If the disk 
+contains any data, it is important that you back this up before proceeding. 
+It is also highly recommended that you read the NVMe specification, which can 
+be found at the following link: 
+<http://nvmexpress.org/resources/specifications/>
+
+
+### Requirements and prerequisites
+Make sure that the following is installed on your system:
+  * Linux kernel version 4.11.0-14 or newer
+  * CMake 3.1 or newer.
+  * GCC version 5.4.0 or newer (compiler must support GNU99 for library and 
+    examples, and C++11 for benchmarks and CUDA programs).
+  * CUDA 8.0 or newer
+  * Dolphin SISCI API 5.5.0 or newer (optional)
+
+If you plan on using CUDA, you must use the kernel module or Dolphin SmartIO.
+See the sections on [using the kernel module](#using-kernel-module) or 
+[using Dolphin SmartIO](#using-dolphin-smartio).
+
+
+### How to build ###
+Clone repository and enter project root directory.
+
+
+### Checking that it works ###
 
 
 ### Using kernel module ###
@@ -109,8 +234,7 @@ You should make sure that you use a processor that supports PCIe peer-to-peer,
 for example Intel Xeon, and that you have a GPU with GPUDirect support (Quadro
 or Tesla workstation GPUs). For best support, check that your GPU is Pascal 
 architecture or newer. Currently, IOMMU support is broken, so disable the
-IOMMU. This is done by removing `iommu=on` and `intel_iommu=on` from the 
-`CMDLINE` variable in `/etc/default/grub`. 
+IOMMU. 
 
 Loading and unloading the driver is done as follows:
 ```
@@ -131,9 +255,9 @@ After doing this, the file `/dev/disnvm0` should show up, representing the
 disk's BAR0.
 
 
-### Dolphin SmartIO ###
+### Using Dolphin SmartIO ###
 If you have an NTB adapter from Dolphin Interconnect Solutions and are 
-familiar with their [SISCI API](http://ww.dolphinics.no/download/ci/docs-master/),
+familiar with their [SISCI API]
 it is possible to use _libnvm_ in conjunction with the SmartIO extension to SISCI.
 This provides the user with a flexible method of concurrently sharing one or more
 NVMe drives in a PCIe cluster. When using SmartIO, IOMMU is supported but may 
@@ -204,17 +328,34 @@ remote run than for the local run.
 
 
 
-Technical overview
+Nvidia GPUDirect
+------------------------------------------------------------------------------
+
+Programs intended for running on GPUs or other computing accelerators that 
+support Remote DMA (RDMA), can use this library to enable direct disk access
+from the accelerators. Currently, the library supports setting up mappings
+for GPUDirect-capable Nvidia GPUs. 
+
+
+
+PCIe NTBs and Dolphin SmartIO
+------------------------------------------------------------------------------
+
+
+
+
+
+API overview
 ------------------------------------------------------------------------------
 `libnvm` is a userspace library implemented in C for writing custom storage 
 applications and/or custom NVMe drivers. By exploiting the memory addressing 
 scheme in NVMe, `libnvm` is able to provide a block-level interface with 
-extremely low latency in the I/O path. In addition, with minimal driver 
+extremely low latency in the IO path. In addition, with minimal driver 
 support, it is possible to set up arbitrary memory mappings to device memory, 
-enabling peer-to-peer I/O between devices and storage in architectures that 
+enabling peer-to-peer IO between devices and storage in architectures that 
 support it.
 
-The library is in essence similar to [SPDK](http://www.spdk.io/), in that it
+The library is in essence similar to [SPDK], in that it
 moves driver code to user-space and relies on hardware polling rather than 
 being interrupt driven. This means that the application can avoid using 
 syscalls and has zero-copy data access, as well as getting predictable and
@@ -224,28 +365,18 @@ CPU architectures, we are able to provide a lock-less interface to the disk
 which can be shared by multiple process instances, even running on _separate_
 machines(!).
 
-### Non-Volatile Memory Express ###
 
 
-#### Queue pairs and doorbells
+ eliminates the need to context switch to
+kernel space and enables zero-copy access from userspace, greatly reducing 
+latency. 
+	
+	
+, achieving minimal latency in the I/O path.
 
-#### Physical Region Pages
+### Scope and limitations of `libnvm`
 
-### Nvidia GPUDirect ###
-
-### PCIe NTBs and Dolphin SmartIO ###
-
-
-### What `libnvm` is ###
-
-### What `libnvm` is'nt ###
-
-
-
-The API
-------------------------------------------------------------------------------
-
-### Types ###
+### Types
 
 * `nvm_ctrl_t`: This is the controller reference type.
   Holds basic information about a controller and a memory
@@ -304,12 +435,22 @@ Also contains a function similar to `strerror()` to retrieve
 a human readable error description.
 
 
+### Kernel module ###
+
+
 ### Typical mode of operation ###
 
 Please refer to section 7 of the NVM Express specification.
 
 
-
-Build steps
+References
 ------------------------------------------------------------------------------
-
+[NVMe1.3]: http://nvmexpress.org/wp-content/uploads/NVM-Express-1_3a-20171024_ratified.pdf
+[SmartIO]: http://dolphinics.com/products/pcie_smart_io_device_lending.html
+[SISCI]: http://ww.dolphinics.no/download/ci/docs-master/
+[PCIe P2P]: https://www.dolphinics.com/download/WHITEPAPERS/Dolphin_Express_IX_Peer_to_Peer_whitepaper.pdf
+[Device Lending]: http://dolphinics.com/download/WHITEPAPERS/PCI_Express_device_lending_may_2016.pdf
+[SPDK]: http://www.spdk.io/
+[3D XPoint]: https://en.wikipedia.org/wiki/3D_XPoint
+[GPUDirect]: http://docs.nvidia.com/cuda/gpudirect-rdma/index.html
+[GPUDirect Async]: http://on-demand.gputechconf.com/gtc/2016/presentation/s6264-davide-rossetti-GPUDirect.pdf
