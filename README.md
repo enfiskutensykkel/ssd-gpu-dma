@@ -228,14 +228,15 @@ disk's BAR0.
 
 
 
-### CMake build settings summary ###
+### All CMake build settings ###
 Settings can be passed to CMake using the `-Dsetting=value` flag. Here is a 
 comprehensive list of settings that can be overridden.
 
 Setting             | Default    | Explanation
 --------------------|------------|---------------------------------------------
+`CMAKE_BUILD_TYPE`  | `Debug`    | Set to `Release` to make a release build
 `DIS`	            | `/opt/DIS` | Override the Dolphin installation path
-`NVIDIA`            | N/A        | Override path to Nvidia driver
+`NVIDIA`            |            | Override path to Nvidia driver
 `no_sisci_samples`  | `false`    | Don't build SmartIO samples
 `no_sisci`          | `false`    | Don't build `libnvm` with SmartIO support
 `no_module`         | `false`    | Don't build kernel module
