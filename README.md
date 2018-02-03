@@ -206,6 +206,7 @@ as well as any calls to the DMA API.
 Repeating the requirements from the section above, you should make sure that
 you use a processor that supports [PCIe peer-to-peer], and that you have a GPU 
 with [GPUDirect] support. Remember to [disable the IOMMU](#disable-iommu).
+If you are not using CUDA, it is recommended that you leave the IOMMU on.
 
 Loading and unloading the driver is done as follows:
 ```
@@ -224,6 +225,23 @@ $ echo -n "0000:05:00.0" > /sys/bus/pci/drivers/disnvm/bind
 
 After doing this, the file `/dev/libnvm0` should show up, representing the
 disk's BAR0.
+
+
+
+### CMake build settings summary ###
+Settings can be passed to CMake using the `-Dsetting=value` flag. Here is a 
+comprehensive list of settings that can be overridden.
+
+Setting             | Default    | Explanation
+-------------------------------------------------------------------------------
+`DIS`	            | `/opt/DIS` | Override the Dolphin installation path
+`NVIDIA`            | N/A        | Override path to Nvidia driver
+`no_sisci_samples`  | `false`    | Don't build SmartIO samples
+`no_sisci`          | `false`    | Don't build `libnvm` with SmartIO support
+`no_module`         | `false`    | Don't build kernel module
+`no_nvidia_driver`  | `false`    | Don't build kernel module with CUDA support
+`no_cuda`           | `false`    | Do not build `libnvm` with CUDA support
+-------------------------------------------------------------------------------
 
 
 
