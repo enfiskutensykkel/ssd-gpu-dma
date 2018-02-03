@@ -20,16 +20,16 @@ NVMe storage and other PCIe devices ([PCIe peer-to-peer]).
 As NVMe is designed in a way that reflects the inherent parallelism in modern
 computing architectures, we are able to provide a lock-less interface to the 
 disk which can be shared by multiple computing instances. `libnvm` can be 
-linked with CUDA programs, enabling **high-performance storage accsee directly 
+linked with CUDA programs, enabling **high-performance storage acces directly 
 from your CUDA kernels**. This is achieved by placing IO queues and data 
 buffers directly in GPU memory, **eliminating the need to involve the CPU in 
 the IO path entirely**.
 
 A huge benefit of the parallel design of NVMe combined with the possibility of
-using arbitrary memory addresses for buffers and queues also means that a disk
-can be **shared by multiple computing instances running on remote machines**. 
-This can be done by setting up mappings using a PCIe Non-Transparent Bridge 
-([PCIe NTB]). The API can be linked with applications using the SISCI 
+using arbitrary memory addresses for buffers and queues also means that 
+**a disk can be shared by multiple computing instances running on remote 
+machines**. This can be done by setting up mappings using a PCIe Non-Transparent 
+Bridge ([PCIe NTB]). The API can be linked with applications using the SISCI 
 [SmartIO] API from Dolphin Interconnect Solutions, allowing the  user to create 
 custom configurations of remote and local devices and NVMe disks in a 
 PCIe cluster. It also enables concurrent low-latency access to NVMe disks from
