@@ -233,7 +233,7 @@ Settings can be passed to CMake using the `-Dsetting=value` flag. Here is a
 comprehensive list of settings that can be overridden.
 
 Setting             | Default    | Explanation
--------------------------------------------------------------------------------
+--------------------|------------|---------------------------------------------
 `DIS`	            | `/opt/DIS` | Override the Dolphin installation path
 `NVIDIA`            | N/A        | Override path to Nvidia driver
 `no_sisci_samples`  | `false`    | Don't build SmartIO samples
