@@ -1,23 +1,39 @@
 libnvm: An API for building userspace NVMe drivers and storage applications
 ===============================================================================
-This library is intended to allow userspace programs to control and manage 
-NVM Express ([NVMe]) disk controllers through an easy-to-use API. 
-The motivation is to provide a userspace library your CUDA applications and 
-other programs can easily link against, in order to build custom drivers and 
-high-performance storage applications.
+This library is a userspace API implemented in C for writing custom NVM Express
+([NVMe]) drivers and high-performance storage applications. The API provides 
+simple semantics and functions which a userspace program can use to control or 
+manage one or more NVMe disk controllers.
 
-The library uses simple semantics and functions for mapping userspace memory
-buffers and device memory, providing a simple yet low-level mechanism suitable
-for controlling an NVMe disk and performing IO operations. By mapping user-
-space memory directly, IO performance is greatly increased compared to 
-accessing storage through normal file system abstractions provided by the
-Linux kernel.
+The library is in essence similar to [SPDK], in that it moves driver code to 
+userspace and relies on hardware polling rather than being interrupt driven. 
+By mapping userspace memory directly, `libnvm` eliminates the cost of context
+switching into kernel space and enables zero-copy access from userspace. 
+This greatly reduces the latency of IO operations compared to accessing storage
+devices through normal file system abstractions provided by the Linux kernel.
 
-The API can also be linked with applications using the SISCI SmartIO API from 
-Dolphin Interconnect Solutions. This allows the programmer to set up arbitrary
-configurations of devices and NVMe disks in a PCIe cluster, and enables 
-concurrent low-latency access to one or more NVMe disks from multiple machines 
-in the cluster.
+`libnvm` is able to provide a simple low-level block-interface with extremely
+low latency in the IO path. With minimal driver support, it is possible to set
+up arbitrary memory mappings to device memory, enabling peer-to-peer IO between
+NVMe storage and other PCIe devices ([PCIe peer-to-peer]). 
+
+As NVMe is designed in a way that reflects the inherent parallelism in modern
+computing architectures, we are able to provide a lock-less interface to the 
+disk which can be shared by multiple computing instances. `libnvm` can be 
+linked with CUDA programs, enabling **high-performance storage accsee directly 
+from your CUDA kernels**. This is achieved by placing IO queues and data 
+buffers directly in GPU memory, **eliminating the need to involve the CPU in 
+the IO path entirely**.
+
+A huge benefit of the parallel design of NVMe combined with the possibility of
+using arbitrary memory addresses for buffers and queues also means that a disk
+can be **shared by multiple computing instances running on remote machines**. 
+This can be done by setting up mappings using a PCIe Non-Transparent Bridge 
+([PCIe NTB]). The API can be linked with applications using the [SISCI] 
+[SmartIO] API from Dolphin Interconnect Solutions, allowing the  user to create 
+custom configurations of remote and local devices and NVMe disks in a 
+PCIe cluster. It also enables concurrent low-latency access to NVMe disks from
+multiple machines in the cluster.
 
 
 
@@ -43,7 +59,7 @@ For linking with CUDA programs, you need the following:
 * An Nvidia GPU capable of [GPUDirect RDMA] and [GPUDirect Async]
   This means either a Quadro or Tesla workstation model using the Kepler 
   architecture or newer.
-* An architecture that supports PCIe peer-to-peer, for example the Intel Xeon
+* An architecture that supports [PCIe peer-to-peer], for example the Intel Xeon
   family of processors.
 * The _FindCUDA_ package for CMake.
 * GCC version 5.4.0 or newer. Compiler must be able to compile C++11.
@@ -143,7 +159,7 @@ Current number of SQs   : 8
 ```
 
 
-### Using the libnvm helper kernel module ###
+### Using the _libnvm helper_ kernel module ###
 If you are not using SISCI SmartIO, you must use the project's kernel module
 in order to map GPU memory for the NVMe disk.
 Currently the only version of Linux tested is Linux 4.11.0. Other versions
@@ -176,9 +192,9 @@ disk's BAR0.
 
 Non-Volatile Memory Express (NVMe)
 -------------------------------------------------------------------------------
-NVMe [NVMe1.3] is a software specification for disk controllers (_drives_) that 
+[NVMe] is a software specification for disk controllers (_drives_) that 
 provides storage on non-volatile media, for example flash memory or Intel's
-3D XPoint [3D XPoint].
+[3D XPoint].
 
 
 The specification is designed in a way that reflects the parallelism in modern
@@ -292,32 +308,8 @@ remote run than for the local run.
 
 API overview
 ------------------------------------------------------------------------------
-`libnvm` is a userspace library implemented in C for writing custom storage 
-applications and/or custom NVMe drivers. By exploiting the memory addressing 
-scheme in NVMe, `libnvm` is able to provide a block-level interface with 
-extremely low latency in the IO path. In addition, with minimal driver 
-support, it is possible to set up arbitrary memory mappings to device memory, 
-enabling peer-to-peer IO between devices and storage in architectures that 
-support it.
-
-The library is in essence similar to [SPDK], in that it
-moves driver code to user-space and relies on hardware polling rather than 
-being interrupt driven. This means that the application can avoid using 
-syscalls and has zero-copy data access, as well as getting predictable and
-extremely low latency for I/O operations.
-As NVMe is designed in a way that reflects the inherent parallelism in modern
-CPU architectures, we are able to provide a lock-less interface to the disk
-which can be shared by multiple process instances, even running on _separate_
-machines(!).
 
 
-
- eliminates the need to context switch to
-kernel space and enables zero-copy access from userspace, greatly reducing 
-latency. 
-	
-	
-, achieving minimal latency in the I/O path.
 
 ### Scope and limitations of `libnvm`
 
@@ -392,6 +384,7 @@ Please refer to section 7 of the NVM Express specification.
 [NVMe]: http://nvmexpress.org/wp-content/uploads/NVM-Express-1_3a-20171024_ratified.pdf
 [SmartIO]: http://dolphinics.com/products/pcie_smart_io_device_lending.html
 [SISCI]: http://ww.dolphinics.no/download/ci/docs-master/
+[PCIe NTB]: http://www.dolphinics.com/products/pcie_Intel_NTB_networking.html
 [PCIe peer-to-peer]: https://www.dolphinics.com/download/WHITEPAPERS/Dolphin_Express_IX_Peer_to_Peer_whitepaper.pdf
 [Device Lending]: http://dolphinics.com/download/WHITEPAPERS/PCI_Express_device_lending_may_2016.pdf
 [SPDK]: http://www.spdk.io/
