@@ -241,7 +241,6 @@ Setting             | Default    | Explanation
 `no_module`         | `false`    | Don't build kernel module
 `no_nvidia_driver`  | `false`    | Don't build kernel module with CUDA support
 `no_cuda`           | `false`    | Do not build `libnvm` with CUDA support
--------------------------------------------------------------------------------
 
 
 
