@@ -1,61 +1,64 @@
-#ifndef __DIS_NVM_MODULE_MAP_H__
-#define __DIS_NVM_MODULE_MAP_H__
+#ifndef __LIBNVM_HELPER_MAP_H__
+#define __LIBNVM_HELPER_MAP_H__
 
 #include "list.h"
 #include <linux/types.h>
 #include <linux/mm_types.h>
 
-struct device;
-struct ctrl_ref;
+
+/* Forward declaration */
+struct ctrl;
+struct map;
+
+
+typedef void (*release)(struct map*);
 
 
 /*
  * Describes a range of mapped memory.
- *
- * Used to represent both mapped RAM memory and mapped GPU memory.
  */
-struct map_descriptor
+struct map
 {
-    struct map_list_head        list_head;      /* Linked list header */
-    struct pci_dev*             pdev;           /* PCI device mappings are mapped for */
-    unsigned long               page_size;      /* Virtual/logical page size */
-    unsigned long               n_pages;        /* Number of pages pinned (should equal n_addrs) */
-    void*                       pages;          /* Reference to the pinned pages */
-    void*                       mappings;       /* Reference to mappings */
-    unsigned long               n_addrs;        /* Number of bus addresses */
-    dma_addr_t                  addrs[1];       /* Mapped bus addresses */
+    struct list_node    list;           /* Linked list header */
+    struct task_struct* owner;          /* Owner of mapping */
+    u64                 vaddr;          /* Starting virtual address */
+    struct pci_dev*     pdev;           /* Reference to physical PCI device */
+    unsigned long       page_size;      /* Logical page size */
+    void*               data;           /* Custom data */
+    release             release;        /* Custom callback for unmapping and releasing memory */
+    unsigned long       n_addrs;        /* Number of mapped pages */
+    dma_addr_t          addrs[1];       /* Bus addresses */
 };
 
 
+
 /*
- * Map user pages.
- *
- * Map n_pages of memory starting at virtual address vaddr for the controller.
+ * Lock and map userspace pages for DMA.
  */
-long map_user_pages(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, struct map_descriptor** map);
+struct map* map_userspace(struct list* list, const struct ctrl* ctrl, u64 vaddr, unsigned long n_pages);
 
 
-void unmap_user_pages(struct map_descriptor* map);
+
+/*
+ * Unmap and release memory.
+ */
+void unmap_and_release(struct map* map);
+
 
 
 #ifdef _CUDA
-long map_gpu_memory(struct ctrl_ref* ref, u64 vaddr, unsigned long n_pages, struct map_descriptor** map);
-
-
-void unmap_gpu_memory(struct map_descriptor* map);
+/*
+ * Lock and map GPU device memory.
+ */
+struct map* map_device_memory(struct list* list, const struct ctrl* ctrl, u64 vaddr, unsigned long n_pages);
 #endif
 
 
-/*
- * Look up a map from the list of user page mappings.
- */
-struct map_descriptor* find_user_page_map(struct ctrl_ref* ref, u64 vaddr);
-
 
 /*
- * Look up a map from the list of GPU mappings.
+ * Find memory mapping from vaddr and current task
  */
-struct map_descriptor* find_gpu_map(struct ctrl_ref* ref, u64 vaddr);
+struct map* map_find(const struct list* list, u64 vaddr);
 
 
-#endif /* __DIS_NVM_MODULE_MAP_H__ */
+#endif /* __LIBNVM_HELPER_MAP_H__ */

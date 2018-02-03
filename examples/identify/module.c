@@ -17,7 +17,7 @@
 #include <errno.h>
 
 
-static void parse_args(int argc, char** argv, uint64_t* device_id);
+static void parse_args(int argc, char** argv, char** device);
 
 
 static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
@@ -84,12 +84,9 @@ out:
 }
 
 
-static int open_fd(uint64_t dev_id)
+static int open_fd(const char* path)
 {
     int fd;
-    char path[64];
-
-    sprintf(path, "/dev/disnvme%lu", dev_id);
 
     fd = open(path, O_RDWR|O_NONBLOCK);
     if (fd < 0)
@@ -111,10 +108,10 @@ int main(int argc, char** argv)
 
     long page_size = sysconf(_SC_PAGESIZE);
 
-    uint64_t dev_id;
-    parse_args(argc, argv, &dev_id);
+    char* path = NULL;
+    parse_args(argc, argv, &path);
 
-    int fd = open_fd(dev_id);
+    int fd = open_fd(path);
     if (fd < 0)
     {
         exit(1);
@@ -168,28 +165,13 @@ static void give_usage(const char* name)
 static void show_help(const char* name)
 {
     give_usage(name);
-    fprintf(stderr, "    Create a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
-            "    --ctrl     <dev id>        Device ID ('/dev/disnvmeXXX').\n"
+    fprintf(stderr, "    Create a manager and run an IDENTIFY CONTROLLER NVM admin command.\n"
+            "    --ctrl     <path>          Path to controller device (/dev/libnvmXXX)\n"
             "    --help                     Show this information.\n");
 }
 
 
-static int parse_u64(const char* str, uint64_t* num, int base)
-{
-    char* endptr = NULL;
-    uint64_t ul = strtoul(str, &endptr, base);
-
-    if (endptr == NULL || *endptr != '\0')
-    {
-        return EINVAL;
-    }
-
-    *num = ul;
-    return 0;
-}
-
-
-static void parse_args(int argc, char** argv, uint64_t* dev)
+static void parse_args(int argc, char** argv, char** dev)
 {
     static struct option opts[] = {
         { "help", no_argument, NULL, 'h' },
@@ -200,8 +182,7 @@ static void parse_args(int argc, char** argv, uint64_t* dev)
     int opt;
     int idx;
 
-    bool dev_set = false;
-    *dev = 0;
+    *dev = NULL;
 
     while ((opt = getopt_long(argc, argv, ":hc:", opts, &idx)) != -1)
     {
@@ -218,12 +199,7 @@ static void parse_args(int argc, char** argv, uint64_t* dev)
                 exit(':');
 
             case 'c': // device identifier
-                dev_set = true;
-                if (parse_u64(optarg, dev, 10) != 0)
-                {
-                    give_usage(argv[0]);
-                    exit('c');
-                }
+                *dev = optarg;
                 break;
 
             case 'h':
@@ -232,9 +208,9 @@ static void parse_args(int argc, char** argv, uint64_t* dev)
         }
     }
 
-    if (!dev_set)
+    if (*dev == NULL)
     {
-        fprintf(stderr, "Device ID is not set!\n");
+        fprintf(stderr, "Controller is not set!\n");
         give_usage(argv[0]);
         exit('c');
     }

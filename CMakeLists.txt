@@ -12,11 +12,18 @@ find_package (CUDA 8.0)
 set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 set (NVIDIA "" CACHE PATH "Path to Nvidia driver source")
 
-set (no_sisci_samples false CACHE BOOL "Do not use SISCI for examples")
-set (no_sisci false CACHE BOOL "Do not use SISCI for library")
+set (no_smartio_samples false CACHE BOOL "Do not use SISCI for examples")
+set (no_smartio_benchmarks false CACHE BOOL "Do not use SISCI for benchmarks")
+set (no_smartio false CACHE BOOL "Do not use SISCI for library or examples")
 set (no_module false CACHE BOOL "Do not build kernel module")
-set (no_nvidia_driver false CACHE BOOL "Build kernel module without NVIDIA support")
-set (no_cuda false CACHE BOOL "Do not build with CUDA")
+set (no_cuda false CACHE BOOL "Do not build library with CUDA support")
+set (no_benchmarks false CACHE BOOL "Do not build benchmarks")
+
+if (no_smartio)
+    set (no_smartio_samples true)
+    set (no_smartio_benchmarks true)
+endif ()
+
 
 
 # Set global compiler flags
@@ -32,7 +39,7 @@ set (CUDA_NVCC_FLAGS_RELEASE "${CMAKE_NVCC_FLAGS_RELEASE} -O2" CACHE INTERNAL ""
 
 
 # Try to find Nvidia driver
-if (CUDA_FOUND AND NOT no_nvidia_driver)
+if (CUDA_FOUND AND NOT no_cuda)
 
     # Try to find Nvidia headers (will choose the newest version)
     file (GLOB_RECURSE driver_paths "/usr/src/nvidia-*/nv-p2p.h")
@@ -97,7 +104,7 @@ add_library (libnvm SHARED ${libnvm_source})
 target_include_directories (libnvm PRIVATE "${libnvm_root}" "${libnvm_root}/dis")
 
 
-if (sisci_include AND sisci_lib AND NOT no_sisci)
+if (sisci_include AND sisci_lib AND NOT no_smartio)
     target_sources (libnvm PRIVATE ${libnvm_dis_source})
     target_compile_definitions (libnvm PRIVATE _REENTRANT _SISCI __DIS_CLUSTER__)
     target_link_libraries (libnvm ${sisci_lib} Threads::Threads)
@@ -123,11 +130,13 @@ install (TARGETS libnvm DESTINATION "lib")
 
 # Create kernel module makefile
 if (NOT no_module)
-    if (CUDA_FOUND AND NOT no_nvidia_driver AND EXISTS "${driver_dir}/Module.symvers")
+    if (CUDA_FOUND AND NOT no_cuda AND EXISTS "${driver_dir}/Module.symvers")
         set (module_ccflags "-D_CUDA -I${driver_include} -I${libnvm_root}")
         set (module_symbols "${driver_dir}/Module.symvers")
+        message(STATUS "Configuring kernel module with CUDA")
     else ()
         set (module_ccflags "-I${libnvm_root}")
+        message(STATUS "Configuring kernel module without CUDA")
     endif ()
 
     set (kdir "/lib/modules/${CMAKE_SYSTEM_VERSION}/build")
@@ -151,13 +160,15 @@ macro (make_sample target binary_name files)
 
     list (APPEND sample_targets "${target}")
     set (sample_targets "${sample_targets}" PARENT_SCOPE)
+
+    #install (TARGETS ${target} DESTINATION "bin")
 endmacro ()
 
 
 
 # Macro for making a target depend on SISCI
 macro (set_sisci target)
-    if (NOT no_sisci_samples AND sisci_include AND sisci_lib)
+    if (NOT no_smartio_samples AND sisci_include AND sisci_lib)
         target_link_libraries (${target} ${sisci_lib})
         target_compile_definitions (${target} PRIVATE _REENTRANT __DIS_CLUSTER__)
     else ()
@@ -176,8 +187,8 @@ endmacro ()
 
 
 # Set preferred ordering for sample targets
-macro (make_sisci_choice ctarget sisci_target other_target)
-    if (NOT no_sisci_samples AND sisci_include AND sisci_lib)
+macro (make_samples_choice ctarget sisci_target other_target)
+    if (NOT no_smartio_samples AND sisci_include AND sisci_lib)
         add_custom_target (${ctarget} DEPENDS ${sisci_target})
         list (REMOVE_ITEM sample_targets "${other_target}")
         set (sample_targets "${sample_targets}" PARENT_SCOPE)
@@ -193,8 +204,8 @@ endmacro ()
 # Make benchmark target
 # We assume all benchmarks are CUDA programs
 macro (make_benchmark target binary_name files)
-    if (CUDA_FOUND AND NOT no_cuda)
-        cuda_add_executable (${target} ${files} OPTIONS ) # Ugly bugly
+    if (NOT no_benchmarks AND CUDA_FOUND AND NOT no_cuda)
+        cuda_add_executable (${target} EXCLUDE_FROM_ALL ${files} OPTIONS ) # Ugly bugly
         target_compile_definitions (${target} PRIVATE __CUDA__)
 
         add_dependencies (${target} libnvm)
@@ -203,14 +214,12 @@ macro (make_benchmark target binary_name files)
 
         list (APPEND benchmark_targets "${target}")
         set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
-
-        install (TARGETS ${target} DESTINATION "bin")
     endif ()
 endmacro ()
 
 macro (make_sisci_benchmark target binary_name files)
-    if (CUDA_FOUND AND sisci_include AND sisci_lib AND NOT (no_cuda OR no_sisci))
-        cuda_add_executable (${target} ${files} OPTIONS -gencode arch=compute_50,code=sm_50 -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
+    if (NOT no_benchmarks AND CUDA_FOUND AND sisci_include AND sisci_lib AND NOT (no_cuda OR no_smartio OR no_smartio_benchmarks))
+        cuda_add_executable (${target} ${files} EXCLUDE_FROM_ALL OPTIONS -gencode arch=compute_50,code=sm_50 -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
         target_compile_definitions(${target} PRIVATE __DIS_CLUSTER__ __CUDA__ _REENTRANT)
 
         add_dependencies (${target} libnvm)
@@ -219,8 +228,22 @@ macro (make_sisci_benchmark target binary_name files)
 
         list (APPEND benchmark_targets "${target}")
         set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
+    endif ()
+endmacro ()
 
-        install (TARGETS ${target} DESTINATION "bin")
+
+# Set preferred ordering for benchmark targets
+macro (make_benchmark_choice ctarget sisci_target other_target)
+    if (NOT no_smartio_benchmarks AND sisci_include AND sisci_lib AND NOT no_smartio)
+        add_custom_target (${ctarget} DEPENDS ${sisci_target})
+        list (REMOVE_ITEM benchmark_targets "${other_target}")
+        set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
+
+    else ()
+        add_custom_target (${ctarget} DEPENDS ${other_target})
+        list (REMOVE_ITEM benchmark_targets "${sisci_target}")
+        set (benchmark_targets "${benchmark_targets}" PARENT_SCOPE)
+
     endif ()
 endmacro ()
 
@@ -239,8 +262,6 @@ add_custom_target (examples DEPENDS samples)
 
 # Add individual benchmarks
 if (CUDA_FOUND)
-    #add_subdirectory ("${benchmarks_root}/simple-rdma")
-    #add_subdirectory ("${benchmarks_root}/dis-latency")
     add_subdirectory ("${benchmarks_root}/latency")
     add_custom_target (benchmarks DEPENDS ${benchmark_targets})
 endif ()

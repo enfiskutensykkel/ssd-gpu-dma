@@ -8,4 +8,4 @@ make_sample (identify-module identify "module.c")
 make_sample (identify-smartio identify "smartio.c")
 set_sisci (identify-smartio)
 
-make_sisci_choice(identify identify-smartio identify-module)
+make_samples_choice(identify identify-smartio identify-module)

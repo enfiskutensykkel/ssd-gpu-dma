@@ -402,7 +402,6 @@ int nvm_dma_map_host(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, si
     err = populate_handle(container(*handle), ctrl);
     if (err != 0)
     {
-        _nvm_dma_remove(*handle);
         remove_mapping(md);
         *handle = NULL;
         return err;
@@ -443,7 +442,6 @@ int nvm_dma_map_device(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* devptr,
     err = populate_handle(container(*handle), ctrl);
     if (err != 0)
     {
-        _nvm_dma_remove(*handle);
         remove_mapping(md);
         *handle = NULL;
         return err;

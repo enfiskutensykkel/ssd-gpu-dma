@@ -1,97 +1,61 @@
 #include "list.h"
 #include <linux/types.h>
+#include <linux/spinlock.h>
 #include <linux/printk.h>
 #include <asm/errno.h>
 
 
-void list_init(void* node, u64 vaddr)
-{
-    struct map_list_head* ptr = (struct map_list_head*) node;
 
-    ptr->next = NULL;
-    ptr->prev = NULL;
-    ptr->vaddr = vaddr;
+void list_init(struct list* list)
+{
+    list_node_init(&list->head);
+    list->head.prev = &list->head;
+
+    spin_lock_init(&list->lock);
 }
 
 
-void* list_find(struct map_list_head* list_start, u64 vaddr)
-{
-    struct map_list_head* ptr;
-   
-    // Start on the first element after head
-    ptr  = list_start->next;
 
-    // Loop through list until we encounter addresses larger than the
-    // one we are searching for
-    while (ptr != NULL && ptr->vaddr <= vaddr)
+void list_remove(struct list_node* element)
+{
+    if (element != NULL && element->list != NULL)
     {
-        if (ptr->vaddr == vaddr)
+        spin_lock(&element->list->lock);
+
+        if (element->prev != NULL)
         {
-            return ptr;
+            element->prev->next = element->next;
         }
 
-        ptr = ptr->next;
-    }
+        if (element->next != NULL)
+        {
+            element->next->prev = element->prev;
+        }
 
-    return NULL;
+        spin_unlock(&element->list->lock);
+
+        element->list = NULL;
+        element->next = NULL;
+        element->prev = NULL;
+    }
 }
 
 
-void list_remove(void* node)
 
+void list_insert(struct list* list, struct list_node* element)
 {
-    struct map_list_head* curr = (struct map_list_head*) node;
-    struct map_list_head* next = curr->next;
-    struct map_list_head* prev = curr->prev;
+    struct list_node* last = NULL;
 
-    if (prev != NULL)
-    {
-        prev->next = next;
-    }
+    spin_lock(&list->lock);
+    last = list->head.prev;
+    last->next = element;
 
-    if (next != NULL)
-    {
-        next->prev = prev;
-    }
+    element->list = list;
+    element->prev = last;
+    element->next = NULL;
 
-    curr->next = NULL;
-    curr->prev = NULL;
-}
+    list->head.prev = element;
 
-
-long list_insert(struct map_list_head* list_start, void* node)
-{
-    long count = 0;
-    struct map_list_head* insert = (struct map_list_head*) node;
-    struct map_list_head* curr = list_start;
-    struct map_list_head* next = curr->next;
-
-    // Iterate until we find a suitable spot
-    while (next != NULL && next->vaddr < insert->vaddr)
-    {
-        curr = next;
-        next = next->next;
-        ++count;
-    }
-
-    // Some sanity checking
-    if (curr->vaddr == insert->vaddr)
-    {
-        printk(KERN_WARNING "Virtual address is already present in list at position %ld: %llx\n", 
-                count, insert->vaddr);
-        return -EEXIST;
-    }
-
-    // Insert in list
-    curr->next = insert;
-    insert->prev = curr;
-    insert->next = next;
-    if (next != NULL)
-    {
-        next->prev = insert;
-    }
-
-    // Return position of node
-    return count;
+    spin_unlock(&list->lock);
 }
 

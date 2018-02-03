@@ -261,7 +261,11 @@ int main(int argc, char** argv)
     try
     {
         fprintf(stderr, "Resetting controller...\n");
+#ifdef __DIS_CLUSTER__
         Controller ctrl(settings.controllerId, settings.adapter, settings.segmentId++, settings.nvmNamespace, settings.numQueues);
+#else
+        Controller ctrl(settings.controllerPath, settings.nvmNamespace, settings.numQueues);
+#endif
 
         settings.numQueues = ctrl.numQueues;
 

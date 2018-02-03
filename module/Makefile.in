@@ -2,7 +2,7 @@
 ifneq ($(KERNELRELEASE),)
 	src := @module_root@
 	obj-m := @CMAKE_PROJECT_NAME@.o
-	@CMAKE_PROJECT_NAME@-objs := pci.o cdev.o map.o list.o
+	@CMAKE_PROJECT_NAME@-objs := pci.o list.o ctrl.o map.o
 	ccflags-y += @module_ccflags@
 	KBUILD_EXTRA_SYMBOLS := @module_symbols@
 else
@@ -21,7 +21,7 @@ unload:
 	-rmmod @CMAKE_PROJECT_NAME@.ko
 
 load:
-	insmod @CMAKE_PROJECT_NAME@.ko num_ctrl_devs=2 num_ctrl_refs=12 max_pages_per_map=65536
+	insmod @CMAKE_PROJECT_NAME@.ko num_ctrls=64
 
 install: default
 	$(MAKE) -C @kdir@ M=@module_output@ modules_install

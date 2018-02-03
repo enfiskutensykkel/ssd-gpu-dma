@@ -16,6 +16,7 @@ enum AccessPattern : int
 struct Settings
 {
     int             cudaDevice;
+    const char*     controllerPath;
     uint32_t        controllerId;
     uint32_t        adapter;
     uint32_t        segmentId;

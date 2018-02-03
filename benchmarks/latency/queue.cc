@@ -26,6 +26,7 @@ Queue::Queue(const Controller& ctrl, uint32_t adapter, uint32_t segmentId, uint1
     uint64_t sqAddr = 0;
     uint64_t cqAddr = 0;
 
+#ifdef __DIS_CLUSTER__
     if (remote)
     {
         // Allocate submission queue and PRP lists on side closest to disk
@@ -47,6 +48,14 @@ Queue::Queue(const Controller& ctrl, uint32_t adapter, uint32_t segmentId, uint1
         cqPtr = NVM_DMA_OFFSET(sq_mem, 1 + this->depth);
         cqAddr = sq_mem->ioaddrs[1 + this->depth];
     }
+#else
+    sq_mem = createBuffer(ctrl.ctrl, adapter, segmentId, ctrl.ctrl->page_size * (this->depth + 2));
+    sqPtr = sq_mem->vaddr;
+    sqAddr = sq_mem->ioaddrs[0];
+
+    cqPtr = NVM_DMA_OFFSET(sq_mem, 1 + this->depth);
+    cqAddr = sq_mem->ioaddrs[1 + this->depth];
+#endif
 
 
     memset(cqPtr, 0, ctrl.ctrl->page_size);

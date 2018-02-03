@@ -16,6 +16,9 @@ BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, si
 BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, size_t size, int cudaDevice);
 
 
+#ifdef __DIS_CLUSTER__
 BufferPtr createRemoteBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t number, size_t size);
+#endif
+
 
 #endif

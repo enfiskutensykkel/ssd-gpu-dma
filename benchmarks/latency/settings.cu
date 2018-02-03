@@ -26,7 +26,9 @@ static const struct option options[] = {
     { .name = "nvm-namespace", .has_arg = required_argument, .flag = nullptr, .val = 'i' },
     { .name = "namespace", .has_arg = required_argument, .flag = nullptr, .val = 'i' },
     { .name = "ns", .has_arg = required_argument, .flag = nullptr, .val = 'i' },
+#ifdef __DIS_CLUSTER__
     { .name = "adapter", .has_arg = required_argument, .flag = nullptr, .val = 'a' },
+#endif
     { .name = "num-blocks", .has_arg = required_argument, .flag = nullptr, .val = 'n' },
     { .name = "block-count", .has_arg = required_argument, .flag = nullptr, .val = 'n' },
     { .name = "blocks", .has_arg = required_argument, .flag = nullptr, .val = 'n' },
@@ -47,7 +49,9 @@ static const struct option options[] = {
     { .name = "qd", .has_arg = required_argument, .flag = nullptr, .val = 'd' },
     { .name = "queue-length", .has_arg = required_argument, .flag = nullptr, .val = 'd' },
     { .name = "depth", .has_arg = required_argument, .flag = nullptr, .val = 'd' },
+#ifdef __DIS_CLUSTER__
     { .name = "local-sq", .has_arg = no_argument, .flag = nullptr, .val = 2 },
+#endif
     { .name = "warmups", .has_arg = required_argument, .flag = nullptr, .val = 'w' },
     { .name = "repeat", .has_arg = required_argument, .flag = nullptr, .val = 'r' },
     { .name = "repetitions", .has_arg = required_argument, .flag = nullptr, .val = 'r' },
@@ -100,8 +104,12 @@ static string helpString(const char* name)
     s << usageString(name) << std::endl;
     s << std::endl << "Arguments" << std::endl;
     argInfo(s, "help", "show this help");
+#ifdef __DIS_CLUSTER__
     argInfo(s, "ctrl", "id", "NVM controller identifier");
     argInfo(s, "adapter", "number", "DIS adapter number (default is 0)");
+#else
+    argInfo(s, "ctrl", "path", "Path to controller device");
+#endif
     argInfo(s, "namespace", "id", "specify NVM namespace (default is 1)");
     argInfo(s, "blocks", "count", "specify number of blocks");
     argInfo(s, "offset", "count", "specify start block (default is 0)");
@@ -111,7 +119,9 @@ static string helpString(const char* name)
     argInfo(s, "gpu", "[device]", "select GPUDirect capable CUDA device (default is none)");
     argInfo(s, "verify", "path", "use file to verify transfer");
     argInfo(s, "write", "write instead of read (WARNING! Will destroy data on disk)");
+#ifdef __DIS_CLUSTER__
     argInfo(s, "local-sq", "host submission queue and PRP lists in local memory");
+#endif
     argInfo(s, "stats", "print latency statistics to stdout");
     argInfo(s, "pattern", "mode", "specify access pattern (default is sequential)");
 
@@ -160,6 +170,7 @@ static int maxCudaDevice()
 Settings::Settings()
 {
     cudaDevice = -1;
+    controllerPath = nullptr;
     controllerId = 0;
     adapter = 0;
     segmentId = 0;
@@ -204,7 +215,13 @@ void Settings::parseArguments(int argc, char** argv)
     int index;
     int option;
 
-    while ((option = getopt_long(argc, argv, ":hc:g:i:a:n:o:q:d:w:r:v:p:s", options, &index)) != -1)
+#ifdef __DIS_CLUSTER__
+    const char* optstr = ":hc:g:i:a:n:o:q:d:w:r:v:p:s";
+#else
+    const char* optstr = ":hc:g:i:n:o:q:d:w:r:v:p:s";
+#endif
+
+    while ((option = getopt_long(argc, argv, optstr, options, &index)) != -1)
     {
         switch (option)
         {
@@ -229,9 +246,15 @@ void Settings::parseArguments(int argc, char** argv)
                 pattern = parsePattern(optarg);
                 break;
 
+#ifdef __DIS_CLUSTER__
             case 'c':
                 controllerId = (uint64_t) parseNumber(optarg, 16);
                 break;
+#else
+            case 'c':
+                controllerPath = optarg;
+                break;
+#endif
 
             case 'g':
                 if (optarg != nullptr)
@@ -256,6 +279,7 @@ void Settings::parseArguments(int argc, char** argv)
                 }
                 break;
 
+#ifdef __DIS_CLUSTER__
             case 'a':
                 adapter = (uint32_t) parseNumber(optarg, 10);
                 if (adapter >= NVM_DIS_RPC_MAX_ADAPTER)
@@ -263,6 +287,7 @@ void Settings::parseArguments(int argc, char** argv)
                     throw string("Invalid adapter number: ") + optarg;
                 }
                 break;
+#endif
 
             case 'n':
                 numBlocks = (size_t) parseNumber(optarg);
@@ -310,10 +335,17 @@ void Settings::parseArguments(int argc, char** argv)
         }
     }
 
+#ifdef __DIS_CLUSTER__
     if (controllerId == 0)
     {
         throw string("No controller specified!");
     }
+#else
+    if (controllerPath == nullptr)
+    {
+        throw string("No controller specified!");
+    }
+#endif
 
     if (numBlocks == 0)
     {
