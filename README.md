@@ -5,7 +5,7 @@ This library is a userspace API implemented in C for writing custom NVM Express
 simple semantics and functions which a userspace program can use to control or 
 manage one or more NVMe disk controllers.
 
-The library is in essence similar to [SPDK], in that it moves driver code to 
+The API is in essence similar to [SPDK], in that it moves driver code to 
 userspace and relies on hardware polling rather than being interrupt driven. 
 By mapping userspace memory directly, `libnvm` eliminates the cost of context
 switching into kernel space and enables zero-copy access from userspace. 
@@ -14,13 +14,13 @@ devices through normal file system abstractions provided by the Linux kernel.
 
 `libnvm` is able to provide a simple low-level block-interface with extremely
 low latency in the IO path. With minimal driver support, it is possible to set
-up arbitrary memory mappings to device memory, enabling peer-to-peer IO between
-NVMe storage and other PCIe devices ([PCIe peer-to-peer]). 
+up arbitrary memory mappings to device memory, enabling direct IO between NVMe
+storage devices and other PCIe devices ([PCIe peer-to-peer]). 
 
 As NVMe is designed in a way that reflects the inherent parallelism in modern
 computing architectures, we are able to provide a lock-less interface to the 
 disk which can be shared by multiple computing instances. `libnvm` can be 
-linked with CUDA programs, enabling **high-performance storage acces directly 
+linked with CUDA programs, enabling **high-performance storage access directly 
 from your CUDA kernels**. This is achieved by placing IO queues and data 
 buffers directly in GPU memory, **eliminating the need to involve the CPU in 
 the IO path entirely**.
