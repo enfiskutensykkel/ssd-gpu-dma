@@ -29,11 +29,13 @@ A huge benefit of the parallel design of NVMe combined with the possibility of
 using arbitrary memory addresses for buffers and queues also means that a disk
 can be **shared by multiple computing instances running on remote machines**. 
 This can be done by setting up mappings using a PCIe Non-Transparent Bridge 
-([PCIe NTB]). The API can be linked with applications using the [SISCI] 
+([PCIe NTB]). The API can be linked with applications using the SISCI 
 [SmartIO] API from Dolphin Interconnect Solutions, allowing the  user to create 
 custom configurations of remote and local devices and NVMe disks in a 
 PCIe cluster. It also enables concurrent low-latency access to NVMe disks from
 multiple machines in the cluster.
+
+
 
 
 
@@ -55,25 +57,44 @@ Please make sure that the following is installed on your system:
 The above is sufficient for building the userspace library and most of the 
 example programs.
 
-For linking with CUDA programs, you need the following:
+For using `libnvm` with your CUDA programs, you need the following:
 * An Nvidia GPU capable of [GPUDirect RDMA] and [GPUDirect Async]
   This means either a Quadro or Tesla workstation model using the Kepler 
   architecture or newer.
 * An architecture that supports [PCIe peer-to-peer], for example the Intel Xeon
   family of processors.
 * The _FindCUDA_ package for CMake.
-* GCC version 5.4.0 or newer. Compiler must be able to compile C++11.
+* GCC version 5.4.0 or newer. Compiler must be able to compile C++11 and 
+  POSIX threads.
 * CUDA 8.0 or newer with CUDA development toolkit.
 * Kernel module symbols and headers for your Nvidia driver.
 
-For linking with SISCI API, you additionally need the Dolphin 5.5.0 software
-base (or newer) with CUDA support and SmartIO enabled. If you are _not_ using
-Dolphin software, you need to explicitly disable IOMMU as current Nvidia GPUs
-do not currently fully support it. This is done by removing `iommu=on` and 
-`intel_iommu=on` from the `CMDLINE` variable in `/etc/default/grub` and then
-reconfiguring GRUB before rebooting. If you _are_ using SmartIO, the Dolphin 
-driver stack will handle this for you and it is recommended that you leave the 
-IOMMU on for memory protection.
+For linking with [SISCI] API, you additionally need the Dolphin 5.5.0 software
+base (or newer) with CUDA support and SmartIO enabled. 
+
+
+
+### Disable IOMMU ###
+If you are _not_ using Dolphin software, you need to explicitly disable IOMMU 
+as IOMMU support for peer-to-peer on Linux is a bit flaky at the moment.
+If you are using SmartIO however, the Dolphin  driver stack will handle this 
+for you and it is not required to disable the IOMMU. I would in fact recommend
+you leaving the IOMMU _on_ for protecting memory from rogue writes.
+
+To check if the IOMMU is on, you can do the following:
+```
+$ cat /proc/cmdline | grep iommu
+```
+If either `iommu=on` or `intel_iommu=on` is found by `grep`, the IOMMU
+is enabled.
+
+You can disable it by removing `iommu=on` and `intel_iommu=on` from the 
+`CMDLINE` variable in `/etc/default/grub` and then reconfiguring GRUB.
+The next time you reboot, the IOMMU will be disabled.
+
+As soon as peer-to-peer IOMMU support is improved in the Linux API and the
+Nvidia driver supports it, I will add it to the kernel module.
+
 
 
 ### Building the project ###
@@ -83,7 +104,6 @@ $ mkdir -p build; cd build
 $ cmake .. -DCMAKE_BUILD_TYPE=Release # use =Debug for debug build
 $ make libnvm                         # builds library
 $ make examples                       # builds example programs
-$ cd module; make                     # only required if no SISCI SmartIO
 ```
 
 If you are going to use CUDA, you also need to locate the kernel module
@@ -97,6 +117,13 @@ Nvidia driver and SISCI library. CUDA is located by the _FindCUDA_ package for
 CMake, while the location of both the Nvidia driver and SISCI can be manually
 set by overriding the `NVIDIA` and `DIS` defines for CMake 
 (`cmake .. -DNVIDIA=/usr/src/...` -DDIS=/opt/DIS/`).
+
+After this, you should also compile the `libnvm` helper kernel module unless
+you are using SISCI SmartIO. Assuming that you are still standing in the build
+directory, do the following:
+```
+$ cd module; make # only required if not using SISCI SmartIO
+```
 
 If you have disabled the IOMMU, you can run the _identify_ example to verify
 that your build is working. Find out your disk's PCI BDF by using `lspci`.
@@ -133,12 +160,21 @@ configure the disk for device sharing.
 ```
 $ /opt/DIS/sbin/smartio_tool add 05:00.0
 $ /opt/DIS/sbin/smartio_tool available 05:00.0
+$
+$ # Find out the local node identifier
 $ /opt/DIS/sbin/dis_config -gn
-Card 1 - NodeId:  8       # use the local node id
-$ /opt/DIS/sbin/smartio_tool connect 8  # the local node id
-$ /opt/DIS/sbin/smartio_tool list       # find device id
+Card 1 - NodeId:  8
+$
+$ # Connect to the local node
+$ /opt/DIS/sbin/smartio_tool connect 8
+$
+$ # Find out the device identifier
+$ /opt/DIS/sbin/smartio_tool list
 80000: Non-Volatile memory controller Intel Corporation Device f1a5 [available]
-$ make libnvm && make identify
+$
+$ # Build library and identify example
+$ make libnvm && make identify-smartio
+$
 $ ./bin/nvm-identify --ctrl=0x80000  # use the device id
 Resetting controller and setting up admin queues...
 ------------- Controller information -------------
@@ -159,16 +195,17 @@ Current number of SQs   : 8
 ```
 
 
-### Using the _libnvm helper_ kernel module ###
+
+### Using the libnvm helper kernel module ###
 If you are not using SISCI SmartIO, you must use the project's kernel module
 in order to map GPU memory for the NVMe disk.
 Currently the only version of Linux tested is Linux 4.11.0. Other versions
 may work, but you probably have to change the call to `get_user_pages()`
 as well as any calls to the DMA API.
 
-Repeating the requirements from the section above, you should make sure that 
-you use a processor that supports [PCIe peer-to-peer], and that you 
-have a GPU with [GPUDirect] support. Remember to disable the IOMMU.
+Repeating the requirements from the section above, you should make sure that
+you use a processor that supports [PCIe peer-to-peer], and that you have a GPU 
+with [GPUDirect] support. Remember to [disable the IOMMU](#disable-iommu).
 
 Loading and unloading the driver is done as follows:
 ```
@@ -190,12 +227,13 @@ disk's BAR0.
 
 
 
+
+
 Non-Volatile Memory Express (NVMe)
 -------------------------------------------------------------------------------
 [NVMe] is a software specification for disk controllers (_drives_) that 
 provides storage on non-volatile media, for example flash memory or Intel's
 [3D XPoint].
-
 
 The specification is designed in a way that reflects the parallelism in modern
 CPU architectures: a controller can support up to 2^16 - 1 IO queues with up
@@ -205,11 +243,14 @@ register write in the command submission path to a dedicated register.
 
 The specification assumes an underlying bus interface that conforms to PCIe.
 
+
+
 ### NVM Namespaces 
 A namespace is a quantity of non-volatile memory that may be formatted into
 logical blocks. A NVMe controller may support multiple namespaces. 
 Many controllers may attach the same namespace. In many ways, a namespace
 can be regarded as an abstraction of traditional disk partitions.
+
 
 
 ### Queue pairs and doorbells 
@@ -234,6 +275,7 @@ order. Each entry in the SQ is a command. Commands are 64 bytes in size.
 An admin submission queue (ASQ) and completion queue (ACQ) exists for the 
 purpose of controller management and control. There is a dedicated command
 set for admin commands.
+
 
 
 ### Physical Region Pages and Scatter-Gather Lists 
