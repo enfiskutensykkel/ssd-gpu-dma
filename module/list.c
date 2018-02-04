@@ -3,13 +3,15 @@
 #include <linux/spinlock.h>
 #include <linux/printk.h>
 #include <asm/errno.h>
+#include <linux/compiler.h>
 
 
 
 void list_init(struct list* list)
 {
-    list_node_init(&list->head);
+    list->head.list = list;
     list->head.prev = &list->head;
+    list->head.next = &list->head;
 
     spin_lock_init(&list->lock);
 }
@@ -18,20 +20,11 @@ void list_init(struct list* list)
 
 void list_remove(struct list_node* element)
 {
-    if (element != NULL && element->list != NULL)
+    if (likely(element != NULL && element->list != NULL && element != &element->list->head))
     {
         spin_lock(&element->list->lock);
-
-        if (element->prev != NULL)
-        {
-            element->prev->next = element->next;
-        }
-
-        if (element->next != NULL)
-        {
-            element->next->prev = element->prev;
-        }
-
+        element->prev->next = element->next;
+        element->next->prev = element->prev;
         spin_unlock(&element->list->lock);
 
         element->list = NULL;
@@ -52,7 +45,7 @@ void list_insert(struct list* list, struct list_node* element)
 
     element->list = list;
     element->prev = last;
-    element->next = NULL;
+    element->next = &list->head;
 
     list->head.prev = element;
 

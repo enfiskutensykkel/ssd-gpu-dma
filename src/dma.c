@@ -431,7 +431,7 @@ int nvm_dma_map_device(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* devptr,
     {
         return err;
     }
-    
+
     err = _nvm_dma_create(handle, ctrl, (struct dma_map*) md, (dma_map_free_t) remove_mapping);
     if (err != 0)
     {

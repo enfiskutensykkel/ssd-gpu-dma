@@ -17,7 +17,6 @@ set (no_smartio_benchmarks false CACHE BOOL "Do not use SISCI for benchmarks")
 set (no_smartio false CACHE BOOL "Do not use SISCI for library or examples")
 set (no_module false CACHE BOOL "Do not build kernel module")
 set (no_cuda false CACHE BOOL "Do not build library with CUDA support")
-set (no_benchmarks false CACHE BOOL "Do not build benchmarks")
 
 if (no_smartio)
     set (no_smartio_samples true)
@@ -204,7 +203,7 @@ endmacro ()
 # Make benchmark target
 # We assume all benchmarks are CUDA programs
 macro (make_benchmark target binary_name files)
-    if (NOT no_benchmarks AND CUDA_FOUND AND NOT no_cuda)
+    if (CUDA_FOUND AND NOT no_cuda)
         cuda_add_executable (${target} EXCLUDE_FROM_ALL ${files} OPTIONS ) # Ugly bugly
         target_compile_definitions (${target} PRIVATE __CUDA__)
 
@@ -218,7 +217,7 @@ macro (make_benchmark target binary_name files)
 endmacro ()
 
 macro (make_sisci_benchmark target binary_name files)
-    if (NOT no_benchmarks AND CUDA_FOUND AND sisci_include AND sisci_lib AND NOT (no_cuda OR no_smartio OR no_smartio_benchmarks))
+    if (CUDA_FOUND AND NOT no_cuda AND sisci_include AND sisci_lib AND NOT (no_smartio OR no_smartio_benchmarks))
         cuda_add_executable (${target} ${files} EXCLUDE_FROM_ALL OPTIONS -gencode arch=compute_50,code=sm_50 -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
         target_compile_definitions(${target} PRIVATE __DIS_CLUSTER__ __CUDA__ _REENTRANT)
 

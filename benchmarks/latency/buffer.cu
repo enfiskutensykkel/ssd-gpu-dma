@@ -22,6 +22,7 @@ BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, si
 {
     nvm_dma_t* dma = nullptr;
     void* bufferPtr = nullptr;
+    void* devicePtr = nullptr;
 
     if (dev < 0)
     {
@@ -48,12 +49,12 @@ BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, si
         throw error(string("Failed to get pointer attributes: ") + cudaGetErrorString(err));
     }
 
-    fprintf(stderr, "bufferPtr=%p devicePointer=%p\n", bufferPtr, attrs.devicePointer);
+    devicePtr = attrs.devicePointer;
 
 #ifdef __DIS_CLUSTER__
-    int status = nvm_dis_dma_map_device(&dma, ctrl, adapter, id, attrs.devicePointer, size);
+    int status = nvm_dis_dma_map_device(&dma, ctrl, adapter, id, devicePtr, size);
 #else
-    int status = nvm_dma_map_device(&dma, ctrl, attrs.devicePointer, size);
+    int status = nvm_dma_map_device(&dma, ctrl, devicePtr, size);
 #endif
     if (!nvm_ok(status))
     {
@@ -93,16 +94,16 @@ BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t, uint32_t, size_t size)
     nvm_dma_t* dma = nullptr;
     void* ptr = nullptr;
 
-    int status = posix_memalign(&ptr, ctrl->page_size, size);
-    if (status != 0)
+    cudaError_t err = cudaHostAlloc(&ptr, size, cudaHostAllocDefault);
+    if (err != cudaSuccess)
     {
-        throw error(string("Failed to allocate memory: ") + strerror(errno));
+        throw error(string("Failed to allocate memory: ") + cudaGetErrorString(err));
     }
 
-    status = nvm_dma_map_host(&dma, ctrl, ptr, size);
+    int status = nvm_dma_map_host(&dma, ctrl, ptr, size);
     if (!nvm_ok(status))
     {
-        free(ptr);
+        cudaFreeHost(ptr);
         throw error(string("Failed to map host memory: ") + nvm_strerror(status));
     }
 
@@ -110,7 +111,7 @@ BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t, uint32_t, size_t size)
         nvm_dma_unmap(m);
         if (ptr != nullptr)
         {
-            free(ptr);
+            cudaFreeHost(ptr);
         }
     });
 }

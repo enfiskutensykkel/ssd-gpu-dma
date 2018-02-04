@@ -74,7 +74,7 @@ void unmap_and_release(struct map* map)
 
 struct map* map_find(const struct list* list, u64 vaddr)
 {
-    struct list_node* element = list->head.next;
+    const struct list_node* element = list_next(&list->head);
     struct map* map = NULL;
 
     while (element != NULL)
@@ -89,7 +89,7 @@ struct map* map_find(const struct list* list, u64 vaddr)
             }
         }
 
-        element = element->next;
+        element = list_next(element);
     }
 
     return NULL;
@@ -118,7 +118,7 @@ static void release_user_pages(struct map* map)
     kfree(map->data);
     map->data = NULL;
 
-    printk(KERN_DEBUG "Released %lu host pages\n", map->n_addrs);
+    //printk(KERN_DEBUG "Released %lu host pages\n", map->n_addrs);
 }
 
 
@@ -199,7 +199,8 @@ struct map* map_userspace(struct list* list, const struct ctrl* ctrl, u64 vaddr,
 
     list_insert(list, &md->list);
 
-    printk(KERN_DEBUG "Mapped %lu host pages\n", md->n_addrs);
+    //printk(KERN_DEBUG "Mapped %lu host pages starting at address %llx\n", 
+    //        md->n_addrs, md->vaddr);
     return md;
 }
 
@@ -254,7 +255,7 @@ void release_gpu_memory(struct map* map)
         kfree(gd);
         map->data = NULL;
 
-        printk(KERN_DEBUG "Released %lu GPU pages\n", map->n_addrs);
+        //printk(KERN_DEBUG "Released %lu GPU pages\n", map->n_addrs);
     }
 }
 #endif
@@ -342,7 +343,8 @@ struct map* map_device_memory(struct list* list, const struct ctrl* ctrl, u64 va
 
     list_insert(list, &md->list);
 
-    printk(KERN_DEBUG "Mapped %lu GPU pages\n", md->n_addrs);
+    //printk(KERN_DEBUG "Mapped %lu GPU pages starting at address %llx\n", 
+    //        md->n_addrs, md->vaddr);
     return md;
 }
 #endif

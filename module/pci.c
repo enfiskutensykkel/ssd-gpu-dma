@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 #include <linux/pci.h>
 #include <linux/fs.h>
+#include <linux/err.h>
 #include <linux/device.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -106,11 +107,15 @@ static long map_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
             copy_from_user(&request, (void __user*) arg, sizeof(request));
 
             map = map_userspace(&host_list, ctrl, request.vaddr_start, request.n_pages);
-            retval = PTR_ERR(map);
 
-            if (!IS_ERR(map))
+            if (!IS_ERR_OR_NULL(map))
             {
                 copy_to_user((void __user*) request.ioaddrs, map->addrs, map->n_addrs * sizeof(uint64_t));
+                retval = 0;
+            }
+            else 
+            {
+                retval = PTR_ERR(map);
             }
             break;
 
@@ -119,12 +124,17 @@ static long map_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
             copy_from_user(&request, (void __user*) arg, sizeof(request));
 
             map = map_device_memory(&device_list, ctrl, request.vaddr_start, request.n_pages);
-            retval = PTR_ERR(map);
 
-            if (!IS_ERR(map))
+            if (!IS_ERR_OR_NULL(map))
             {
                 copy_to_user((void __user*) request.ioaddrs, map->addrs, map->n_addrs * sizeof(uint64_t));
+                retval = 0;
             }
+            else 
+            {
+                retval = PTR_ERR(map);
+            }
+            break;
 #endif
 
         case NVM_UNMAP_MEMORY:
@@ -259,13 +269,16 @@ static void remove_pci_dev(struct pci_dev* dev)
 static unsigned long clear_map_list(struct list* list)
 {
     unsigned long i = 0;
+    struct list_node* ptr = list_next(&list->head);
     struct map* map;
 
-    while (list->head.next != NULL)
+    while (ptr != NULL)
     {
-        map = container_of(list->head.next, struct map, list);
+        map = container_of(ptr, struct map, list);
         unmap_and_release(map);
         ++i;
+
+        ptr = list_next(&list->head);
     }
 
     return i;
@@ -331,13 +344,13 @@ static void __exit libnvm_helper_exit(void)
     remaining = clear_map_list(&device_list);
     if (remaining != 0)
     {
-        printk(KERN_NOTICE "%lu GPU memory pages were still mapped on unload\n", remaining);
+        printk(KERN_NOTICE "%lu GPU memory mappings were still in use on unload\n", remaining);
     }
 
     remaining = clear_map_list(&host_list);
     if (remaining != 0)
     {
-        printk(KERN_NOTICE "%lu host memory pages were still mapped on unload\n", remaining);
+        printk(KERN_NOTICE "%lu host memory mappings were still in use on unload\n", remaining);
     }
 
     pci_unregister_driver(&driver);

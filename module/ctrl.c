@@ -52,7 +52,7 @@ void ctrl_put(struct ctrl* ctrl)
 
 struct ctrl* ctrl_find_by_pci_dev(const struct list* list, const struct pci_dev* pdev)
 {
-    const struct list_node* element = list->head.next;
+    const struct list_node* element = list_next(&list->head);
     struct ctrl* ctrl;
 
     while (element != NULL)
@@ -64,7 +64,7 @@ struct ctrl* ctrl_find_by_pci_dev(const struct list* list, const struct pci_dev*
             return ctrl;
         }
 
-        element = element->next;
+        element = list_next(element);
     }
 
     return NULL;
@@ -74,7 +74,7 @@ struct ctrl* ctrl_find_by_pci_dev(const struct list* list, const struct pci_dev*
 
 struct ctrl* ctrl_find_by_inode(const struct list* list, const struct inode* inode)
 {
-    const struct list_node* element = list->head.next;
+    const struct list_node* element = list_next(&list->head);
     struct ctrl* ctrl;
 
     while (element != NULL)
@@ -86,7 +86,7 @@ struct ctrl* ctrl_find_by_inode(const struct list* list, const struct inode* ino
             return ctrl;
         }
 
-        element = element->next;
+        element = list_next(element);
     }
 
     return NULL;

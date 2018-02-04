@@ -3,6 +3,7 @@
 
 #include <linux/types.h>
 #include <linux/spinlock.h>
+#include <linux/compiler.h>
 
 
 /* Forward declaration */
@@ -41,6 +42,14 @@ static void __always_inline list_node_init(struct list_node* element)
     element->next = NULL;
     element->prev = NULL;
 }
+
+
+
+/*
+ * Get next element in list (if there are any)
+ */
+#define list_next(current)  \
+    ( ((current)->next != &(current)->list->head) ? (current)->next : NULL )
 
 
 

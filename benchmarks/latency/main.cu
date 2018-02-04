@@ -21,7 +21,9 @@
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
+#ifdef __DIS_CLUSTER__
 #include <sisci_api.h>
+#endif
 
 using std::string;
 using std::runtime_error;
@@ -250,6 +252,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
+#ifdef __DIS_CLUSTER__
     sci_error_t err;
     SCIInitialize(0, &err);
     if (err != SCI_ERR_OK)
@@ -257,6 +260,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "Something went wrong: %s\n", SCIGetErrorString(err));
         return 1;
     }
+#endif
 
     try
     {
@@ -282,8 +286,6 @@ int main(int argc, char** argv)
             fprintf(stderr, "Verifying transfer...\n");
             verify(ctrl, queues, buffer, settings);
         }
-
-        //dumpMemory(buffer, false);
     }
     catch (const runtime_error& e)
     {
@@ -292,7 +294,10 @@ int main(int argc, char** argv)
     }
 
     fprintf(stderr, "OK!\n");
+
+#ifdef __DIS_CLUSTER__
     SCITerminate();
+#endif
     return 0;
 }
 
@@ -468,8 +473,18 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
 
 static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Settings& settings, size_t blockSize)
 {
+    cudaError_t err;
     Times times[queues.size()];
     thread threads[queues.size()];
+
+    if (settings.cudaDevice != -1)
+    {
+        err = cudaSetDevice(settings.cudaDevice);
+        if (err != cudaSuccess)
+        {
+            throw runtime_error(string("Failed to set CUDA device: ") + cudaGetErrorString(err));
+        }
+    }
 
     if (settings.cudaDevice == -1)
     {
@@ -499,6 +514,15 @@ static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Se
     {
         threads[i].join();
         printStatistics(queues[i], times[i], blockSize, settings.stats);
+    }
+
+    if (settings.cudaDevice != -1)
+    {
+        err = cudaDeviceSynchronize();
+        if (err != cudaSuccess)
+        {
+            fprintf(stderr, "Synchronizing CUDA device failed: %s\n", cudaGetErrorString(err));
+        }
     }
 }
 
