@@ -11,4 +11,4 @@ make_sample (read-blocks-smartio read-blocks "smartio.c;args.c;read.c")
 set_multithread (read-blocks-smartio)
 set_sisci (read-blocks-smartio)
 
-make_sisci_choice (read-blocks read-blocks-smartio read-blocks-module)
+make_samples_choice (read-blocks read-blocks-smartio read-blocks-module)

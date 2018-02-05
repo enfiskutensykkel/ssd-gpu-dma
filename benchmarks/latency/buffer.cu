@@ -9,6 +9,7 @@
 #include <new>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include "buffer.h"
 #include <cstdio>
 
@@ -21,6 +22,7 @@ BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, si
 {
     nvm_dma_t* dma = nullptr;
     void* bufferPtr = nullptr;
+    void* devicePtr = nullptr;
 
     if (dev < 0)
     {
@@ -47,9 +49,13 @@ BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, si
         throw error(string("Failed to get pointer attributes: ") + cudaGetErrorString(err));
     }
 
-    fprintf(stderr, "bufferPtr=%p devicePointer=%p\n", bufferPtr, attrs.devicePointer);
+    devicePtr = attrs.devicePointer;
 
-    int status = nvm_dis_dma_map_device(&dma, ctrl, adapter, id, attrs.devicePointer, size);
+#ifdef __DIS_CLUSTER__
+    int status = nvm_dis_dma_map_device(&dma, ctrl, adapter, id, devicePtr, size);
+#else
+    int status = nvm_dma_map_device(&dma, ctrl, devicePtr, size);
+#endif
     if (!nvm_ok(status))
     {
         cudaFree(bufferPtr);
@@ -69,6 +75,7 @@ BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, si
 
 
 
+#ifdef __DIS_CLUSTER__
 BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, size_t size)
 {
     nvm_dma_t* dma = nullptr;
@@ -81,8 +88,38 @@ BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, si
 
     return BufferPtr(dma, [](nvm_dma_t* m) { nvm_dma_unmap(m); });
 }
+#else
+BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t, uint32_t, size_t size)
+{
+    nvm_dma_t* dma = nullptr;
+    void* ptr = nullptr;
+
+    cudaError_t err = cudaHostAlloc(&ptr, size, cudaHostAllocDefault);
+    if (err != cudaSuccess)
+    {
+        throw error(string("Failed to allocate memory: ") + cudaGetErrorString(err));
+    }
+
+    int status = nvm_dma_map_host(&dma, ctrl, ptr, size);
+    if (!nvm_ok(status))
+    {
+        cudaFreeHost(ptr);
+        throw error(string("Failed to map host memory: ") + nvm_strerror(status));
+    }
+
+    return BufferPtr(dma, [ptr](nvm_dma_t* m) {
+        nvm_dma_unmap(m);
+        if (ptr != nullptr)
+        {
+            cudaFreeHost(ptr);
+        }
+    });
+}
+#endif
 
 
+
+#ifdef __DIS_CLUSTER__
 BufferPtr createRemoteBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t segno, size_t size)
 {
     nvm_dma_t* dma = nullptr;
@@ -95,4 +132,5 @@ BufferPtr createRemoteBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t 
 
     return BufferPtr(dma, [](nvm_dma_t* m) { nvm_dma_unmap(m); });
 }
+#endif
 

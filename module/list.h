@@ -1,45 +1,77 @@
-#ifndef __DIS_NVM_MODULE_LIST_H__
-#define __DIS_NVM_MODULE_LIST_H__
+#ifndef __LIBNVM_HELPER_LIST_H__
+#define __LIBNVM_HELPER_LIST_H__
 
 #include <linux/types.h>
+#include <linux/spinlock.h>
+#include <linux/compiler.h>
+
+
+/* Forward declaration */
+struct list;
 
 
 /*
- * Put this in the top of a struct.
- *
- * Assumes that the head of the list is present and that the head is 
- * unremovable.
+ * Doubly linked list element.
  */
-struct map_list_head
+struct list_node
 {
-    struct map_list_head*           next;           /* Pointer to next element in list */
-    struct map_list_head*           prev;           /* Pointer to previous element in list */
-    u64                             vaddr;          /* Sort list by virtual address ranges */
+    struct list*        list;   /* Reference to list */
+    struct list_node*   next;   /* Pointer to next element in list */
+    struct list_node*   prev;   /* Pointer to previous element in list */
 };
 
 
-/*
- * Initialize the list portion of the node.
+/* 
+ * Doubly linked list.
+ * This implementation expects there always be an empty head.
  */
-void list_init(void* node, u64 vaddr);
+struct list
+{
+    struct list_node    head;   /* Start of the list */
+    spinlock_t          lock;   /* Ensure exclusive access to list */
+};
 
-
-/*
- * Insert the node in to an existing list.
- */
-long list_insert(struct map_list_head* list_start, void* node);
-
-
-/*
- * Find an element in the list and return it.
- */
-void* list_find(struct map_list_head* list_start, u64 vaddr);
 
 
 /*
- * Remove an element from the list.
+ * Initialize element.
  */
-void list_remove(void* node);
+static void __always_inline list_node_init(struct list_node* element)
+{
+    element->list = NULL;
+    element->next = NULL;
+    element->prev = NULL;
+}
 
 
-#endif /* __DIS_NVM_MODULE_LIST_H__ */
+
+/*
+ * Get next element in list (if there are any)
+ */
+#define list_next(current)  \
+    ( ((current)->next != &(current)->list->head) ? (current)->next : NULL )
+
+
+
+/*
+ * Initialize list.
+ */
+void list_init(struct list* list);
+
+
+
+/*
+ * Insert element into list.
+ */
+void list_insert(struct list* list, struct list_node* element);
+
+
+
+/*
+ * Remove element from list.
+ */
+void list_remove(struct list_node* element);
+
+
+
+#endif /* __LIBNVM_HELPER_LIST_H__ */

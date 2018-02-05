@@ -232,16 +232,16 @@ disk's BAR0.
 Settings can be passed to CMake using the `-Dsetting=value` flag. Here is a 
 comprehensive list of settings that can be overridden.
 
-Setting             | Default    | Explanation
---------------------|------------|---------------------------------------------
-`CMAKE_BUILD_TYPE`  | `Debug`    | Set to `Release` to make a release build
-`DIS`	            | `/opt/DIS` | Override the Dolphin installation path
-`NVIDIA`            |            | Override path to Nvidia driver
-`no_sisci_samples`  | `false`    | Don't build SmartIO samples
-`no_sisci`          | `false`    | Don't build `libnvm` with SmartIO support
-`no_module`         | `false`    | Don't build kernel module
-`no_nvidia_driver`  | `false`    | Don't build kernel module with CUDA support
-`no_cuda`           | `false`    | Do not build `libnvm` with CUDA support
+Setting                 | Default    | Explanation
+------------------------|------------|-----------------------------------------
+`CMAKE_BUILD_TYPE`      | `Debug`    | Set to `Release` to make a release build
+`DIS`	                | `/opt/DIS` | Override the Dolphin installation path
+`NVIDIA`                |            | Override path to Nvidia driver
+`no_smartio`            | `false`    | Don't build API with SmartIO support
+`no_module`             | `false`    | Don't build kernel module
+`no_cuda`               | `false`    | Don't build API with CUDA support
+`no_smartio_samples`    | `false`    | Don't build SmartIO samples
+`no_smartio_benchmarks` | `false`    | Don't build SmartIO benchmarks
 
 
 
