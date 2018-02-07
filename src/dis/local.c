@@ -27,7 +27,7 @@ static int create_segment(struct local_memory* m, uint32_t id, size_t size, uint
     sci_error_t status = SCI_ERR_OK;
 
     m->id = id;
-    m->size = 0;
+    m->size = size;
     m->flags = flags;
 
     SCIOpen(&m->sd, 0, &err);

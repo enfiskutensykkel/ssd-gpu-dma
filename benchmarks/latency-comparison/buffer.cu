@@ -108,7 +108,7 @@ DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice)
         throw error(string("Failed to map device memory: ") + nvm_strerror(status));
     }
 
-    dma->vaddr = bufferPtr;
+    //dma->vaddr = bufferPtr;
 
     return DmaPtr(dma, [bufferPtr](nvm_dma_t* dma) {
         nvm_dma_unmap(dma);
@@ -184,6 +184,8 @@ DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t a
     {
         throw error(string("Failed to create local segment: ") + nvm_strerror(status));
     }
+
+    dma->vaddr = devicePtr;
 
     return DmaPtr(dma, nvm_dma_unmap);
 }

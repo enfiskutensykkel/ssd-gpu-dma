@@ -21,109 +21,73 @@ using error = std::runtime_error;
 using std::string;
 
 
-//static void prepareQueue(nvm_queue_t* q)
-//{
-//    cudaError_t err = cudaHostRegister((void*) q->db, sizeof(uint32_t), cudaHostRegisterIoMemory);
-//    if (err != cudaSuccess)
-//    {
-//        throw error(string("Failed to register IO memory: ") + cudaGetErrorString(err));
-//    }
-//
-//    void* devicePtr = nullptr;
-//    err = cudaHostGetDevicePointer(&devicePtr, (void*) q->db, 0);
-//    if (err != cudaSuccess)
-//    {
-//        cudaHostUnregister((void*) q->db);
-//        throw error(string("Failed to get device pointer: ") + cudaGetErrorString(err));
-//    }
-//
-//    err = cudaMemset((void*) q->vaddr, 0, q->max_entries * q->entry_size);
-//    if (err != cudaSuccess)
-//    {
-//        cudaHostUnregister((void*) q->db);
-//        throw error(string("Failed to reset queue memory: ") + cudaGetErrorString(err));
-//    }
-//
-//    q->db = (volatile uint32_t*) devicePtr;
-//}
-//
-//
-//static void createQueuePair(QueuePair* deviceMemory, const Controller& ctrl)
-//{
-//}
-//
-//
-//
-//
-//
-//
-//__global__ void moveBlocks(nvm_queue_t* sq, nvm_queue_t* cq, void* dmaBuffer, uint64_t ioaddr, void* destination, 
-//        
-//        
-//        
-//        
-//        
-//        uint64_t ioaddr, void* dst, void* src, uint32_t numBlocks, size_t blockSize, uint32_t ns, uint64_t* ec)
-//{
-//    const uint16_t threadCount = blockDim.x * gridDim.x;
-//    const uint16_t threadId = blockDim.x * blockIdx.x + threadIdx.x;
-//
-//    nvm_cmd_t* cmd;
-//    while ((cmd = nvm_sq_enqueue_n(sq, threadCount, threadId)) == nullptr);
-//
-//    nvm_cmd_header(cmd, NVM_IO_READ, ns);
-//    //nvm_cmd_data_ptr(cmd, ioaddr + blockSize, 0); // TODO work on page sizes instead
-//    //nvm_cmd_rw_blks(cmd, i + threadId, 1);
-//    nvm_cmd_data_ptr(cmd, ioaddr + (threadId * 8), 0);
-//    nvm_cmd_rw_blks(cmd, 0, 8);
-//
-//    // Warp divergence, not good but unavoidable
-//    __syncthreads();
-//    //        if (threadId == 0)
-//    //        {
-//    //            nvm_sq_submit(sq);
-//    //
-//    //            for (uint32_t ncpls = 0; ncpls < threadCount; ++ncpls)
-//    //            {
-//    //                while (nvm_cq_dequeue(cq) == nullptr);
-//    //                nvm_sq_update(sq);
-//    //                nvm_cq_update(cq);
-//    //            }
-//    //        }
-//    __syncthreads();
-//
-//    for (size_t byte = 0; byte < blockSize; ++byte)
-//    {
-//        char* dptr = ((char*) dst) + blockSize * (i + threadId);
-//        char* sptr = ((char*) src) + blockSize * threadId;
-//
-//        dptr[byte] = sptr[byte];
-//    }
-//}
-//
-
-
-
 struct __align__(64) QueuePair
 {
     size_t              pageSize;
     size_t              blockSize;
     uint32_t            nvmNamespace;
     size_t              maxDataSize;
-    void*               prpListPtr;
-    uint64_t            prpListAddr;
+    //void*               prpListPtr;
+    //uint64_t            prpListAddr;
     nvm_queue_t         sq;
     nvm_queue_t         cq;
 };
 
 
+__device__ void movePage(void* src, void* dst, size_t offset, uint16_t threadNum, size_t pageSize)
+{
+    uint8_t* source = ((uint8_t*) src) + pageSize * threadNum;
+    uint8_t* destination = ((uint8_t*) dst) + pageSize * threadNum;
+
+    for (size_t i = 0; i < pageSize; ++i)
+    {
+        destination[i] = source[i];
+    }
+    __syncthreads();
+}
+
+
+
+__global__ void readPages(QueuePair* qp, uint64_t ioaddr, void* src, void* dst, size_t numPages)
+{
+    const uint16_t numThreads = blockDim.x;
+    const uint16_t threadNum = threadIdx.x;
+
+    const size_t blocksPerPage = NVM_PAGE_TO_BLOCK(qp->pageSize, qp->blockSize, 1);
+    uint64_t offset = 0;
+
+    nvm_cmd_t* cmd = nullptr;
+    while ((cmd = nvm_sq_enqueue_n(&qp->sq, numThreads, threadNum)) == nullptr);
+    __syncthreads();
+
+    nvm_cmd_header(cmd, NVM_IO_READ, qp->nvmNamespace);
+    nvm_cmd_data_ptr(cmd, ioaddr + qp->pageSize * threadNum, 0);
+    nvm_cmd_rw_blks(cmd, offset + blocksPerPage * threadNum, blocksPerPage);
+
+    __syncthreads();
+    if (threadNum == 0)
+    {
+        nvm_sq_submit(&qp->sq);
+
+        for (uint16_t i = 0; i < numThreads; ++i)
+        {
+            while (nvm_cq_dequeue(&qp->cq) == nullptr);
+            nvm_sq_update(&qp->sq);
+            nvm_cq_update(&qp->cq);
+        }
+    }
+    __syncthreads();
+
+    movePage(src, dst, 0, threadNum, qp->pageSize);
+}
 
 
 
 static void prepareQueuePair(DmaPtr& qmem, QueuePair& qp, const Controller& ctrl, int device, uint32_t numThreads, uint32_t adapter, uint32_t id)
 {
     size_t queueMemSize = ctrl.info.page_size * 2;
-    size_t prpListSize = ctrl.info.page_size * numThreads;
+    //size_t prpListSize = ctrl.info.page_size * numThreads;
+    size_t prpListSize = 0;
 
     // qmem->vaddr will be already a device pointer after the following call
     qmem = createDma(ctrl.ctrl, queueMemSize + prpListSize, device, adapter, id);
@@ -160,8 +124,27 @@ static void prepareQueuePair(DmaPtr& qmem, QueuePair& qp, const Controller& ctrl
     }
     qp.sq.db = (volatile uint32_t*) devicePtr;
 
-    qp.prpListPtr = NVM_DMA_OFFSET(qmem, 2);
-    qp.prpListAddr = qmem->ioaddrs[2];
+   // qp.prpListPtr = NVM_DMA_OFFSET(qmem, 2);
+   // qp.prpListAddr = qmem->ioaddrs[2];
+}
+
+
+
+static void verify(BufferPtr data, size_t size, const char* filename)
+{
+    auto buffer = createBuffer(size);
+
+    cudaError_t err = cudaMemcpy(buffer.get(), data.get(), size, cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess)
+    {
+        throw error(string("Failed to copy data from destination: ") + cudaGetErrorString(err));
+    }
+
+    // TODO: open filename for read and compare byte by byte
+
+    FILE* fp = fopen(filename, "wb");
+    fwrite(buffer.get(), 1, size, fp);
+    fclose(fp);
 }
 
 
@@ -175,6 +158,39 @@ static void use_nvm(const Controller& ctrl, const Settings& settings)
     QueuePair queuePair;
     prepareQueuePair(queueMemory, queuePair, ctrl, settings.cudaDevice, settings.numThreads, settings.adapter, sid++);
 
+    auto deviceQueue = createBuffer(sizeof(QueuePair), settings.cudaDevice);
+    auto err = cudaMemcpy(deviceQueue.get(), &queuePair, sizeof(QueuePair), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
+    const size_t pageSize = ctrl.info.page_size;
+    const size_t blockSize = ctrl.ns.lba_data_size;
+
+    size_t totalPages = NVM_PAGE_TO_BLOCK(pageSize, blockSize, settings.numBlocks);
+    totalPages = NVM_PAGE_ALIGN(totalPages * pageSize, pageSize * settings.numThreads) / pageSize;
+    size_t totalBlocks = NVM_BLOCK_TO_PAGE(pageSize, blockSize, totalPages);
+
+    fprintf(stderr, "numThreads=%u, totalPages=%zu, totalBlocks=%zu\n",
+            settings.numThreads, totalPages, totalBlocks);
+
+    auto destination = createBuffer(pageSize * totalPages, settings.cudaDevice); // this is a host ptr
+    
+    auto source = createDma(ctrl.ctrl, pageSize * settings.numThreads, settings.cudaDevice, settings.adapter, sid++); // vaddr is a dev ptr
+
+    readPages<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalPages);
+
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
+    if (settings.verify != nullptr)
+    {
+        verify(destination, settings.numBlocks * ctrl.ns.lba_data_size, settings.verify);
+    }
 }
 
 

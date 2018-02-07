@@ -375,7 +375,8 @@ int nvm_dis_dma_map_device(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, uint32_t 
 {
     struct map_descriptor* md;
     *handle = NULL;
-    size = NVM_CTRL_ALIGN(ctrl, size);
+    //size = NVM_CTRL_ALIGN(ctrl, size);
+    size = NVM_PAGE_ALIGN(size, (1ULL << 16));
 
     // Create mapping descriptor
     int err = create_map_descriptor(&md, ctrl, size);
