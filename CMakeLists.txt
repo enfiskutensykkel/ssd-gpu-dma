@@ -262,6 +262,7 @@ add_custom_target (examples DEPENDS samples)
 # Add individual benchmarks
 if (CUDA_FOUND)
     add_subdirectory ("${benchmarks_root}/latency")
+    add_subdirectory ("${benchmarks_root}/latency-comparison")
     add_custom_target (benchmarks DEPENDS ${benchmark_targets})
 endif ()
 
