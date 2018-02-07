@@ -4,6 +4,7 @@
 #ifndef __CUDACC__
 #define __device__
 #define __host__
+#define __syncthreads()
 #endif
 
 #include <nvm_util.h>
@@ -66,6 +67,44 @@ nvm_cmd_t* nvm_sq_enqueue(nvm_queue_t* sq)
     // Set command identifier to tail pointer
     // User may override this by setting the CID manually
     *NVM_CMD_CID(cmd) = sq->tail + (!sq->phase) * sq->max_entries;
+    return cmd;
+}
+
+
+
+/*
+ * Enqueue n submission commands as the i'th thread
+ */
+__device__ static inline
+nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, uint16_t n, uint16_t i)
+{
+    uint16_t head = sq->head;
+    uint16_t tail = sq->tail;
+    __syncthreads();
+
+    if (((sq->max_entries - 1) - (tail - head) % sq->max_entries) < n)
+    {
+        return NULL;
+    }
+
+    nvm_cmd_t* cmd = (nvm_cmd_t*) (((unsigned char*) sq->vaddr) + sq->entry_size * (tail + i));
+
+    *NVM_CMD_CID(cmd) = ((tail + 1 + i) % sq->max_entries);
+    
+    // Only one thread should update tail
+    __syncthreads();
+    if (i == 0)
+    {
+        if (((uint32_t) tail) + n >= sq->max_entries)
+        {
+            sq->tail = n - (sq->max_entries - tail);
+        }
+        else
+        {
+            sq->tail += n;
+        }
+    }
+
     return cmd;
 }
 
