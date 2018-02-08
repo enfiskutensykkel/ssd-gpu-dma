@@ -4,6 +4,7 @@
 #ifndef __CUDACC__
 #define __device__
 #define __host__
+#define __syncthreads()
 #endif
 
 #include <nvm_util.h>
@@ -105,6 +106,7 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
     {
         sq->tail = (((uint32_t) sq->tail) + ((uint32_t) n)) % sq->max_entries;
     }
+    __syncthreads();
 
     return cmd;
 }
