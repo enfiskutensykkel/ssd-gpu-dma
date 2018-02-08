@@ -14,7 +14,7 @@ struct Settings
     uint32_t        adapter;
     uint32_t        segmentId;
     uint32_t        nvmNamespace;
-    size_t          numBlocks;
+    size_t          numPages;
     size_t          startBlock;
     bool            stats;
     const char*     verify;

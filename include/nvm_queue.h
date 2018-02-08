@@ -4,7 +4,6 @@
 #ifndef __CUDACC__
 #define __device__
 #define __host__
-#define __syncthreads()
 #endif
 
 #include <nvm_util.h>
@@ -73,36 +72,38 @@ nvm_cmd_t* nvm_sq_enqueue(nvm_queue_t* sq)
 
 
 /*
- * Enqueue n submission commands as the i'th thread
+ * Enqueue command the i'th of n threads.
+ *
+ * This function does not check actual queue state, so it is important
+ * that all completions are consumed before making successive calls to this function. 
+ * It is also assumed that n < max_entries.
  */
 __device__ static inline
-nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, uint16_t n, uint16_t i)
+nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16_t i)
 {
-    uint16_t head = sq->head;
-    uint16_t tail = sq->tail;
-    __syncthreads();
+    unsigned char* start = (unsigned char*) sq->vaddr;
+    unsigned char* end = start + (sq->max_entries * sq->entry_size);
+    nvm_cmd_t* cmd = NULL;
 
-    if (((sq->max_entries - 1) - (tail - head) % sq->max_entries) < n)
+    if (last == NULL)
     {
-        return NULL;
+        cmd = (nvm_cmd_t*) (start + sq->entry_size * i);
+    }
+    else
+    {
+        cmd = (nvm_cmd_t*) (((unsigned char*) last) + n * sq->entry_size);
+
+        if (((nvm_cmd_t*) end) <= cmd)
+        {
+            cmd = (nvm_cmd_t*) (start + (((unsigned char*) cmd) - end));
+        }
     }
 
-    nvm_cmd_t* cmd = (nvm_cmd_t*) (((unsigned char*) sq->vaddr) + sq->entry_size * (tail + i));
+    *NVM_CMD_CID(cmd) = i;
 
-    *NVM_CMD_CID(cmd) = ((tail + 1 + i) % sq->max_entries);
-    
-    // Only one thread should update tail
-    __syncthreads();
     if (i == 0)
     {
-        if (((uint32_t) tail) + n >= sq->max_entries)
-        {
-            sq->tail = n - (sq->max_entries - tail);
-        }
-        else
-        {
-            sq->tail += n;
-        }
+        sq->tail = (((uint32_t) sq->tail) + ((uint32_t) n)) % sq->max_entries;
     }
 
     return cmd;
