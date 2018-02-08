@@ -13,6 +13,7 @@
 #include "ctrl.h"
 #include "buffer.h"
 #include "settings.h"
+#include "event.h"
 #ifdef __DIS_CLUSTER__
 #include <sisci_api.h>
 #endif
@@ -26,24 +27,44 @@ struct __align__(64) QueuePair
     size_t              pageSize;
     size_t              blockSize;
     uint32_t            nvmNamespace;
-    size_t              maxDataSize;
-    //void*               prpListPtr;
-    //uint64_t            prpListAddr;
     nvm_queue_t         sq;
     nvm_queue_t         cq;
 };
 
 
-__device__ void movePage(volatile void* src, void* dst, size_t offset, uint16_t threadNum, size_t pageSize)
+__device__ void movePage(volatile void* src, void* dst, uint32_t pageSize, size_t dstOffset, uint16_t srcOffset)
 {
-    uint8_t* source = ((uint8_t*) src) + (pageSize * threadNum);
-    uint8_t* destination = ((uint8_t*) dst) + (pageSize * offset);
+    const uint16_t numThreads = blockDim.x;
+    const uint16_t threadNum = threadIdx.x;
 
-    for (size_t i = 0; i < pageSize; ++i)
+    volatile uint8_t* source = ((volatile uint8_t*) src) + pageSize * threadNum + (srcOffset * numThreads * pageSize);
+    uint8_t* destination = ((uint8_t*) dst) + pageSize * dstOffset;
+
+    for (uint32_t i = 0; i < pageSize; ++i)
     {
         destination[i] = source[i];
-        source[i] = 0;
     }
+}
+
+
+__device__ void waitForIoCompletion(nvm_queue_t* cq, nvm_queue_t* sq, uint64_t* errCount)
+{
+    const uint16_t numThreads = blockDim.x;
+
+    for (uint16_t i = 0; i < numThreads; ++i)
+    {
+        nvm_cpl_t* cpl = nullptr;
+        while ((cpl = nvm_cq_dequeue(cq)) == nullptr);
+
+        nvm_sq_update(sq);
+
+        if (!NVM_ERR_OK(cpl))
+        {
+            *errCount = *errCount + 1;
+        }
+    }
+
+    nvm_cq_update(cq);
 }
 
 
@@ -53,65 +74,79 @@ __global__ void readPages(QueuePair* qp, uint64_t ioaddr, volatile void* src, vo
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
 
-    const size_t blocksPerPage = NVM_PAGE_TO_BLOCK(qp->pageSize, qp->blockSize, 1);
+    const uint32_t pageSize = qp->pageSize;
+    const uint32_t blockSize = qp->blockSize;
+    const uint32_t nvmNamespace = qp->nvmNamespace;
+    nvm_queue_t* sq = &qp->sq;
+
+    ioaddr = ioaddr + pageSize * threadNum;
+
+    const size_t blocksPerPage = NVM_PAGE_TO_BLOCK(pageSize, blockSize, 1);
     uint64_t blockOffset = 0;  // FIXME
 
+
+    // Enqueue initial number of commands (due to double buffering)
+    size_t currPage = threadNum;
+    size_t currBlock = NVM_PAGE_TO_BLOCK(pageSize, blockSize, currPage) + blockOffset;
+
+    nvm_cmd_t* cmd = nvm_sq_enqueue_n(sq, nullptr, numThreads, threadNum);
+    nvm_cmd_header(cmd, NVM_IO_READ, nvmNamespace);
+    nvm_cmd_data_ptr(cmd, ioaddr, 0);
+    nvm_cmd_rw_blks(cmd, currBlock, blocksPerPage);
+
+    __threadfence();
     if (threadNum == 0)
     {
         *errCount = 0;
+        nvm_sq_submit(sq);
     }
     __syncthreads();
 
-    nvm_cmd_t* cmd = nullptr;
-    for (size_t currPage = threadNum; currPage < numPages; currPage += numThreads)
+    // Loop around, always work on the previous window
+    bool second = true;
+    for (; currPage + numThreads < numPages; currPage += numThreads, second = !second)
     {
-        size_t currBlock = NVM_PAGE_TO_BLOCK(qp->pageSize, qp->blockSize, currPage) + blockOffset;
-        cmd = nvm_sq_enqueue_n(&qp->sq, cmd, numThreads, threadNum);
+        currBlock = NVM_PAGE_TO_BLOCK(pageSize, blockSize, currPage + numThreads) + blockOffset;
 
-        nvm_cmd_header(cmd, NVM_IO_READ, qp->nvmNamespace);
-        nvm_cmd_data_ptr(cmd, ioaddr + qp->pageSize * threadNum, 0);
+        cmd = nvm_sq_enqueue_n(sq, cmd, numThreads, threadNum);
+        nvm_cmd_header(cmd, NVM_IO_READ, nvmNamespace);
+        nvm_cmd_data_ptr(cmd, ioaddr + (pageSize * numThreads * second), 0);
         nvm_cmd_rw_blks(cmd, currBlock, blocksPerPage);
 
+        // Consume completions for the previous window
+        __threadfence();
         if (threadNum == 0)
         {
-            nvm_sq_submit(&qp->sq);
-
-            for (uint16_t i = 0; i < numThreads; ++i)
-            {
-                nvm_cpl_t* cpl = nullptr;
-                while ((cpl = nvm_cq_dequeue(&qp->cq)) == nullptr);
-                nvm_sq_update(&qp->sq);
-
-                if (!NVM_ERR_OK(cpl))
-                {
-                    *errCount = *errCount + 1;
-                }
-            }
-
-            nvm_cq_update(&qp->cq);
+            waitForIoCompletion(&qp->cq, sq, errCount);
+            nvm_sq_submit(sq);
         }
-        //__threadfence();
         __syncthreads();
 
-        movePage(src, dst, currPage, threadNum, qp->pageSize);
+        movePage(src, dst, pageSize, currPage, !second);
     }
+
+    // Wait for final buffer to complete
+    if (threadNum == 0)
+    {
+        waitForIoCompletion(&qp->cq, sq, errCount);
+    }
+    __syncthreads();
+
+    movePage(src, dst, pageSize, currPage, !second);
 }
 
 
 
-static void prepareQueuePair(DmaPtr& qmem, QueuePair& qp, const Controller& ctrl, int device, uint32_t numThreads, uint32_t adapter, uint32_t id)
+static void prepareQueuePair(DmaPtr& qmem, QueuePair& qp, const Controller& ctrl, int device, uint32_t adapter, uint32_t id)
 {
     size_t queueMemSize = ctrl.info.page_size * 2;
-    //size_t prpListSize = ctrl.info.page_size * numThreads;
-    size_t prpListSize = 0;
 
     // qmem->vaddr will be already a device pointer after the following call
-    qmem = createDma(ctrl.ctrl, queueMemSize + prpListSize, device, adapter, id);
+    qmem = createDma(ctrl.ctrl, queueMemSize, device, adapter, id);
 
     qp.pageSize = ctrl.info.page_size;
     qp.blockSize = ctrl.ns.lba_data_size;
     qp.nvmNamespace = ctrl.ns.ns_id;
-    qp.maxDataSize = ctrl.info.max_data_size;
     
     int status = nvm_admin_cq_create(ctrl.aq_ref, &qp.cq, 1, qmem->vaddr, qmem->ioaddrs[0]);
     if (!nvm_ok(status))
@@ -139,9 +174,6 @@ static void prepareQueuePair(DmaPtr& qmem, QueuePair& qp, const Controller& ctrl
         throw err;
     }
     qp.sq.db = (volatile uint32_t*) devicePtr;
-
-   // qp.prpListPtr = NVM_DMA_OFFSET(qmem, 2);
-   // qp.prpListAddr = qmem->ioaddrs[2];
 }
 
 
@@ -172,7 +204,7 @@ static void use_nvm(const Controller& ctrl, const Settings& settings)
 
     DmaPtr queueMemory;
     QueuePair queuePair;
-    prepareQueuePair(queueMemory, queuePair, ctrl, settings.cudaDevice, settings.numThreads, settings.adapter, sid++);
+    prepareQueuePair(queueMemory, queuePair, ctrl, settings.cudaDevice, settings.adapter, sid++);
 
     auto deviceQueue = createBuffer(sizeof(QueuePair), settings.cudaDevice);
     auto err = cudaMemcpy(deviceQueue.get(), &queuePair, sizeof(QueuePair), cudaMemcpyHostToDevice);
@@ -184,7 +216,7 @@ static void use_nvm(const Controller& ctrl, const Settings& settings)
     const size_t pageSize = ctrl.info.page_size;
     const size_t blockSize = ctrl.ns.lba_data_size;
 
-    size_t totalPages = NVM_PAGE_ALIGN(settings.numPages * pageSize, pageSize * settings.numThreads) / pageSize;
+    size_t totalPages = settings.numThreads * settings.numPages;
     size_t totalBlocks = NVM_PAGE_TO_BLOCK(pageSize, blockSize, totalPages);
 
     fprintf(stderr, "numThreads=%u, totalPages=%zu, totalBlocks=%zu\n",
@@ -192,7 +224,10 @@ static void use_nvm(const Controller& ctrl, const Settings& settings)
 
     auto destination = createBuffer(pageSize * totalPages, settings.cudaDevice); // this is a host ptr
     
-    auto source = createDma(ctrl.ctrl, pageSize * settings.numThreads, settings.cudaDevice, settings.adapter, sid++); // vaddr is a dev ptr
+    const size_t sourceBufferSize = NVM_PAGE_ALIGN(2 * pageSize * settings.numThreads, 1UL << 16);
+    auto source = createDma(ctrl.ctrl, sourceBufferSize, settings.cudaDevice, settings.adapter, sid++); // vaddr is a dev ptr
+
+    Event before, after; 
 
     uint64_t* ec = nullptr;
     err = cudaMalloc(&ec, sizeof(uint64_t));
@@ -201,20 +236,35 @@ static void use_nvm(const Controller& ctrl, const Settings& settings)
         throw err;
     }
 
-    readPages<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalPages, ec);
+    try
+    {
+        before.record(0);
+        readPages<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalPages, ec);
+        after.record(0);
 
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess)
+        err = cudaDeviceSynchronize();
+        if (err != cudaSuccess)
+        {
+            throw err;
+        }
+    }
+    catch (const error& e)
     {
         cudaFree(ec);
-        throw err;
+        throw e;
     }
+
+    float msecs = 0;
+    cudaEventElapsedTime(&msecs, before.event, after.event);
+    double usecs = (msecs * 1e3);
+
+    fprintf(stderr, "BW=%.3f MiB/s\n", (totalPages * pageSize) / usecs);
 
     uint64_t errorCount = 0;
     cudaMemcpy(&errorCount, ec, sizeof(uint64_t), cudaMemcpyDeviceToHost);
     cudaFree(ec);
 
-    fprintf(stderr, "ec: %lx\n", errorCount);
+    fprintf(stderr, "ec: 0x%lx\n", errorCount);
 
     if (settings.verify != nullptr)
     {
