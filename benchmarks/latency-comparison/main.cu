@@ -37,17 +37,17 @@ struct __align__(64) QueuePair
 
 
 __device__ static
-void movePage(volatile void* src, void* dst, uint32_t pageSize, size_t dstOffset, uint16_t srcOffset)
+void moveBytes(const void* src, size_t srcOffset, void* dst, size_t dstOffset, size_t size)
 {
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
 
-    volatile uint8_t* source = ((volatile uint8_t*) src) + pageSize * threadNum + (srcOffset * numThreads * pageSize);
-    uint8_t* destination = ((uint8_t*) dst) + pageSize * dstOffset;
+    const ulong4* source = (ulong4*) (((const unsigned char*) src) + srcOffset);
+    ulong4* destination = (ulong4*) (((unsigned char*) dst) + dstOffset);
 
-    for (uint32_t i = 0; i < pageSize; ++i)
+    for (size_t i = 0, n = size / sizeof(ulong4); i < n; i += numThreads)
     {
-        destination[i] = source[i];
+        destination[i + threadNum] = source[i + threadNum];
     }
 }
 
@@ -75,29 +75,28 @@ void waitForIoCompletion(nvm_queue_t* cq, nvm_queue_t* sq, uint64_t* errCount)
 
 
 __device__ static
-nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, uint64_t ioaddr, uint16_t offset, uint64_t blockOffset, uint32_t currChunk)
+nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, const uint64_t ioaddr, uint16_t offset, uint64_t blockOffset, uint32_t currChunk)
 {
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
-    const uint32_t threadOffset = threadNum + numThreads * offset;
+    const uint16_t threadOffset = threadNum + numThreads * offset;
 
     const uint32_t pageSize = qp->pageSize;
     const uint32_t blockSize = qp->blockSize;
     const uint32_t nvmNamespace = qp->nvmNamespace;
     const uint32_t chunkPages = qp->pagesPerChunk;
 
-    const size_t blocksPerChunk = NVM_PAGE_TO_BLOCK(pageSize, blockSize, chunkPages);
-    const size_t currBlock = NVM_PAGE_TO_BLOCK(pageSize, blockSize, currChunk * chunkPages);
+    const uint16_t blocksPerChunk = NVM_PAGE_TO_BLOCK(pageSize, blockSize, chunkPages);
+    const uint64_t currBlock = NVM_PAGE_TO_BLOCK(pageSize, blockSize, (currChunk + threadNum) * chunkPages);
 
     // Prepare PRP list building
     void* prpList = NVM_PTR_OFFSET(qp->prpList, pageSize, threadOffset);
     uint64_t prpListAddr = NVM_ADDR_OFFSET(qp->prpListIoAddr, pageSize, threadOffset);
 
-    ioaddr = NVM_ADDR_OFFSET(ioaddr, chunkPages * pageSize, threadOffset);
     uint64_t addrs[0x1000 / sizeof(uint64_t)]; // FIXME: hack
     for (uint32_t page = 0; page < chunkPages; ++page)
     {
-        addrs[page] = ioaddr + pageSize * page;
+        addrs[page] = NVM_ADDR_OFFSET(ioaddr, pageSize, chunkPages * threadOffset + page);
     }
 
     nvm_cmd_t* cmd = nvm_sq_enqueue_n(&qp->sq, last, numThreads, threadNum);
@@ -112,17 +111,18 @@ nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, uint64_t ioaddr, uint16_
 
 
 
-__global__ void readPages(QueuePair* qp, const uint64_t ioaddr, volatile void* src, void* dst, size_t numChunks, uint64_t* errCount)
+__global__ void readPages(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t* errCount)
 {
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
-    const uint16_t bufferLevel = qp->bufferLevel;
-    const size_t chunkSize = qp->pagesPerChunk * qp->pageSize;
+    const uint16_t bufferLevel = 2;//qp->bufferLevel;
+    const uint32_t pageSize = qp->pageSize;
+    const size_t chunkSize = qp->pagesPerChunk * pageSize;
     nvm_queue_t* sq = &qp->sq;
 
     uint64_t blockOffset = 0; // TODO: Fix this
 
-    size_t currChunk = threadNum;
+    uint32_t currChunk = 0;
     uint16_t bufferOffset = 0;
 
     nvm_cmd_t* last = prepareChunk(qp, nullptr, ioaddr, bufferOffset, blockOffset, currChunk);
@@ -147,7 +147,8 @@ __global__ void readPages(QueuePair* qp, const uint64_t ioaddr, volatile void* s
         }
         __syncthreads();
 
-        movePage(src, dst, chunkSize, currChunk, bufferOffset);
+        // Move received chunk
+        moveBytes(src, bufferOffset * numThreads * chunkSize, dst, currChunk * chunkSize, chunkSize * numThreads);
     
         // Update position and input buffer
         bufferOffset = (bufferOffset + 1) % bufferLevel;
@@ -161,7 +162,7 @@ __global__ void readPages(QueuePair* qp, const uint64_t ioaddr, volatile void* s
     }
     __syncthreads();
 
-    movePage(src, dst, chunkSize, currChunk, bufferOffset);
+    moveBytes(src, bufferOffset * numThreads * chunkSize, dst, currChunk * chunkSize, chunkSize * numThreads);
 }
 
 
@@ -259,8 +260,8 @@ static void use_nvm(const Controller& ctrl, const Settings& settings) // TODO ta
     size_t totalPages = totalChunks * settings.numPages;
     size_t totalBlocks = NVM_PAGE_TO_BLOCK(pageSize, blockSize, totalPages);
 
-    fprintf(stderr, "numThreads=%u, numChunks=%zu, pagesPerChunk=%zu, totalPages=%zu, totalBlocks=%zu\n",
-            settings.numThreads, settings.numChunks, settings.numPages, totalPages, totalBlocks);
+    fprintf(stderr, "numThreads=%u, numChunks=%zu, pagesPerChunk=%zu, totalChunks=%zu, totalPages=%zu, totalBlocks=%zu\n",
+            settings.numThreads, settings.numChunks, settings.numPages, totalChunks, totalPages, totalBlocks);
 
     auto destination = createBuffer(pageSize * totalPages, settings.cudaDevice); // this is a host ptr
     
