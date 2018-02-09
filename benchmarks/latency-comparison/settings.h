@@ -14,11 +14,13 @@ struct Settings
     uint32_t        adapter;
     uint32_t        segmentId;
     uint32_t        nvmNamespace;
+    uint16_t        bufferLevel;
+    size_t          numChunks;
     size_t          numPages;
     size_t          startBlock;
     bool            stats;
     const char*     verify;
-    uint32_t        numThreads;
+    uint16_t        numThreads;
 
     Settings();
     void parseArguments(int argc, char** argv);

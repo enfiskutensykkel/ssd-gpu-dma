@@ -13,9 +13,11 @@ Settings::Settings()
     adapter = 0;
     segmentId = 0;
     nvmNamespace = 1;
-    numPages = 128;
+    bufferLevel = 2;
+    numChunks = 8;
+    numPages = 32;
     startBlock = 0;
     stats = false;
     verify = "readback.txt";
-    numThreads = 32;
+    numThreads = 16;
 }
