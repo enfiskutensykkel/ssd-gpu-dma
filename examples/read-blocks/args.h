@@ -20,6 +20,7 @@ struct options
     size_t      offset;
     const char* output;
     bool        ascii;
+    bool        identify;
 };
 
 

@@ -140,7 +140,7 @@ int main(int argc, char** argv)
     }
 
     // Identify controller and namespace
-    status = get_disk_info(aq_ref, &disk, args.namespace_id, NVM_DMA_OFFSET(aq_mem, 2), aq_mem->ioaddrs[2]);
+    status = get_disk_info(aq_ref, &disk, args.namespace_id, NVM_DMA_OFFSET(aq_mem, 2), aq_mem->ioaddrs[2], args.identify);
     if (status != 0)
     {
         goto leave;

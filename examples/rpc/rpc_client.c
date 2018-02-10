@@ -117,7 +117,7 @@ static void show_help(const char* program_name)
 {
     give_usage(program_name);
     fprintf(stderr, 
-            "    Run RPC client in a DIS cluster.\n\n"
+            "Identify controller using a remote controller manager in a DIS cluster.\n\n"
             "    --ctrl             <dev id>    SmartIO device identifier.\n"
             "    --adapter          <adapter>   Local adapter to reach device (default is 0).\n"
             "    --help                         Show this information.\n"

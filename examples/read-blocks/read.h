@@ -2,6 +2,7 @@
 #define __LIBNVM_SAMPLES_READ_BLOCKS_READ_H__
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <nvm_types.h>
 #include "args.h"
 
@@ -31,7 +32,7 @@ struct queue_pair
 
 
 
-int get_disk_info(nvm_aq_ref ref, struct disk_info* info, uint32_t ns_id, void* ptr, uint64_t ioaddr);
+int get_disk_info(nvm_aq_ref ref, struct disk_info* info, uint32_t ns_id, void* ptr, uint64_t ioaddr, bool show);
 
 
 int create_queue_pair(nvm_aq_ref ref, struct queue_pair* qp, nvm_dma_t* cq_mem, nvm_dma_t* sq_mem);

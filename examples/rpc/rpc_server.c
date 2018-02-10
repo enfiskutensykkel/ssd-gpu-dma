@@ -325,7 +325,7 @@ static void show_help(const char* program_name)
 {
     give_usage(program_name);
     fprintf(stderr, 
-            "    Run controller manager RPC server in a DIS cluster.\n\n"
+            "Run controller manager RPC server in a DIS cluster.\n\n"
             "    --ctrl             <dev id>    SmartIO device identifier.\n"
             "    --adapter          <adapter>   Local adapter to reach device (default is 0).\n"
             "    --enable           <adapter>   Enable RPC on adapter (defaults to controller adapter).\n"

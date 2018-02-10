@@ -21,6 +21,7 @@ static struct option opts[] = {
     { .name = "offset", .has_arg = required_argument, .flag = NULL, .val = 'o' },
     { .name = "output", .has_arg = required_argument, .flag = NULL, .val = 0 },
     { .name = "ascii", .has_arg = no_argument, .flag = NULL, .val = 2 },
+    { .name = "identify", .has_arg = no_argument, .flag = NULL, .val = 3 },
     { .name = NULL, .has_arg = no_argument, .flag = NULL, .val = 0 }
 };
 
@@ -41,7 +42,7 @@ static void show_help(const char* name)
 {
     show_usage(name);
 
-    fprintf(stderr, "\nRead blocks from disk.\n\n"
+    fprintf(stderr, ""
 #ifdef __DIS_CLUSTER__
             "    --ctrl         <id>      Specify controller's device identifier.\n"
             "    --adapter      <no>      Specify local DIS adapter.\n"
@@ -53,6 +54,7 @@ static void show_help(const char* name)
             "    --namespace    <id>      Namespace identifier (default 1).\n"
             "    --ascii                  Show output of ASCII characters as text.\n"
             "    --output       <path>    Dump to file rather than stdout.\n"
+            "    --identify               Show IDENTIFY CONTROLLER structure.\n"
            );
 }
 
@@ -83,6 +85,7 @@ void parse_options(int argc, char** argv, struct options* args)
     args->offset = 0;
     args->output = NULL;
     args->ascii = false;
+    args->identify = false;
 
     while ((opt = getopt_long(argc, argv, argstr, opts, &idx)) != -1)
     {
@@ -107,6 +110,10 @@ void parse_options(int argc, char** argv, struct options* args)
                     fprintf(stderr, "Output file is set, ignoring option --ascii\n");
                     args->ascii = false;
                 }
+                break;
+
+            case 3:
+                args->identify = true;
                 break;
 
 #ifdef __DIS_CLUSTER__

@@ -48,7 +48,7 @@ static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
 }
 
 
-int get_disk_info(nvm_aq_ref ref, struct disk_info* info, uint32_t ns_id, void* ptr, uint64_t ioaddr)
+int get_disk_info(nvm_aq_ref ref, struct disk_info* info, uint32_t ns_id, void* ptr, uint64_t ioaddr, bool show)
 {
     int status;
     struct nvm_ctrl_info ctrl_info;
@@ -74,7 +74,10 @@ int get_disk_info(nvm_aq_ref ref, struct disk_info* info, uint32_t ns_id, void* 
     info->ns_id = ns_info.ns_id;
     info->block_size = ns_info.lba_data_size;
 
-    print_ctrl_info(stderr, &ctrl_info);
+    if (show)
+    {
+        print_ctrl_info(stderr, &ctrl_info);
+    }
     return 0;
 }
 
