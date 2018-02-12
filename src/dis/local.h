@@ -51,6 +51,13 @@ int _nvm_local_memory_get_attached(struct local_memory* mem, uint32_t id, void* 
 
 
 /*
+ * Create local segment with registered host memory.
+ * This function will not map segment into address space (as it is already mapped).
+ */
+int _nvm_local_memory_get_registered(struct local_memory* mem, uint32_t id, void* ptr, size_t size);
+
+
+/*
  * Remove local segment.
  */
 void _nvm_local_memory_put(struct local_memory* mem);

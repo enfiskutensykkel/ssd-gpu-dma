@@ -4,6 +4,8 @@
 #include <getopt.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <errno.h>
+#include <string.h>
 
 
 
@@ -22,6 +24,7 @@ static struct option opts[] = {
     { .name = "output", .has_arg = required_argument, .flag = NULL, .val = 0 },
     { .name = "ascii", .has_arg = no_argument, .flag = NULL, .val = 2 },
     { .name = "identify", .has_arg = no_argument, .flag = NULL, .val = 3 },
+    { .name = "chunk", .has_arg = required_argument, .flag = NULL, .val = 's' },
     { .name = NULL, .has_arg = no_argument, .flag = NULL, .val = 0 }
 };
 
@@ -49,6 +52,7 @@ static void show_help(const char* name)
 #else
             "    --ctrl         <path>    Specify path to controller.\n"
 #endif
+            "    --chunk        <count>    Limit reads to a number of blocks at the time.\n"
             "    --blocks       <count>   Read specified number of blocks from disk.\n"
             "    --offset       <count>   Start reading at specified block (default 0).\n"
             "    --namespace    <id>      Namespace identifier (default 1).\n"
@@ -63,9 +67,9 @@ static void show_help(const char* name)
 void parse_options(int argc, char** argv, struct options* args)
 {
 #ifdef __DIS_CLUSTER__
-    const char* argstr = ":hc:a:n:b:o:";
+    const char* argstr = ":hc:a:n:b:o:s:";
 #else
-    const char* argstr = ":hc:b:b:o:";
+    const char* argstr = ":hc:b:n:o:s:";
 #endif
 
     int opt;
@@ -76,10 +80,11 @@ void parse_options(int argc, char** argv, struct options* args)
     args->controller_id = 0;
     args->adapter = 0;
     args->segment_id = 0xdeadbeef;
+    args->chunk_size = (64UL << 20) / 512;
 #else
     args->controller_path = NULL;
+    args->chunk_size = 0;
 #endif
-
     args->namespace_id = 1;
     args->num_blocks = 0;
     args->offset = 0;
@@ -104,11 +109,17 @@ void parse_options(int argc, char** argv, struct options* args)
                 exit('?');
 
             case 0:
-                args->output = optarg;
                 if (args->ascii)
                 {
                     fprintf(stderr, "Output file is set, ignoring option --ascii\n");
                     args->ascii = false;
+                }
+
+                args->output = fopen(optarg, "w");
+                if (args->output == NULL)
+                {
+                    fprintf(stderr, "Failed to open output file: %s\n", strerror(errno));
+                    exit(1);
                 }
                 break;
 
@@ -204,6 +215,15 @@ void parse_options(int argc, char** argv, struct options* args)
                     exit(2);
                 }
                 break;
+
+            case 's':
+                args->chunk_size = strtoul(optarg, &endptr, 0);
+                if (endptr == NULL || *endptr != '\0')
+                {
+                    fprintf(stderr, "Invalid block count: `%s'\n", optarg);
+                    exit(2);
+                }
+                break;
         }
     }
 
@@ -228,6 +248,11 @@ void parse_options(int argc, char** argv, struct options* args)
         fprintf(stderr, "Block count is not specified!\n");
         show_usage(argv[0]);
         exit(2);
+    }
+
+    if (args->chunk_size == 0)
+    {
+        args->chunk_size = args->num_blocks;
     }
 }
 

@@ -148,6 +148,14 @@ int main(int argc, char** argv)
 
     status = prepare_and_read(aq_ref, &disk, &args);
 
+    if (args.output != NULL)
+    {
+        fprintf(stderr, "Flushing output file...\n");
+        fclose(args.output);
+    }
+
+    fprintf(stderr, "Done\n");
+
 leave:
     nvm_aq_destroy(aq_ref);
     nvm_dma_unmap(aq_mem);

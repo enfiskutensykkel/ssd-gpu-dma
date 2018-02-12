@@ -130,6 +130,20 @@ int nvm_dis_dma_map_remote(nvm_dma_t** map,             // Mapping descriptor re
 
 
 
+#if ( !defined( __CUDA__ ) && !defined( __CUDACC__ ) ) && ( defined (__unix__) )
+/* 
+ * Short-hand function for allocating a page aligned buffer and mapping it 
+ * for the controller.
+ *
+ * Note: this function will not work if you are using the CUDA API
+ */
+int nvm_dma_create(nvm_dma_t** map,
+                   const nvm_ctrl_t* ctrl,
+                   size_t size);
+#endif
+
+
+
 #if defined( __DIS_CLUSTER__ )
 
 /*
@@ -161,6 +175,21 @@ int nvm_dis_dma_connect(nvm_dma_t** map,
 
 #endif /* __DIS_CLUSTER__ */
 
+
+
+#if defined ( __DIS_CLUSTER__ )
+
+/*
+ * Note: This function requires the IOMMU to be enabled.
+ */
+int nvm_dis_dma_map_host(nvm_dma_t** map,
+                         const nvm_ctrl_t* ctrl,
+                         uint32_t dis_adapter,
+                         uint32_t id,
+                         void* vaddr,
+                         size_t size);
+
+#endif
 
 
 #if ( ( defined( __CUDA__ ) || defined( __CUDACC__ ) ) && defined( __DIS_CLUSTER__ ) )

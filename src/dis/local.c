@@ -121,3 +121,51 @@ int _nvm_local_memory_get_attached(struct local_memory* mem, uint32_t id, void* 
     return 0;
 }
 
+
+
+int _nvm_local_memory_get_registered(struct local_memory* mem, uint32_t id, void* ptr, size_t size)
+{
+    sci_error_t err;
+    int status;
+
+    // FIXME: Add support for SCI_FLAG_PRIVATE
+    status = create_segment(mem, id, size, SCI_FLAG_EMPTY /* | SCI_FLAG_PRIVATE */);
+    if (status != 0)
+    {
+        return status;
+    }
+
+    SCIRegisterSegmentMemory(ptr, size, mem->segment, SCI_FLAG_LOCK_USER_MEM, &err);
+    
+    switch (err)
+    {
+        case SCI_ERR_OK:
+            // Do nothing
+            break;
+
+        case SCI_ERR_SIZE_ALIGNMENT:
+            _nvm_local_memory_put(mem);
+            return EINVAL;
+
+        case SCI_ERR_OUT_OF_RANGE:
+            _nvm_local_memory_put(mem);
+            return ERANGE;
+
+        case SCI_ERR_ILLEGAL_ADDRESS:
+            _nvm_local_memory_put(mem);
+            return EPERM;
+
+        case SCI_ERR_NOT_SUPPORTED:
+            _nvm_local_memory_put(mem);
+            dprintf("Function is not supported on platform\n");
+            return ENOTSUP;
+
+        default:
+            _nvm_local_memory_put(mem);
+            dprintf("Unknown error when registering host memory: %s\n", SCIGetErrorString(err));
+            return EIO;
+    }
+
+    return 0;
+}
+

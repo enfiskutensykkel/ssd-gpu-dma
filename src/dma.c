@@ -49,7 +49,8 @@ struct __attribute__((aligned (64))) dma
 enum map_type
 {
     _MAP_TYPE_HOST      = 0x01,
-    _MAP_TYPE_CUDA      = 0x02
+    _MAP_TYPE_CUDA      = 0x02,
+    _MAP_TYPE_INTERNAL  = 0x03
 };
 
 
@@ -62,6 +63,7 @@ struct ioctl_mapping
 {
     struct dma_map      mapping;        // DMA mapping descriptor
     enum map_type       type;           // Type of memory
+    void*               buffer;         // Buffer pointer
     int                 ioctl_fd;       // File descriptor to kernel module
     bool                mapped;         // Indicates if memory is mapped
 };
@@ -225,6 +227,7 @@ static int map_memory(struct ioctl_mapping* md, uint64_t* ioaddrs)
     
     switch (md->type)
     {
+        case _MAP_TYPE_INTERNAL:
         case _MAP_TYPE_HOST:
             type = NVM_MAP_HOST_MEMORY;
             break;
@@ -286,6 +289,7 @@ static int create_mapping(struct ioctl_mapping** handle, enum map_type type, int
     switch (type)
     {
         case _MAP_TYPE_HOST:
+        case _MAP_TYPE_INTERNAL:
             page_size = _nvm_host_page_size();
             break;
 
@@ -315,6 +319,12 @@ static int create_mapping(struct ioctl_mapping** handle, enum map_type type, int
     md->mapping.n_pages = n_pages;
     md->type = type;
     md->mapped = false;
+    md->buffer = NULL;
+
+    if (type == _MAP_TYPE_INTERNAL)
+    {
+        md->buffer = vaddr;
+    }
 
     md->ioctl_fd = dup(fd);
     if (md->ioctl_fd < 0)
@@ -340,6 +350,7 @@ static void remove_mapping(struct ioctl_mapping* md)
         unmap_memory(md);
     }
     close(md->ioctl_fd);
+    free(md->buffer);
     free(md);
 }
 
@@ -368,6 +379,56 @@ static int populate_handle(struct dma* container, const nvm_ctrl_t* ctrl)
     
     return 0;
 }
+
+
+
+
+#if defined ( __unix__ ) 
+int nvm_dma_create(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, size_t size)
+{
+    void* buffer;
+    struct ioctl_mapping* md;
+    size = NVM_CTRL_ALIGN(ctrl, size);
+
+    *handle = NULL;
+    int fd = _nvm_fd_from_ctrl(ctrl);
+    if (fd < 0)
+    {
+        return EBADF;
+    }
+
+    int err = posix_memalign(&buffer, ctrl->page_size, size);
+    if (err != 0)
+    {
+        dprintf("Faile to allocate page-aligned buffer: %s\n", strerror(err));
+        return err;
+    }
+
+    err = create_mapping(&md, _MAP_TYPE_INTERNAL, fd, buffer, size);
+    if (err != 0)
+    {
+        free(buffer);
+        return err;
+    }
+    
+    err = _nvm_dma_create(handle, ctrl, (struct dma_map*) md, (dma_map_free_t) remove_mapping);
+    if (err != 0)
+    {
+        remove_mapping(md);
+        return err;
+    }
+
+    err = populate_handle(container(*handle), ctrl);
+    if (err != 0)
+    {
+        remove_mapping(md);
+        *handle = NULL;
+        return err;
+    }
+
+    return 0;
+}
+#endif
 
 
 

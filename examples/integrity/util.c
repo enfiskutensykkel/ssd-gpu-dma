@@ -11,16 +11,28 @@
 #include "integrity.h"
 
 
-
 int create_buffer(struct buffer* b, nvm_aq_ref ref, size_t size, uint32_t adapter, uint32_t id)
 {
     int status;
 
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
 
+#ifdef __DIS_CLUSTER
+    b->buffer = NULL;
     status = nvm_dis_dma_create(&b->dma, ctrl, adapter, id, size);
+#else
+    status = posix_memalign(&b->buffer, ctrl->page_size, size);
+    if (status != 0)
+    {
+        fprintf(stderr, "Failed to allocate memory: %s\n", strerror(status));
+        return status;
+    }
+
+    status = nvm_dma_map_host(&b->dma, ctrl, b->buffer, size);
+#endif
     if (!nvm_ok(status))
     {
+        free(b->buffer);
         fprintf(stderr, "Failed to create local segment: %s\n", nvm_strerror(status));
         return status;
     }
@@ -37,6 +49,7 @@ int create_buffer(struct buffer* b, nvm_aq_ref ref, size_t size, uint32_t adapte
 void remove_buffer(struct buffer* b)
 {
     nvm_dma_unmap(b->dma);
+    free(b->buffer);
 }
 
 

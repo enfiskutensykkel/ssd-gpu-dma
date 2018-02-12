@@ -12,7 +12,14 @@
 #include <getopt.h>
 #include <string.h>
 #include <errno.h>
+
+#ifdef __DIS_CLUSTER__
 #include <sisci_api.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 #include "integrity.h"
 
 
@@ -21,6 +28,7 @@
 struct arguments
 {
     uint64_t        device_id;
+    const char*     device_path;
     uint32_t        adapter;
     uint32_t        segment_id;
     uint32_t        ns_id;
@@ -59,8 +67,10 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
         { "read", required_argument, NULL, 'r' },
         { "ctrl", required_argument, NULL, 'c' },
         { "namespace", required_argument, NULL, 'n' },
+#ifdef __DIS_CLUSTER__
         { "adapter", required_argument, NULL, 'a' },
         { "id-offset" , required_argument, NULL, 1 },
+#endif
         { "queues", required_argument, NULL, 'q' },
         { NULL, 0, NULL, 0 }
     };
@@ -70,6 +80,7 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
     uint64_t num;
 
     args->device_id = 0;
+    args->device_path = NULL;
     args->adapter = 0;
     args->segment_id = 5;
     args->ns_id = 1;
@@ -82,6 +93,7 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
         switch (opt)
         {
             case '?': // unknown option
+            default:
                 fprintf(stderr, "Unknown option: `%s'\n", argv[optind - 1]);
                 exit(4);
 
@@ -90,7 +102,11 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
                 exit(4);
 
             case 'h':
+#ifdef __DIS_CLUSTER__
                 fprintf(stderr, "Usage: %s --ctrl=device-id [--read=bytes] [-a adapter] [-n namespace] [-q queues] filename\n", argv[0]);
+#else
+                fprintf(stderr, "Usage: %s --ctrl=device-path [--read=bytes] [-n namespace] [-q queues] filename\n", argv[0]);
+#endif
                 exit(4);
 
             case 'r':
@@ -102,11 +118,15 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
                 break;
 
             case 'c': // device identifier
+#ifdef __DIS_CLUSTER__
                 if (! parse_number(&args->device_id, optarg, 0, 0, 0) )
                 {
                     fprintf(stderr, "Invalid controller identifier: `%s'\n", optarg);
                     exit(1);
                 }
+#else
+                args->device_path = optarg;
+#endif
                 break;
 
             case 'n': // specify namespace number
@@ -118,6 +138,7 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
                 args->ns_id = (uint32_t) num;
                 break;
 
+#ifdef __DIS_CLUSTER__
             case 1: // set segment identifier offset
                 if (! parse_number(&num, optarg, 0, 0, 0) )
                 {
@@ -135,6 +156,7 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
                 }
                 args->adapter = (uint32_t) num;
                 break;
+#endif
 
             case 'q': // set number of queues
                 if (! parse_number(&num, optarg, 0, 1, 0xffff) )
@@ -150,11 +172,19 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
     argc -= optind;
     argv += optind;
 
+#ifdef __DIS_CLUSTER__
     if (args->device_id == 0)
     {
         fprintf(stderr, "No controller specified!\n");
         exit(1);
     }
+#else
+    if (args->device_path == NULL)
+    {
+        fprintf(stderr, "No controller specified!\n");
+        exit(1);
+    }
+#endif
 
     if (argc < 1)
     {
@@ -213,7 +243,11 @@ static int identify_controller(nvm_aq_ref ref, const struct arguments* args, str
 
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
 
+#ifdef __DIS_CLUSTER__
     status = nvm_dis_dma_create(&window, ctrl, args->adapter, args->segment_id, ctrl->page_size);
+#else
+    status = nvm_dma_create(&window, ctrl, ctrl->page_size);
+#endif
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create buffer: %s\n", nvm_strerror(status));
@@ -244,7 +278,11 @@ static int identify_namespace(nvm_aq_ref ref, const struct arguments* args, stru
 
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
 
+#ifdef __DIS_CLUSTER__
     status = nvm_dis_dma_create(&window, ctrl, args->adapter, args->segment_id, ctrl->page_size);
+#else
+    status = nvm_dma_create(&window, ctrl, ctrl->page_size);
+#endif
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create buffer: %s\n", nvm_strerror(status));
@@ -340,7 +378,9 @@ static int request_queues(nvm_aq_ref ref, struct arguments* args, struct queue**
 
 int main(int argc, char** argv)
 {
+#ifdef __DIS_CLUSTER__
     sci_error_t err;
+#endif
     struct arguments args;
     nvm_ctrl_t* ctrl;
     int status;
@@ -386,10 +426,13 @@ int main(int argc, char** argv)
     }
 
 
+#ifdef __DIS_CLUSTER__
     // Start SISCI API
     SCIInitialize(0, &err);
+#endif
 
     // Get controller reference
+#ifdef __DIS_CLUSTER__
     status = nvm_dis_ctrl_init(&ctrl, args.device_id, args.adapter);
     if (status != 0)
     {
@@ -397,9 +440,33 @@ int main(int argc, char** argv)
         fprintf(stderr, "Failed to get controller reference: %s\n", strerror(status));
         exit(1);
     }
+#else
+    int fd = open(args.device_path, O_RDWR | O_NONBLOCK);
+    if (fd < 0)
+    {
+        fclose(fp);
+        fprintf(stderr, "Failed to open device file: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    status = nvm_ctrl_init(&ctrl, fd);
+    if (status != 0)
+    {
+        close(fd);
+        fclose(fp);
+        fprintf(stderr, "Failed to get controller reference: %s\n", strerror(status));
+    }
+
+    close(fd);
+
+#endif
 
     // Create admin queues
+#ifdef __DIS_CLUSTER__
     status = nvm_dis_dma_create(&aq_dma, ctrl, args.adapter, args.segment_id++, ctrl->page_size * 2);
+#else
+    status = nvm_dma_create(&aq_dma, ctrl, ctrl->page_size * 2);
+#endif
     if (status != 0)
     {
         nvm_ctrl_free(ctrl);
@@ -474,6 +541,8 @@ out:
     remove_buffer(&buffer);
     nvm_ctrl_free(ctrl);
     fclose(fp);
+#ifdef __DIS_CLUSTER__
     SCITerminate();
+#endif
     exit(status);
 }

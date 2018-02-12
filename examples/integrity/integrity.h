@@ -11,6 +11,7 @@ struct buffer
 {
     uint32_t                id;
     uint32_t                adapter;
+    void*                   buffer;
     nvm_dma_t*              dma;
 };
 
@@ -32,7 +33,6 @@ struct disk
     uint32_t    ns_id;
     size_t      block_size;
 };
-
 
 
 int create_buffer(struct buffer* b, nvm_aq_ref, size_t size, uint32_t adapter, uint32_t id);

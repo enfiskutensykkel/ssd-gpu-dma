@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <nvm_types.h>
 
 
@@ -15,10 +16,11 @@ struct options
 #else
     const char* controller_path;
 #endif
+    size_t      chunk_size;
     uint32_t    namespace_id;
     size_t      num_blocks;
     size_t      offset;
-    const char* output;
+    FILE*       output;
     bool        ascii;
     bool        identify;
 };

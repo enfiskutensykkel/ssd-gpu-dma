@@ -15,7 +15,6 @@
 #include <string.h>
 
 
-
 int main(int argc, char** argv)
 {
     int status;
@@ -74,7 +73,8 @@ int main(int argc, char** argv)
     }
 
     // Create data buffer
-    status = nvm_dis_dma_create(&buffer, ctrl, args.adapter, args.segment_id++, args.num_blocks * info.block_size);
+    size_t buffer_size = (args.chunk_size <= args.num_blocks ? args.chunk_size : args.num_blocks) * info.block_size;
+    status = nvm_dis_dma_create(&buffer, ctrl, args.adapter, args.segment_id++, buffer_size);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create data buffer: %s\n", nvm_strerror(status));
@@ -112,6 +112,13 @@ int main(int argc, char** argv)
 
     status = read_and_dump(&info, &queues, buffer, &args);
 
+    if (args.output != NULL)
+    {
+        fprintf(stderr, "Flushing output file...\n");
+        fclose(args.output);
+    }
+    
+    fprintf(stderr, "Done\n");
 leave:
     nvm_dma_unmap(cq_mem);
     nvm_dma_unmap(sq_mem);

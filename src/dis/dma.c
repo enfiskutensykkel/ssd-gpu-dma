@@ -367,6 +367,15 @@ int nvm_dis_dma_create(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, uint32_t adap
 
 
 
+int nvm_dis_dma_map_host(nvm_dma_t** map, const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, void* vaddr, size_t size)
+{
+    // TODO: add support for _nvm_local_memory_get_registered similar to _nvm_local_memory_get_attached in create_segment()
+    dprintf("Function not implemented\n");
+    return ENOTSUP;
+}
+
+
+
 #ifdef _CUDA
 /*
  * Map CUDA device memory for device.
