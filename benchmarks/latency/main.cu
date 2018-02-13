@@ -502,6 +502,7 @@ static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Se
         Times* t = &times[i];
         QueuePtr q = queues[i];
 
+        // TODO: use bind instead
         //threads[i] = thread(measure, &queues[i], &buffer, &times[i], &settings, &barrier);
         threads[i] = thread([&q, &buffer, t, &settings, &barrier] {
             measure(q, buffer, t, settings, &barrier);

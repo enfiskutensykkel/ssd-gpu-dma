@@ -7,20 +7,20 @@
 
 struct Settings
 {
-    int             cudaDevice;
+    uint32_t        cudaDevice;
     const char*     blockDevicePath;
     const char*     controllerPath;
-    uint32_t        controllerId;
+    uint64_t        controllerId;
     uint32_t        adapter;
     uint32_t        segmentId;
     uint32_t        nvmNamespace;
-    uint16_t        bufferLevel;
+    bool            doubleBuffered;
     size_t          numChunks;
     size_t          numPages;
     size_t          startBlock;
     bool            stats;
-    const char*     verify;
-    uint16_t        numThreads;
+    const char*     output;
+    size_t          numThreads;
 
     Settings();
     void parseArguments(int argc, char** argv);

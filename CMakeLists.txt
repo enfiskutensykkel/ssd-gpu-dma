@@ -230,6 +230,11 @@ macro (make_sisci_benchmark target binary_name files)
     endif ()
 endmacro ()
 
+macro (make_sisci_ptx prefix files)
+    cuda_compile_ptx (${prefix}_files "${files}" OPTIONS -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
+    add_custom_target (${prefix}-ptx DEPENDS ${prefix_files} SOURCES ${files})
+endmacro ()
+
 
 # Set preferred ordering for benchmark targets
 macro (make_benchmark_choice ctarget sisci_target other_target)
@@ -262,7 +267,7 @@ add_custom_target (examples DEPENDS samples)
 # Add individual benchmarks
 if (CUDA_FOUND)
     add_subdirectory ("${benchmarks_root}/latency")
-    add_subdirectory ("${benchmarks_root}/latency-comparison")
+    add_subdirectory ("${benchmarks_root}/cuda")
     add_custom_target (benchmarks DEPENDS ${benchmark_targets})
 endif ()
 

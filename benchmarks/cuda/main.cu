@@ -10,10 +10,13 @@
 #include <stdexcept>
 #include <cstdio>
 #include <cstdint>
+#include <fcntl.h>
+#include <unistd.h>
 #include "ctrl.h"
 #include "buffer.h"
 #include "settings.h"
 #include "event.h"
+#include "queue.h"
 #ifdef __DIS_CLUSTER__
 #include <sisci_api.h>
 #endif
@@ -21,19 +24,6 @@
 using error = std::runtime_error;
 using std::string;
 
-
-struct __align__(64) QueuePair
-{
-    uint32_t            pageSize;
-    uint32_t            blockSize;
-    uint32_t            nvmNamespace;
-    uint32_t            pagesPerChunk;
-    uint16_t            bufferLevel;
-    void*               prpList;
-    uint64_t            prpListIoAddr;
-    nvm_queue_t         sq;
-    nvm_queue_t         cq;
-};
 
 
 __device__ static
@@ -86,6 +76,7 @@ nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, const uint64_t ioaddr, u
     const uint32_t nvmNamespace = qp->nvmNamespace;
     const uint32_t chunkPages = qp->pagesPerChunk;
 
+    // Calculate offsets
     const uint16_t blocksPerChunk = NVM_PAGE_TO_BLOCK(pageSize, blockSize, chunkPages);
     const uint64_t currBlock = NVM_PAGE_TO_BLOCK(pageSize, blockSize, (currChunk + threadNum) * chunkPages);
 
@@ -93,14 +84,16 @@ nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, const uint64_t ioaddr, u
     void* prpList = NVM_PTR_OFFSET(qp->prpList, pageSize, threadOffset);
     uint64_t prpListAddr = NVM_ADDR_OFFSET(qp->prpListIoAddr, pageSize, threadOffset);
 
-    uint64_t addrs[0x1000 / sizeof(uint64_t)]; // FIXME: hack
+    uint64_t addrs[0x1000 / sizeof(uint64_t)]; // FIXME: This assumes that page size is 4K
     for (uint32_t page = 0; page < chunkPages; ++page)
     {
         addrs[page] = NVM_ADDR_OFFSET(ioaddr, pageSize, chunkPages * threadOffset + page);
     }
 
+    // Enqueue commands
     nvm_cmd_t* cmd = nvm_sq_enqueue_n(&qp->sq, last, numThreads, threadNum);
 
+    // Set command fields
     nvm_cmd_header(cmd, NVM_IO_READ, nvmNamespace);
     nvm_cmd_data(cmd, pageSize, chunkPages, prpList, prpListAddr, addrs);
     nvm_cmd_rw_blks(cmd, currBlock + blockOffset, blocksPerChunk);
@@ -111,11 +104,11 @@ nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, const uint64_t ioaddr, u
 
 
 
-__global__ void readPages(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t* errCount)
+__global__ static
+void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t* errCount)
 {
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
-    const uint16_t bufferLevel = 2;//qp->bufferLevel;
     const uint32_t pageSize = qp->pageSize;
     const size_t chunkSize = qp->pagesPerChunk * pageSize;
     nvm_queue_t* sq = &qp->sq;
@@ -123,7 +116,7 @@ __global__ void readPages(QueuePair* qp, const uint64_t ioaddr, void* src, void*
     uint64_t blockOffset = 0; // TODO: Fix this
 
     uint32_t currChunk = 0;
-    uint16_t bufferOffset = 0;
+    bool bufferOffset = false;
 
     nvm_cmd_t* last = prepareChunk(qp, nullptr, ioaddr, bufferOffset, blockOffset, currChunk);
 
@@ -137,7 +130,7 @@ __global__ void readPages(QueuePair* qp, const uint64_t ioaddr, void* src, void*
     while (currChunk + numThreads < numChunks)
     {
         // Prepare in advance next chunk
-        last = prepareChunk(qp, last, ioaddr, (bufferOffset + 1) % bufferLevel, blockOffset, currChunk + numThreads);
+        last = prepareChunk(qp, last, ioaddr, !bufferOffset, blockOffset, currChunk + numThreads);
 
         // Consume completions for the previous window
         if (threadNum == 0)
@@ -151,7 +144,7 @@ __global__ void readPages(QueuePair* qp, const uint64_t ioaddr, void* src, void*
         moveBytes(src, bufferOffset * numThreads * chunkSize, dst, currChunk * chunkSize, chunkSize * numThreads);
     
         // Update position and input buffer
-        bufferOffset = (bufferOffset + 1) % bufferLevel;
+        bufferOffset = !bufferOffset;
         currChunk += numThreads;
     }
 
@@ -167,54 +160,89 @@ __global__ void readPages(QueuePair* qp, const uint64_t ioaddr, void* src, void*
 
 
 
-static void prepareQueuePair(DmaPtr& qmem, QueuePair& qp, const Controller& ctrl, const Settings& settings)
+__global__ static
+void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t* errCount)
 {
-    size_t queueMemSize = ctrl.info.page_size * 2;
-    size_t prpListSize = ctrl.info.page_size * settings.numThreads * settings.bufferLevel;
-
-    // qmem->vaddr will be already a device pointer after the following call
-    qmem = createDma(ctrl.ctrl, NVM_PAGE_ALIGN(queueMemSize + prpListSize, 1UL << 16), settings.cudaDevice, settings.adapter, settings.segmentId);
-
-    qp.pageSize = ctrl.info.page_size;
-    qp.blockSize = ctrl.ns.lba_data_size;
-    qp.nvmNamespace = ctrl.ns.ns_id;
-    qp.pagesPerChunk = settings.numPages;
-    qp.bufferLevel = settings.bufferLevel;
-    
-    int status = nvm_admin_cq_create(ctrl.aq_ref, &qp.cq, 1, qmem->vaddr, qmem->ioaddrs[0]);
-    if (!nvm_ok(status))
-    {
-        throw error(string("Failed to create completion queue: ") + nvm_strerror(status));
-    }
-
-    void* devicePtr = nullptr;
-    cudaError_t err = cudaHostGetDevicePointer(&devicePtr, (void*) qp.cq.db, 0);
-    if (err != cudaSuccess)
-    {
-        throw err;
-    }
-    qp.cq.db = (volatile uint32_t*) devicePtr;
-
-    status = nvm_admin_sq_create(ctrl.aq_ref, &qp.sq, &qp.cq, 1, NVM_DMA_OFFSET(qmem, 1), qmem->ioaddrs[1]);
-    if (!nvm_ok(status))
-    {
-        throw error(string("Failed to create submission queue: ") + nvm_strerror(status));
-    }
-
-    err = cudaHostGetDevicePointer(&devicePtr, (void*) qp.sq.db, 0);
-    if (err != cudaSuccess)
-    {
-        throw err;
-    }
-    qp.sq.db = (volatile uint32_t*) devicePtr;
-
-    qp.prpList = NVM_DMA_OFFSET(qmem, 2);
-    qp.prpListIoAddr = qmem->ioaddrs[2];
 }
 
 
 
-static void verify(BufferPtr data, size_t size, const char* filename)
+static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, size_t totalChunks, const Settings& settings)
+{
+    QueuePair queuePair;
+    DmaPtr queueMemory = prepareQueuePair(queuePair, ctrl, settings);
+
+    // Set up and prepare queues
+    auto deviceQueue = createBuffer(sizeof(QueuePair), settings.cudaDevice);
+    auto err = cudaMemcpy(deviceQueue.get(), &queuePair, sizeof(QueuePair), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
+    const size_t pageSize = ctrl.info.page_size;
+    const size_t chunkSize = pageSize * settings.numPages;
+
+    // Create input buffer
+    const size_t sourceBufferSize = NVM_PAGE_ALIGN((settings.doubleBuffered + 1) * chunkSize * settings.numThreads, 1UL << 16);
+    auto source = createDma(ctrl.ctrl, sourceBufferSize, settings.cudaDevice, settings.adapter, settings.segmentId + 1); // vaddr is a dev ptr
+
+    // We want to count number of errors
+    uint64_t* ec = nullptr;
+    err = cudaMalloc(&ec, sizeof(uint64_t));
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
+    // Launch kernel
+    double elapsed = 0;
+    try
+    {
+        Event before, after; 
+
+        before.record(0);
+        if (settings.doubleBuffered)
+        {
+            readDoubleBuffered<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalChunks, ec);
+        }
+        else
+        {
+            readSingleBuffered<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalChunks, ec);
+        }
+        after.record(0);
+
+        err = cudaDeviceSynchronize();
+        if (err != cudaSuccess)
+        {
+            throw err;
+        }
+
+        float msecs = 0;
+        cudaEventElapsedTime(&msecs, before.event, after.event);
+        elapsed = msecs * 1e3;
+    }
+    catch (const error& e)
+    {
+        cudaFree(ec);
+        throw e;
+    }
+
+    // Check error status
+    uint64_t errorCount = 0;
+    cudaMemcpy(&errorCount, ec, sizeof(uint64_t), cudaMemcpyDeviceToHost);
+    cudaFree(ec);
+
+    if (errorCount != 0)
+    {
+        fprintf(stderr, "WARNING: There were NVM errors\n");
+    }
+
+    return elapsed;
+}
+
+
+static void outputFile(BufferPtr data, size_t size, const char* filename)
 {
     auto buffer = createBuffer(size);
 
@@ -224,93 +252,9 @@ static void verify(BufferPtr data, size_t size, const char* filename)
         throw error(string("Failed to copy data from destination: ") + cudaGetErrorString(err));
     }
 
-    // TODO: open filename for read and compare byte by byte
-
     FILE* fp = fopen(filename, "wb");
     fwrite(buffer.get(), 1, size, fp);
     fclose(fp);
-}
-
-
-
-
-static void use_nvm(const Controller& ctrl, const Settings& settings) // TODO take destination as argument
-{
-    DmaPtr queueMemory;
-    QueuePair queuePair;
-    prepareQueuePair(queueMemory, queuePair, ctrl, settings);
-
-    auto deviceQueue = createBuffer(sizeof(QueuePair), settings.cudaDevice);
-    auto err = cudaMemcpy(deviceQueue.get(), &queuePair, sizeof(QueuePair), cudaMemcpyHostToDevice);
-    if (err != cudaSuccess)
-    {
-        throw err;
-    }
-
-    const size_t pageSize = ctrl.info.page_size;
-    const size_t blockSize = ctrl.ns.lba_data_size;
-    const size_t chunkSize = pageSize * settings.numPages;
-
-    if (chunkSize > ctrl.info.max_data_size)
-    {
-        throw error("Chunk size can not be larger than controller data size");
-    }
-
-    size_t totalChunks = settings.numChunks * settings.numThreads;
-    size_t totalPages = totalChunks * settings.numPages;
-    size_t totalBlocks = NVM_PAGE_TO_BLOCK(pageSize, blockSize, totalPages);
-
-    fprintf(stderr, "numThreads=%u, numChunks=%zu, pagesPerChunk=%zu, totalChunks=%zu, totalPages=%zu, totalBlocks=%zu\n",
-            settings.numThreads, settings.numChunks, settings.numPages, totalChunks, totalPages, totalBlocks);
-
-    auto destination = createBuffer(pageSize * totalPages, settings.cudaDevice); // this is a host ptr
-    
-    const size_t sourceBufferSize = NVM_PAGE_ALIGN(settings.bufferLevel * chunkSize * settings.numThreads, 1UL << 16);
-    auto source = createDma(ctrl.ctrl, sourceBufferSize, settings.cudaDevice, settings.adapter, settings.segmentId + 1); // vaddr is a dev ptr
-
-    Event before, after; 
-
-    uint64_t* ec = nullptr;
-    err = cudaMalloc(&ec, sizeof(uint64_t));
-    if (err != cudaSuccess)
-    {
-        throw err;
-    }
-
-    try
-    {
-        before.record(0);
-        readPages<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalChunks, ec);
-        after.record(0);
-
-        err = cudaDeviceSynchronize();
-        if (err != cudaSuccess)
-        {
-            throw err;
-        }
-    }
-    catch (const error& e)
-    {
-        cudaFree(ec);
-        throw e;
-    }
-
-    float msecs = 0;
-    cudaEventElapsedTime(&msecs, before.event, after.event);
-    double usecs = (msecs * 1e3);
-
-    fprintf(stderr, "BW=%.3f MiB/s\n", (totalPages * pageSize) / usecs);
-
-    uint64_t errorCount = 0;
-    cudaMemcpy(&errorCount, ec, sizeof(uint64_t), cudaMemcpyDeviceToHost);
-    cudaFree(ec);
-
-    fprintf(stderr, "ec: 0x%lx\n", errorCount);
-
-    if (settings.verify != nullptr)
-    {
-        verify(destination, totalPages * pageSize, settings.verify);
-    }
 }
 
 
@@ -328,32 +272,89 @@ int main(int argc, char** argv)
 #endif
 
     Settings settings;
+    try
+    {
+        settings.parseArguments(argc, argv);
+    }
+    catch (const string& e)
+    {
+        fprintf(stderr, "%s\n", e.c_str());
+        return 1;
+    }
 
     try
     {
-        if (argc != 2)
+        if (settings.blockDevicePath != nullptr)
         {
+        }
+        else
+        {
+#ifdef __DIS_CLUSTER__
             Controller ctrl(settings.controllerId, settings.nvmNamespace, settings.adapter, settings.segmentId++);
+#else
+            int fd = open(settings.controllerPath, O_RDWR | O_NONBLOCK);
+            if (fd < 0)
+            {
+                throw error(strerror(errno));
+            }
+
+            close(fd);
+#endif
             ctrl.reserveQueues(1);
+
+            const size_t pageSize = ctrl.info.page_size;
+            const size_t blockSize = ctrl.ns.lba_data_size;
+            const size_t chunkSize = pageSize * settings.numPages;
+            const size_t totalChunks = settings.numChunks * settings.numThreads;
+            const size_t totalPages = totalChunks * settings.numPages;
+            const size_t totalBlocks = NVM_PAGE_TO_BLOCK(pageSize, blockSize, totalPages);
+
+            if (chunkSize > ctrl.info.max_data_size)
+            {
+                throw error("Chunk size can not be larger than controller data size");
+            }
+            else if (totalBlocks > ctrl.ns.size)
+            {
+                throw error("Requesting read size larger than disk size");
+            }
+
+            fprintf(stderr, "Number of chunks      : %zu\n", settings.numChunks);
+            fprintf(stderr, "Number of pages       : %zu\n", settings.numPages);
+            fprintf(stderr, "Number of threads     : %zu\n", settings.numThreads);
+            fprintf(stderr, "Total number of pages : %zu\n", totalPages);
+            fprintf(stderr, "Total number of blocks: %zu\n", totalBlocks);
+
+
+            auto outputBuffer = createBuffer(ctrl.info.page_size * totalPages, settings.cudaDevice);
 
             cudaError_t err = cudaHostRegister((void*) ctrl.ctrl->mm_ptr, NVM_CTRL_MEM_MINSIZE, cudaHostRegisterIoMemory);
             if (err != cudaSuccess)
             {
-                throw err;
+                throw error(string("Unexpected error while mapping IO memory: ") + cudaGetErrorString(err));
             }
 
-            use_nvm(ctrl, settings);
+            try
+            {
+                double usecs = launchNvmKernel(ctrl, outputBuffer, totalChunks, settings);
 
-            cudaHostUnregister((void*) ctrl.ctrl->mm_ptr);
+                fprintf(stderr, "Bandwidth = %.3f MiB/s\n", (totalPages * pageSize) / usecs);
+
+                if (settings.output != nullptr)
+                {
+                    outputFile(outputBuffer, totalPages * pageSize, settings.output);
+                }
+            }
+            catch (const error& e)
+            {
+                cudaHostUnregister((void*) ctrl.ctrl->mm_ptr);
+                throw e;
+            }
+            catch (const cudaError_t err)
+            {
+                cudaHostUnregister((void*) ctrl.ctrl->mm_ptr);
+                throw error(string("Unexpected CUDA error: ") + cudaGetErrorString(err));
+            }
         }
-        else
-        {
-            //use_fd(grid, block, argv[1]);
-        }
-    }
-    catch (const cudaError_t err)
-    {
-        fprintf(stderr, "Unexpected CUDA error: %s\n", cudaGetErrorString(err));
     }
     catch (const error& e)
     {
