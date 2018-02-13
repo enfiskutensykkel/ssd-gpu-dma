@@ -359,12 +359,25 @@ void Settings::parseArguments(int argc, char** argv)
     {
         throw string("No block device or NVM controller specified");
     }
+    else if (blockDevicePath != nullptr && controllerId != 0)
+    {
+        throw string("Either block device or NVM controller must be specified, not both!");
+    }
 #else
     if (blockDevicePath == nullptr && controllerPath == nullptr)
     {
         throw string("No block device or NVM controller specified");
     }
+    else if (blockDevicePath != nullptr && controllerPath != nullptr)
+    {
+        throw string("Either block device or NVM controller must be specified, not both!");
+    }
 #endif
+
+    if (blockDevicePath != nullptr && doubleBuffered)
+    {
+        throw string("Double buffered reading from block device is not supported");
+    }
 
     verifyCudaDevice(cudaDevice);
     verifyNumberOfThreads(numThreads);
