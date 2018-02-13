@@ -163,6 +163,43 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
 __global__ static
 void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t* errCount)
 {
+    const uint16_t numThreads = blockDim.x;
+    const uint16_t threadNum = threadIdx.x;
+    const uint32_t pageSize = qp->pageSize;
+    const size_t chunkSize = qp->pagesPerChunk * pageSize;
+    nvm_queue_t* sq = &qp->sq;
+
+    uint64_t blockOffset = 0; // TODO: Fix this
+
+    uint32_t currChunk = 0;
+
+    nvm_cmd_t* cmd = nullptr;
+
+    if (threadNum == 0)
+    {
+        *errCount = 0;
+    }
+    __syncthreads();
+
+    while (currChunk < numChunks)
+    {
+        // Prepare in advance next chunk
+        cmd = prepareChunk(qp, cmd, ioaddr, 0, blockOffset, currChunk);
+
+        // Consume completions for the previous window
+        if (threadNum == 0)
+        {
+            nvm_sq_submit(sq);
+            waitForIoCompletion(&qp->cq, sq, errCount);
+        }
+        __syncthreads();
+
+        // Move received chunk
+        moveBytes(src, 0, dst, currChunk * chunkSize, chunkSize * numThreads);
+    
+        // Update position and input buffer
+        currChunk += numThreads;
+    }
 }
 
 
@@ -318,12 +355,14 @@ int main(int argc, char** argv)
                 throw error("Requesting read size larger than disk size");
             }
 
-            fprintf(stderr, "Number of chunks      : %zu\n", settings.numChunks);
-            fprintf(stderr, "Number of pages       : %zu\n", settings.numPages);
+            fprintf(stderr, "Controller page size  : %zu B\n", pageSize);
+            fprintf(stderr, "Namespace block size  : %zu B\n", blockSize);
             fprintf(stderr, "Number of threads     : %zu\n", settings.numThreads);
+            fprintf(stderr, "Chunks per thread     : %zu\n", settings.numChunks);
+            fprintf(stderr, "Pages per chunk       : %zu\n", settings.numPages);
             fprintf(stderr, "Total number of pages : %zu\n", totalPages);
             fprintf(stderr, "Total number of blocks: %zu\n", totalBlocks);
-
+            fprintf(stderr, "Double buffering      : %s\n", settings.doubleBuffered ? "yes" : "no");
 
             auto outputBuffer = createBuffer(ctrl.info.page_size * totalPages, settings.cudaDevice);
 
@@ -337,7 +376,8 @@ int main(int argc, char** argv)
             {
                 double usecs = launchNvmKernel(ctrl, outputBuffer, totalChunks, settings);
 
-                fprintf(stderr, "Bandwidth = %.3f MiB/s\n", (totalPages * pageSize) / usecs);
+                fprintf(stdout, "Time elapsed: %.3f µs\n", usecs);
+                fprintf(stdout, "Bandwidth   : %.3f MiB/s\n", (totalPages * pageSize) / usecs);
 
                 if (settings.output != nullptr)
                 {
