@@ -62,7 +62,8 @@ For using `libnvm` with your CUDA programs, you need the following:
   This means either a Quadro or Tesla workstation model using the Kepler 
   architecture or newer.
 * An architecture that supports [PCIe peer-to-peer], for example the Intel Xeon
-  family of processors.
+  family of processors. This is strictly required if you are using SmartIO or
+  plan on using RDMA.
 * The _FindCUDA_ package for CMake.
 * GCC version 5.4.0 or newer. Compiler must be able to compile C++11 and 
   POSIX threads.
@@ -75,11 +76,11 @@ base (or newer) with CUDA support and SmartIO enabled.
 
 
 ### Disable IOMMU ###
-If you are _not_ using Dolphin software, you need to explicitly disable IOMMU 
-as IOMMU support for peer-to-peer on Linux is a bit flaky at the moment.
-If you are using SmartIO however, the Dolphin  driver stack will handle this 
-for you and it is not required to disable the IOMMU. I would in fact recommend
-you leaving the IOMMU _on_ for protecting memory from rogue writes.
+If you are using CUDA or implementing support for your own custom devices, 
+you need to explicitly disable IOMMU as IOMMU support for peer-to-peer on 
+Linux is a bit flaky at the moment. If you are not relying on peer-to-peer,
+I would in fact recommend you leaving the IOMMU _on_ for protecting memory 
+from rogue writes.
 
 To check if the IOMMU is on, you can do the following:
 ```
@@ -206,7 +207,8 @@ as well as any calls to the DMA API.
 Repeating the requirements from the section above, you should make sure that
 you use a processor that supports [PCIe peer-to-peer], and that you have a GPU 
 with [GPUDirect] support. Remember to [disable the IOMMU](#disable-iommu).
-If you are not using CUDA, it is recommended that you leave the IOMMU on.
+If you are not using CUDA (or any other third-party stuff), it is recommended 
+that you leave the IOMMU on.
 
 Loading and unloading the driver is done as follows:
 ```
