@@ -23,18 +23,18 @@ typedef std::map<int, OptionPtr> OptionMap;
 
 struct OptionIface
 {
-    string          type;
-    string          name;
-    string          description;
-    string          defaultValue;
+    const char*     type;
+    const char*     name;
+    const char*     description;
+    const char*     defaultValue;
     int             hasArgument;
 
     virtual ~OptionIface() = default;
 
-    OptionIface(const string& type, const string& name, const string& description)
+    OptionIface(const char* type, const char* name, const char* description)
         : type(type), name(name), description(description), hasArgument(no_argument) { }
 
-    OptionIface(const string& type, const string& name, const string& description, const string& dvalue)
+    OptionIface(const char* type, const char* name, const char* description, const char* dvalue)
         : type(type), name(name), description(description), defaultValue(dvalue), hasArgument(no_argument) { }
 
     virtual void parseArgument(const char* optstr, const char* optarg) = 0;
@@ -50,15 +50,19 @@ template <typename T>
 struct Option: public OptionIface
 {
     T&              value;
+    
+    Option() = delete;
+    Option(Option&& rhs) = delete;
+    Option(const Option& rhs) = delete;
 
-    Option(T& value, const string& type, const string& name, const string& description)
+    Option(T& value, const char* type, const char* name, const char* description)
         : OptionIface(type, name, description)
         , value(value)
     {
         hasArgument = required_argument;
     }
 
-    Option(T& value, const string& type, const string& name, const string& description, const string& dvalue)
+    Option(T& value, const char* type, const char* name, const char* description, const char* dvalue)
         : OptionIface(type, name, description, dvalue)
         , value(value)
     {
@@ -125,37 +129,12 @@ void Option<const char*>::parseArgument(const char*, const char* optarg)
 }
 
 
-struct Flag: public Option<bool>
-{
-    Flag(bool& value, const string& name, const string& description)
-        : Option<bool>(value, "bool", name, description, "false")
-    {
-        hasArgument = optional_argument;
-    }
-
-    void throwError(const char* str, const char* arg) const override
-    {
-        throw string("Option ") + name + string(" must be set to true or false");
-    }
-
-    void parseArgument(const char* str, const char* arg) override
-    {
-        if (arg == nullptr)
-        {
-            value = true;
-        }
-
-        Option<bool>::parseArgument(str, arg);
-    }
-};
-
-
 struct Range: public Option<uint64_t>
 {
     uint64_t      lower;
     uint64_t      upper;
 
-    Range(uint64_t& value, uint64_t lo, uint64_t hi, const string& name, const string& description, const string& dv)
+    Range(uint64_t& value, uint64_t lo, uint64_t hi, const char* name, const char* description, const char* dv)
         : Option<uint64_t>(value, "count", name, description, dv)
         , lower(lo)
         , upper(hi)
@@ -192,10 +171,26 @@ struct Range: public Option<uint64_t>
 
 
 
-static string usageString(const string& name)
+static void setBDF(Settings& settings)
 {
-    return "Usage: " + name + " --ctrl=identifier\n"
-        +  "   or: " + name + " --block-device=path";
+    cudaDeviceProp props;
+    
+    cudaError_t err = cudaGetDeviceProperties(&props, settings.cudaDevice);
+    if (err != cudaSuccess)
+    {
+        throw string("Failed to get device properties: ") + cudaGetErrorString(err);
+    }
+
+    settings.bus = props.pciBusID;
+    settings.devfn = props.pciDeviceID;
+}
+
+
+
+string Settings::usageString(const string& name)
+{
+    return "Usage: " + name + " --ctrl=identifier [options]\n"
+        +  "   or: " + name + " --block-device=path [options]";
 }
 
 
@@ -204,9 +199,6 @@ static string helpString(const string& name, OptionMap& options)
 {
     using namespace std;
     ostringstream s;
-
-    s << usageString(name) << endl;
-    s << endl;
 
     s << "" << left
         << setw(16) << "OPTION"
@@ -219,7 +211,7 @@ static string helpString(const string& name, OptionMap& options)
     {
         const auto& opt = optPair.second;
         s << "  " << left
-            << setw(16) << ((opt->name.length() == 1 ? "-" : "--") + opt->name)
+            << setw(16) << opt->name
             << setw(16) << opt->type
             << setw(10) << opt->defaultValue
             << setw(36) << opt->description
@@ -241,7 +233,7 @@ static void createLongOptions(vector<option>& options, string& optionString, con
         const OptionPtr& parser = parserPair.second;
 
         option opt;
-        opt.name = parser->name.c_str();
+        opt.name = parser->name;
         opt.has_arg = parser->hasArgument;
         opt.flag = nullptr;
         opt.val = shortOpt;
@@ -254,10 +246,6 @@ static void createLongOptions(vector<option>& options, string& optionString, con
             if (parser->hasArgument == required_argument)
             {
                 optionString += ":";
-            }
-            else if (parser->hasArgument == optional_argument)
-            {
-                optionString += "::";
             }
         }
     }
@@ -301,6 +289,7 @@ static void verifyNumberOfThreads(size_t numThreads)
 }
 
 
+
 void Settings::parseArguments(int argc, char** argv)
 {
     OptionMap parsers = {
@@ -313,7 +302,7 @@ void Settings::parseArguments(int argc, char** argv)
 #endif
         {'g', OptionPtr(new Option<uint32_t>(cudaDevice, "number", "gpu", "specify CUDA device", "0"))},
         {'i', OptionPtr(new Option<uint32_t>(nvmNamespace, "identifier", "namespace", "NVM namespace identifier", "0"))},
-        {'B', OptionPtr(new Flag(doubleBuffered, "double-buffer", "double buffer disk reads"))},
+        {'B', OptionPtr(new Option<bool>(doubleBuffered, "bool", "double-buffer", "double buffer disk reads", "false"))},
         {'n', OptionPtr(new Range(numChunks, 1, 0, "chunks", "number of chunks per thread", "32"))},
         {'p', OptionPtr(new Range(numPages, 1, 0, "pages", "number of pages per chunk", "1"))},
         {'t', OptionPtr(new Range(numThreads, 1, 32, "threads", "number of CUDA threads", "32"))},
@@ -338,7 +327,7 @@ void Settings::parseArguments(int argc, char** argv)
                 throw string("Unknown option: `") + argv[optind - 1] + string("'");
 
             case ':':
-                throw string("Missing argument for option ") + argv[optind - 1];
+                throw string("Missing argument for option `") + argv[optind - 1] + string("'");
 
             case 'h':
                 throw helpString(argv[0], parsers);
@@ -381,6 +370,8 @@ void Settings::parseArguments(int argc, char** argv)
 
     verifyCudaDevice(cudaDevice);
     verifyNumberOfThreads(numThreads);
+
+    setBDF(*this);
 }
 
 
@@ -400,6 +391,8 @@ Settings::Settings()
     stats = false;
     output = nullptr;
     numThreads = 32;
+    bus = 0;
+    devfn = 0;
 }
 
 

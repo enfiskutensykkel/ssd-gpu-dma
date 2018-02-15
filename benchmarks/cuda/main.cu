@@ -366,6 +366,71 @@ static void outputFile(BufferPtr data, size_t size, const char* filename)
 }
 
 
+static int useBlockDevice(const Settings& settings)
+{
+    int fd = open(settings.blockDevicePath, O_RDONLY);
+    if (fd < 0)
+    {
+        fprintf(stderr, "Failed to open block device: %s\n", strerror(errno));
+        return 1;
+    }
+
+    const size_t pageSize = sysconf(_SC_PAGESIZE);
+    const size_t blockSize = 512; // FIXME: specify this from command line
+    const size_t totalChunks = settings.numChunks * settings.numThreads;
+    const size_t totalPages = totalChunks * settings.numPages;
+
+    fprintf(stderr, "Controller page size  : %zu B\n", pageSize);
+    fprintf(stderr, "Assumed block size    : %zu B\n", blockSize);
+    fprintf(stderr, "Number of threads     : %zu\n", settings.numThreads);
+    fprintf(stderr, "Chunks per thread     : %zu\n", settings.numChunks);
+    fprintf(stderr, "Pages per chunk       : %zu\n", settings.numPages);
+    fprintf(stderr, "Total number of pages : %zu\n", totalPages);
+    fprintf(stderr, "Double buffering      : %s\n", settings.doubleBuffered ? "yes" : "no");
+
+    void* ptr = mmap(nullptr, totalPages * pageSize, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, settings.startBlock * blockSize);
+    if (ptr == nullptr)
+    {
+        close(fd);
+        fprintf(stderr, "Failed to memory map block device: %s\n", strerror(errno));
+        return 1;
+    }
+
+    try
+    {
+        auto outputBuffer = createBuffer(totalPages * pageSize);
+
+        double usecs = launchMoveKernelLoop(ptr, outputBuffer, pageSize, settings);
+
+        fprintf(stdout, "Time elapsed: %.3f µs\n", usecs);
+        fprintf(stdout, "Bandwidth   : %.3f MiB/s\n", (totalPages * pageSize) / usecs);
+
+        if (settings.output != nullptr)
+        {
+            outputFile(outputBuffer, totalPages * pageSize, settings.output);
+        }
+    }
+    catch (const cudaError_t err)
+    {
+        munmap(ptr, totalPages * pageSize);
+        close(fd);
+        fprintf(stderr, "Unexpected CUDA error: %s\n", cudaGetErrorString(err));
+        return 1;
+    }
+    catch (const error& e)
+    {
+        munmap(ptr, totalPages * pageSize);
+        close(fd);
+        fprintf(stderr, "Unexpected error: %s\n", e.what());
+        return 1;
+    }
+
+    munmap(ptr, totalPages * pageSize);
+    close(fd);
+    return 0;
+}
+
+
 
 int main(int argc, char** argv)
 {
@@ -377,71 +442,13 @@ int main(int argc, char** argv)
     catch (const string& e)
     {
         fprintf(stderr, "%s\n", e.c_str());
+        fprintf(stderr, "%s\n", Settings::usageString(argv[0]).c_str());
         return 1;
     }
 
     if (settings.blockDevicePath != nullptr)
     {
-        int fd = open(settings.blockDevicePath, O_RDONLY);
-        if (fd < 0)
-        {
-            fprintf(stderr, "Failed to open block device: %s\n", strerror(errno));
-            return 1;
-        }
-
-        const size_t pageSize = sysconf(_SC_PAGESIZE);
-        const size_t blockSize = 512; // FIXME: specify this from command line
-        const size_t totalChunks = settings.numChunks * settings.numThreads;
-        const size_t totalPages = totalChunks * settings.numPages;
-
-        fprintf(stderr, "Controller page size  : %zu B\n", pageSize);
-        fprintf(stderr, "Assumed block size    : %zu B\n", blockSize);
-        fprintf(stderr, "Number of threads     : %zu\n", settings.numThreads);
-        fprintf(stderr, "Chunks per thread     : %zu\n", settings.numChunks);
-        fprintf(stderr, "Pages per chunk       : %zu\n", settings.numPages);
-        fprintf(stderr, "Total number of pages : %zu\n", totalPages);
-        fprintf(stderr, "Double buffering      : %s\n", settings.doubleBuffered ? "yes" : "no");
-
-        void* ptr = mmap(nullptr, totalPages * pageSize, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, settings.startBlock * blockSize);
-        if (ptr == nullptr)
-        {
-            close(fd);
-            fprintf(stderr, "Failed to memory map block device: %s\n", strerror(errno));
-            return 1;
-        }
-
-        try
-        {
-            auto outputBuffer = createBuffer(totalPages * pageSize);
-
-            double usecs = launchMoveKernelLoop(ptr, outputBuffer, pageSize, settings);
-
-            fprintf(stdout, "Time elapsed: %.3f µs\n", usecs);
-            fprintf(stdout, "Bandwidth   : %.3f MiB/s\n", (totalPages * pageSize) / usecs);
-
-            if (settings.output != nullptr)
-            {
-                outputFile(outputBuffer, totalPages * pageSize, settings.output);
-            }
-        }
-        catch (const cudaError_t err)
-        {
-            munmap(ptr, totalPages * pageSize);
-            close(fd);
-            fprintf(stderr, "Unexpected CUDA error: %s\n", cudaGetErrorString(err));
-            return 1;
-        }
-        catch (const error& e)
-        {
-            munmap(ptr, totalPages * pageSize);
-            close(fd);
-            fprintf(stderr, "Unexpected error: %s\n", e.what());
-            return 1;
-        }
-
-        munmap(ptr, totalPages * pageSize);
-        close(fd);
-        return 0;
+        return useBlockDevice(settings);
     }
 
 #ifdef __DIS_CLUSTER__
@@ -452,6 +459,23 @@ int main(int argc, char** argv)
         fprintf(stderr, "Failed to initialize SISCI: %s\n", SCIGetErrorString(err));
         return 1;
     }
+
+    sci_desc_t sd;
+    SCIOpen(&sd, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to open SISCI descriptor: %s\n", SCIGetErrorString(err));
+        return 1;
+    }
+
+    SCIRegisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, SCI_FLAG_PCIE_REQUESTER_GLOBAL, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to register PCI requester: %s\n", SCIGetErrorString(err));
+        SCIClose(sd, 0, &err);
+        return 1;
+    }
+    sleep(1); // FIXME: Hack due to race condition in SmartIO
 #endif
 
     try
@@ -521,11 +545,18 @@ int main(int argc, char** argv)
     }
     catch (const error& e)
     {
+#ifdef __DIS_CLUSTER__
+        SCIUnregisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, 0, &err);
+        SCIClose(sd, 0, &err);
+        SCITerminate();
+#endif
         fprintf(stderr, "Unexpected error: %s\n", e.what());
         return 1;
     }
 
 #ifdef __DIS_CLUSTER__
+    SCIUnregisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, 0, &err);
+    SCIClose(sd, 0, &err);
     SCITerminate();
 #endif
     return 0;
