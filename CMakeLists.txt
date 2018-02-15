@@ -12,6 +12,7 @@ find_package (CUDA 8.0)
 set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 set (NVIDIA "" CACHE PATH "Path to Nvidia driver source")
 
+set (compute_mode "50" CACHE STRING "CUDA compute mode")
 set (no_smartio_samples false CACHE BOOL "Do not use SISCI for examples")
 set (no_smartio_benchmarks false CACHE BOOL "Do not use SISCI for benchmarks")
 set (no_smartio false CACHE BOOL "Do not use SISCI for library or examples")
@@ -32,7 +33,7 @@ set (CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORC
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra" CACHE INTERNAL "" FORCE)
 set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -g -DDEBUG" CACHE INTERNAL "" FORCE)
 set (CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
-set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D__CUDA__;-std=c++11;-gencode arch=compute_50,code=sm_50")
+set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D__CUDA__;-std=c++11;-gencode arch=compute_${compute_mode},code=sm_${compute_mode}")
 set (CUDA_NVCC_FLAGS_RELEASE "${CMAKE_NVCC_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
 
 
@@ -218,7 +219,7 @@ endmacro ()
 
 macro (make_sisci_benchmark target binary_name files)
     if (CUDA_FOUND AND NOT no_cuda AND sisci_include AND sisci_lib AND NOT (no_smartio OR no_smartio_benchmarks))
-        cuda_add_executable (${target} ${files} EXCLUDE_FROM_ALL OPTIONS -gencode arch=compute_50,code=sm_50 -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
+        cuda_add_executable (${target} ${files} EXCLUDE_FROM_ALL OPTIONS -gencode arch=compute_${compute_mode},code=sm_${compute_mode} -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
         target_compile_definitions(${target} PRIVATE __DIS_CLUSTER__ __CUDA__ _REENTRANT)
 
         add_dependencies (${target} libnvm)

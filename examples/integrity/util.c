@@ -17,7 +17,7 @@ int create_buffer(struct buffer* b, nvm_aq_ref ref, size_t size, uint32_t adapte
 
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
 
-#ifdef __DIS_CLUSTER
+#ifdef __DIS_CLUSTER__
     b->buffer = NULL;
     status = nvm_dis_dma_create(&b->dma, ctrl, adapter, id, size);
 #else
