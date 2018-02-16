@@ -41,4 +41,7 @@ int create_queue_pair(nvm_aq_ref ref, struct queue_pair* qp, nvm_dma_t* cq_mem, 
 int read_and_dump(const struct disk_info* disk, struct queue_pair* qp, const nvm_dma_t* buffer, const struct options* args);
 
 
+int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_dma_t* buffer, const struct options* args);
+
+
 #endif

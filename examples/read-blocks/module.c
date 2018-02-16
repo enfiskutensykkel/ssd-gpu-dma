@@ -71,6 +71,15 @@ static int prepare_and_read(nvm_aq_ref ref, const struct disk_info* disk, const 
         goto leave;
     }
 
+    if (args.input != NULL)
+    {
+        status = write_blocks(disk, &queues, buffer, args);
+        if (status != 0)
+        {
+            goto leave;
+        }
+    }
+
     status = read_and_dump(disk, &queues, buffer, args);
 
 leave:
@@ -148,6 +157,12 @@ int main(int argc, char** argv)
 
     status = prepare_and_read(aq_ref, &disk, &args);
 
+leave:
+    if (args.input != NULL)
+    {
+        fclose(args.input);
+    }
+
     if (args.output != NULL)
     {
         fprintf(stderr, "Flushing output file...\n");
@@ -156,7 +171,6 @@ int main(int argc, char** argv)
 
     fprintf(stderr, "Done\n");
 
-leave:
     nvm_aq_destroy(aq_ref);
     nvm_dma_unmap(aq_mem);
     free(aq_ptr);

@@ -182,7 +182,7 @@ static void dump_memory(const nvm_dma_t* buffer, const struct options* args, siz
 }
 
 
-static size_t read_bytes(const struct disk_info* disk, struct queue_pair* qp, const nvm_dma_t* buffer, uint64_t* blk_offset, size_t* size_remaining)
+static size_t rw_bytes(const struct disk_info* disk, struct queue_pair* qp, const nvm_dma_t* buffer, uint64_t* blk_offset, size_t* size_remaining, uint8_t op)
 {
     // Read blocks
     size_t page = 0;
@@ -206,7 +206,7 @@ static size_t read_bytes(const struct disk_info* disk, struct queue_pair* qp, co
         size_t num_blocks = NVM_PAGE_TO_BLOCK(disk->page_size, disk->block_size, num_pages);
         size_t start_block = offset + NVM_PAGE_TO_BLOCK(disk->page_size, disk->block_size, page);
 
-        nvm_cmd_header(cmd, NVM_IO_READ, disk->ns_id);
+        nvm_cmd_header(cmd, op, disk->ns_id);
 
         page += nvm_cmd_data(cmd, disk->page_size, num_pages, NVM_DMA_OFFSET(qp->sq_mem, prp_list),
                 qp->sq_mem->ioaddrs[prp_list], &buffer->ioaddrs[page]);
@@ -250,7 +250,7 @@ int read_and_dump(const struct disk_info* disk, struct queue_pair* qp, const nvm
                 buffer->n_ioaddrs * disk->page_size, 
                 args->num_blocks * disk->block_size - size_remaining);
         size_t remaining = size_remaining;
-        num_cmds += read_bytes(disk, qp, buffer, &start_block, &size_remaining);
+        num_cmds += rw_bytes(disk, qp, buffer, &start_block, &size_remaining, NVM_IO_READ);
 
         while (qp->num_cpls < num_cmds)
         {
@@ -267,4 +267,46 @@ int read_and_dump(const struct disk_info* disk, struct queue_pair* qp, const nvm
     return 0;
 }
 
+
+
+int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_dma_t* buffer, const struct options* args)
+{
+    int status;
+    pthread_t completer;
+
+    // Start consuming
+    status = pthread_create(&completer, NULL, (void *(*)(void*)) consume_completions, qp);
+    if (status != 0)
+    {
+        fprintf(stderr, "Could not start completer thread\n");
+        return status;
+    }
+
+    // Clear all PRP lists
+    memset(NVM_DMA_OFFSET(qp->sq_mem, 1), 0, qp->sq_mem->page_size * (qp->sq_mem->n_ioaddrs - 1));
+
+    size_t num_cmds = 0;
+    uint64_t start_block = args->offset;
+    size_t size_remaining = args->num_blocks * disk->block_size;
+
+    while (size_remaining != 0)
+    {
+        fprintf(stderr, "Writing %zu bytes (total=%zu)\n", 
+                buffer->n_ioaddrs * disk->page_size, 
+                args->num_blocks * disk->block_size - size_remaining);
+
+        num_cmds += rw_bytes(disk, qp, buffer, &start_block, &size_remaining, NVM_IO_WRITE);
+
+        while (qp->num_cpls < num_cmds)
+        {
+            usleep(1);
+        }
+    }
+
+    // Wait for completions
+    qp->stop = true;
+    pthread_join(completer, NULL);
+
+    return 0;
+}
 

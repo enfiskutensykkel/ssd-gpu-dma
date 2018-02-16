@@ -21,6 +21,7 @@ struct options
     size_t      num_blocks;
     size_t      offset;
     FILE*       output;
+    FILE*       input;
     bool        ascii;
     bool        identify;
 };

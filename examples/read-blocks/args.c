@@ -25,6 +25,7 @@ static struct option opts[] = {
     { .name = "ascii", .has_arg = no_argument, .flag = NULL, .val = 2 },
     { .name = "identify", .has_arg = no_argument, .flag = NULL, .val = 3 },
     { .name = "chunk", .has_arg = required_argument, .flag = NULL, .val = 's' },
+    { .name = "write", .has_arg = required_argument, .flag = NULL, .val = 'w' },
     { .name = NULL, .has_arg = no_argument, .flag = NULL, .val = 0 }
 };
 
@@ -52,12 +53,13 @@ static void show_help(const char* name)
 #else
             "    --ctrl         <path>    Specify path to controller.\n"
 #endif
-            "    --chunk        <count>    Limit reads to a number of blocks at the time.\n"
+            "    --chunk        <count>   Limit reads to a number of blocks at the time.\n"
             "    --blocks       <count>   Read specified number of blocks from disk.\n"
             "    --offset       <count>   Start reading at specified block (default 0).\n"
             "    --namespace    <id>      Namespace identifier (default 1).\n"
             "    --ascii                  Show output of ASCII characters as text.\n"
             "    --output       <path>    Dump to file rather than stdout.\n"
+            "    --write        <path>    Read file and write to disk before reading back.\n"
             "    --identify               Show IDENTIFY CONTROLLER structure.\n"
            );
 }
@@ -67,9 +69,9 @@ static void show_help(const char* name)
 void parse_options(int argc, char** argv, struct options* args)
 {
 #ifdef __DIS_CLUSTER__
-    const char* argstr = ":hc:a:n:b:o:s:";
+    const char* argstr = ":hc:a:n:b:o:s:w:";
 #else
-    const char* argstr = ":hc:b:n:o:s:";
+    const char* argstr = ":hc:b:n:o:s:w:";
 #endif
 
     int opt;
@@ -89,6 +91,7 @@ void parse_options(int argc, char** argv, struct options* args)
     args->num_blocks = 0;
     args->offset = 0;
     args->output = NULL;
+    args->input = NULL;
     args->ascii = false;
     args->identify = false;
 
@@ -115,13 +118,23 @@ void parse_options(int argc, char** argv, struct options* args)
                     args->ascii = false;
                 }
 
-                args->output = fopen(optarg, "w");
+                args->output = fopen(optarg, "wb");
                 if (args->output == NULL)
                 {
                     fprintf(stderr, "Failed to open output file: %s\n", strerror(errno));
                     exit(1);
                 }
                 break;
+
+            case 'w':
+                args->input = fopen(optarg, "rb");
+                if (args->input == NULL)
+                {
+                    fprintf(stderr, "Failed to open input file: %s\n", strerror(errno));
+                    exit(1);
+                }
+                break;
+
 
             case 3:
                 args->identify = true;

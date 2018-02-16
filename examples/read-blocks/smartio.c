@@ -110,16 +110,30 @@ int main(int argc, char** argv)
         goto leave;
     }
 
+    if (args.input != NULL)
+    {
+        status = write_blocks(&info, &queues, buffer, &args);
+        if (status != 0)
+        {
+            goto leave;
+        }
+    }
+
     status = read_and_dump(&info, &queues, buffer, &args);
+
+    
+leave:
+    if (args.input != NULL)
+    {
+        fclose(args.input);
+    }
 
     if (args.output != NULL)
     {
         fprintf(stderr, "Flushing output file...\n");
         fclose(args.output);
     }
-    
     fprintf(stderr, "Done\n");
-leave:
     nvm_dma_unmap(cq_mem);
     nvm_dma_unmap(sq_mem);
     nvm_dma_unmap(buffer);
