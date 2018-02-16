@@ -10,127 +10,221 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include "buffer.h"
-#include <cstdio>
 
 using error = std::runtime_error;
 using std::string;
 
 
 
-BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, size_t size, int dev)
+static void* allocateDeviceMemory(size_t size, int device)
 {
-    nvm_dma_t* dma = nullptr;
-    void* bufferPtr = nullptr;
-    void* devicePtr = nullptr;
-
-    if (dev < 0)
-    {
-        return createBuffer(ctrl, adapter, id, size);
-    }
-
-    cudaError_t err = cudaSetDevice(dev);
+    cudaError_t err = cudaSetDevice(device);
     if (err != cudaSuccess)
     {
         throw error(string("Failed to set CUDA device: ") + cudaGetErrorString(err));
     }
 
-    err = cudaMalloc(&bufferPtr, size);
+    void* ptr = nullptr;
+    err = cudaMalloc(&ptr, size);
     if (err != cudaSuccess)
     {
         throw error(string("Failed to allocate device memory: ") + cudaGetErrorString(err));
     }
 
-    cudaPointerAttributes attrs;
-    err = cudaPointerGetAttributes(&attrs, bufferPtr);
+    err = cudaMemset(ptr, 0, size);
     if (err != cudaSuccess)
     {
-        cudaFree(bufferPtr);
-        throw error(string("Failed to get pointer attributes: ") + cudaGetErrorString(err));
+        free(ptr);
+        throw error(string("Failed to clear device memory: ") + cudaGetErrorString(err));
     }
 
-    devicePtr = attrs.devicePointer;
-
-#ifdef __DIS_CLUSTER__
-    int status = nvm_dis_dma_map_device(&dma, ctrl, adapter, id, devicePtr, size);
-#else
-    int status = nvm_dma_map_device(&dma, ctrl, devicePtr, size);
-#endif
-    if (!nvm_ok(status))
-    {
-        cudaFree(bufferPtr);
-        throw error(string("Failed to create local segment: ") + nvm_strerror(status));
-    }
-
-    dma->vaddr = bufferPtr;
-
-    return BufferPtr(dma, [bufferPtr](nvm_dma_t* m) {
-        nvm_dma_unmap(m);
-        if (bufferPtr != nullptr)
-        {
-            cudaFree(bufferPtr);
-        }
-    });
+    return ptr;
 }
 
 
 
-#ifdef __DIS_CLUSTER__
-BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t id, size_t size)
+static void* allocateHostMemory(size_t size, uint32_t flags)
 {
-    nvm_dma_t* dma = nullptr;
-
-    int status = nvm_dis_dma_create(&dma, ctrl, adapter, id, size);
-    if (!nvm_ok(status))
-    {
-        throw error(string("Failed to create local segment: ") + nvm_strerror(status));
-    }
-
-    return BufferPtr(dma, [](nvm_dma_t* m) { nvm_dma_unmap(m); });
-}
-#else
-BufferPtr createBuffer(const nvm_ctrl_t* ctrl, uint32_t, uint32_t, size_t size)
-{
-    nvm_dma_t* dma = nullptr;
     void* ptr = nullptr;
 
-    cudaError_t err = cudaHostAlloc(&ptr, size, cudaHostAllocDefault);
+    cudaError_t err = cudaHostAlloc(&ptr, size, flags);
     if (err != cudaSuccess)
     {
-        throw error(string("Failed to allocate memory: ") + cudaGetErrorString(err));
+        throw error(string("Failed to allocate host memory: ") + cudaGetErrorString(err));
     }
 
-    int status = nvm_dma_map_host(&dma, ctrl, ptr, size);
-    if (!nvm_ok(status))
+    memset(ptr, 0, size);
+
+    return ptr;
+}
+
+
+
+static void* lookupDevicePointer(void* pointer)
+{
+    cudaPointerAttributes attrs;
+
+    auto err = cudaPointerGetAttributes(&attrs, pointer);
+    if (err != cudaSuccess)
     {
-        cudaFreeHost(ptr);
-        throw error(string("Failed to map host memory: ") + nvm_strerror(status));
+        return nullptr;
     }
 
-    return BufferPtr(dma, [ptr](nvm_dma_t* m) {
-        nvm_dma_unmap(m);
-        if (ptr != nullptr)
-        {
-            cudaFreeHost(ptr);
-        }
+    return attrs.devicePointer;
+}
+
+
+
+MemPtr createDeviceMemory(size_t size, int cudaDevice)
+{
+    void* pointer = allocateDeviceMemory(size, cudaDevice);
+    return MemPtr(pointer, cudaFree);
+}
+
+
+
+MemPtr createHostMemory(size_t size, uint32_t flags)
+{
+    void* pointer = allocateHostMemory(size, flags);
+    return MemPtr(pointer, cudaFreeHost);
+}
+
+
+
+MemPtr createHostMemory(size_t size)
+{
+    return createHostMemory(size, cudaHostAllocDefault);
+}
+
+
+
+DmaPtr createHostDma(const nvm_ctrl_t* ctrl, size_t size)
+{
+    void* pointer = allocateHostMemory(size, cudaHostAllocDefault);
+
+    nvm_dma_t* dma = nullptr;
+    int err = nvm_dma_map_host(&dma, ctrl, pointer, size);
+    if (!nvm_ok(err))
+    {
+        cudaFreeHost(pointer);
+        throw error(string("Failed to map host memory: ") + nvm_strerror(err));
+    }
+
+    return DmaPtr(dma, [pointer](nvm_dma_t* dma) {
+        nvm_dma_unmap(dma);
+        cudaFreeHost(pointer);
     });
+}
+
+
+
+DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, size_t size, int device)
+{
+    void* pointer = allocateDeviceMemory(size, device);
+
+    void* devicePointer = lookupDevicePointer(pointer);
+    if (devicePointer == nullptr)
+    {
+        cudaFree(pointer);
+        throw error("Failed to look up device pointer");
+    }
+
+    nvm_dma_t* dma = nullptr;
+    int err = nvm_dma_map_device(&dma, ctrl, devicePointer, size);
+    if (!nvm_ok(err))
+    {
+        cudaFree(pointer);
+        throw error(string("Failed to map device memory: ") + nvm_strerror(err));
+    }
+
+    dma->vaddr = pointer;
+
+    return DmaPtr(dma, [pointer](nvm_dma_t* dma) {
+        nvm_dma_unmap(dma);
+        cudaFree(pointer);
+    });
+}
+
+
+
+#ifdef __DIS_CLUSTER__
+DmaPtr createRemoteDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t adapter, uint32_t number)
+{
+    nvm_dma_t* dma = nullptr;
+
+    int err = nvm_dis_dma_connect(&dma, ctrl, adapter, number, size, true); // FIXME: Should be private
+
+    if (!nvm_ok(err))
+    {
+        throw error(string("Failed to connect to remote segment: ") + nvm_strerror(err));
+    }
+
+    return DmaPtr(dma, nvm_dma_unmap);
+}
+#else
+DmaPtr createRemoteDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t, uint32_t)
+{
+    return createHostDma(ctrl, size);
 }
 #endif
 
 
 
 #ifdef __DIS_CLUSTER__
-BufferPtr createRemoteBuffer(const nvm_ctrl_t* ctrl, uint32_t adapter, uint32_t segno, size_t size)
+DmaPtr createHostDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t adapter, uint32_t id)
 {
     nvm_dma_t* dma = nullptr;
 
-    int status = nvm_dis_dma_connect(&dma, ctrl, adapter, segno, size, true); // FIXME: should be private
-    if (!nvm_ok(status))
+    int err = nvm_dis_dma_create(&dma, ctrl, adapter, id, size);
+    if (!nvm_ok(err))
     {
-        throw error(string("Failed to connect to segment: ") + nvm_strerror(status));
+        throw error(string("Failed to create local segment: ") + nvm_strerror(err));
     }
 
-    return BufferPtr(dma, [](nvm_dma_t* m) { nvm_dma_unmap(m); });
+    return DmaPtr(dma, nvm_dma_unmap);
+}
+#else
+DmaPtr createHostDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t, uint32_t)
+{
+    return createHostDma(ctrl, size);
+}
+#endif
+
+
+
+#ifdef __DIS_CLUSTER__
+DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, size_t size, int device, uint32_t adapter, uint32_t id)
+{
+    void* pointer = allocateDeviceMemory(size, device);
+
+    void* devicePointer = lookupDevicePointer(pointer);
+    if (devicePointer == nullptr)
+    {
+        cudaFree(pointer);
+        throw error("Failed to look up device pointer");
+    }
+
+    nvm_dma_t* dma = nullptr;
+    int err = nvm_dis_dma_map_device(&dma, ctrl, adapter, id, devicePointer, size);
+    if (!nvm_ok(err))
+    {
+        cudaFree(pointer);
+        throw error(string("Failed to map device memory: ") + nvm_strerror(err));
+    }
+
+    dma->vaddr = pointer;
+
+    return DmaPtr(dma, [pointer](nvm_dma_t* dma) {
+        nvm_dma_unmap(dma);
+        cudaFree(pointer);
+    });
+}
+#else
+DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, size_t size, int device, uint32_t, uint32_t)
+{
+    return createDeviceDma(ctrl, size);
 }
 #endif
 

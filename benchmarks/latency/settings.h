@@ -15,6 +15,7 @@ enum AccessPattern : int
 
 struct Settings
 {
+    bool            latency;
     int             cudaDevice;
     const char*     controllerPath;
     uint32_t        controllerId;

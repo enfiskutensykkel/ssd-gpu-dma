@@ -14,15 +14,19 @@
 struct Queue
 {
     uint16_t                no;
-    BufferPtr               sq_mem;
-    BufferPtr               cq_mem;
+    DmaPtr                  sq_mem;
+    DmaPtr                  cq_mem;
     nvm_queue_t             sq;
     nvm_queue_t             cq;
     size_t                  depth;
     TransferList            warmups;
     TransferList            transfers;
 
+#ifdef __DIS_CLUSTER__
     Queue(const Controller& ctrl, uint32_t adapter, uint32_t segmentId, uint16_t no, size_t depth, bool remote);
+#endif
+
+    Queue(const Controller& ctrl, uint16_t no, size_t depth);
 };
 
 

@@ -57,7 +57,7 @@ static const struct option options[] = {
     { .name = "repetitions", .has_arg = required_argument, .flag = nullptr, .val = 'r' },
     { .name = "reps", .has_arg = required_argument, .flag = nullptr, .val = 'r' },
     { .name = "count", .has_arg = required_argument, .flag = nullptr, .val = 'r' },
-    { .name = "verify", .has_arg = required_argument, .flag = nullptr, .val = 'v' },
+    { .name = "output", .has_arg = required_argument, .flag = nullptr, .val = 'O' },
     { .name = "pattern", .has_arg = required_argument, .flag = nullptr, .val = 'p' },
     { .name = "mode", .has_arg = required_argument, .flag = nullptr, .val = 'p' },
     { .name = "write", .has_arg = no_argument, .flag = nullptr, .val = 1 },
@@ -117,7 +117,7 @@ static string helpString(const char* name)
     argInfo(s, "depth", "number", "specify number of commands per queue (default is 32)");
     argInfo(s, "repeat", "repetitions", "number of times to repeat measurement (default is 1000)");
     argInfo(s, "gpu", "[device]", "select GPUDirect capable CUDA device (default is none)");
-    argInfo(s, "verify", "path", "use file to verify transfer");
+    argInfo(s, "output", "path", "output to file");
     argInfo(s, "write", "write instead of read (WARNING! Will destroy data on disk)");
 #ifdef __DIS_CLUSTER__
     argInfo(s, "local-sq", "host submission queue and PRP lists in local memory");
@@ -169,6 +169,7 @@ static int maxCudaDevice()
 
 Settings::Settings()
 {
+    latency = true;
     cudaDevice = -1;
     controllerPath = nullptr;
     controllerId = 0;
@@ -216,9 +217,9 @@ void Settings::parseArguments(int argc, char** argv)
     int option;
 
 #ifdef __DIS_CLUSTER__
-    const char* optstr = ":hc:g:i:a:n:o:q:d:w:r:v:p:s";
+    const char* optstr = ":hc:g:i:a:n:o:q:d:w:r:O:p:s";
 #else
-    const char* optstr = ":hc:g:i:n:o:q:d:w:r:v:p:s";
+    const char* optstr = ":hc:g:i:n:o:q:d:w:r:O:p:s";
 #endif
 
     while ((option = getopt_long(argc, argv, optstr, options, &index)) != -1)
@@ -325,7 +326,7 @@ void Settings::parseArguments(int argc, char** argv)
                 repetitions = (size_t) parseNumber(optarg);
                 break;
 
-            case 'v':
+            case 'O':
                 filename = optarg;
                 break;
 
@@ -354,12 +355,12 @@ void Settings::parseArguments(int argc, char** argv)
 
     if (pattern == AccessPattern::RANDOM && filename != nullptr)
     {
-        throw string("Can not verify random access pattern!");
+        throw string("Can not output random access pattern!");
     }
 
     if (write && filename != nullptr)
     {
-        throw string("Can not write and verify!");
+        throw string("Can not write and output!");
     }
 }
 

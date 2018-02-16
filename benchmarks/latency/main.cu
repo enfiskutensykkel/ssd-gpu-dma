@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "benchmark.h"
 #include "buffer.h"
 #include "ctrl.h"
 #include "queue.h"
@@ -31,126 +32,94 @@ using std::make_shared;
 using std::thread;
 
 
-typedef std::chrono::duration<double, std::micro> mtime;
-
-struct Time
-{
-    uint16_t    commands;
-    size_t      blocks;
-    mtime       time;
-    
-    Time(uint16_t commands, size_t blocks, mtime time)
-        : commands(commands), blocks(blocks), time(time) {}
-};
-
-
-typedef std::vector<Time> Times;
-
 
 static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList& queues)
 {
     const size_t pageSize = ctrl.info.page_size;
     const size_t blockSize = ctrl.ns.lba_data_size;
 
-    const size_t transferPages = NVM_PAGE_ALIGN(settings.numBlocks * blockSize, pageSize) / pageSize;
-    const size_t pagesPerQueue = transferPages / ctrl.numQueues;
+    size_t pages = 0;
+    size_t totalPages = NVM_PAGE_ALIGN(settings.numBlocks * blockSize, pageSize) / pageSize;
 
     srand(settings.startBlock);
 
-    const size_t maxDataBlock = NVM_PAGE_TO_BLOCK(pageSize, blockSize, ctrl.info.max_data_pages);
-    const size_t maxBlock = ctrl.ns.size / blockSize;
-
-    size_t dataPages = 0;
-
-    bool write = settings.write;
-
-    for (uint16_t i = 0; i < ctrl.numQueues; ++i)
+    for (uint16_t no = 1; no <= ctrl.numQueues; ++no)
     {
-        auto queue = make_shared<Queue>(ctrl, settings.adapter, settings.segmentId++, i+1, settings.queueDepth, settings.remote);
-        size_t pageOff = pagesPerQueue * i;
+        auto queue = make_shared<Queue>(ctrl, settings.adapter, settings.segmentId++, no, settings.queueDepth, settings.remote);
 
-        fprintf(stderr, "Queue #%02u %s qd=%zu ", queue->no, settings.remote ? "remote" : "local", queue->depth);
         switch (settings.pattern)
         {
-            case AccessPattern::SEQUENTIAL:
-                dataPages += prepareRange(queue->transfers, ctrl, dataPages, settings.startBlock, settings.numBlocks, write);
-                fprintf(stderr, "blocks=%zu offset=%zu pattern=sequential", settings.numBlocks, settings.startBlock);
+            case AccessPattern::LINEAR:
+                pages += prepareRange(queue->transfers, ctrl, settings.write, pages, settings.startBlock, settings.numBlocks);
                 break;
 
-            case AccessPattern::LINEAR:
-                if (i == ctrl.numQueues - 1)
+            case AccessPattern::SEQUENTIAL:
+                if (no == ctrl.numQueues)
                 {
-                    size_t startBlock = settings.startBlock + NVM_PAGE_TO_BLOCK(pageSize, blockSize, pageOff);
-                    size_t numBlocks = settings.numBlocks - startBlock;
-
-                    dataPages += prepareRange(queue->transfers, ctrl, pageOff, startBlock, numBlocks, write);
-                    fprintf(stderr, "blocks=%zu offset=%zu pattern=linear", numBlocks, startBlock);
+                    auto start = settings.startBlock + NVM_PAGE_TO_BLOCK(pageSize, blockSize, pages);
+                    auto blocks = settings.numBlocks - start;
+                    pages += prepareRange(queue->transfers, ctrl, settings.write, pages, start, blocks);
                 }
                 else
                 {
-                    size_t startBlock = settings.startBlock + NVM_PAGE_TO_BLOCK(pageSize, blockSize, pageOff);
-                    size_t numBlocks = NVM_PAGE_TO_BLOCK(pageSize, blockSize, pagesPerQueue);
-                    
-                    dataPages += prepareRange(queue->transfers, ctrl, pageOff, startBlock, numBlocks, write);
-                    fprintf(stderr, "blocks=%zu offset=%zu pattern=linear", numBlocks, startBlock);
+                    auto start = settings.startBlock + NVM_PAGE_TO_BLOCK(pageSize, blockSize, pages);
+                    auto blocks = NVM_PAGE_TO_BLOCK(pageSize, blockSize, totalPages / ctrl.numQueues);
+                    pages += prepareRange(queue->transfers, ctrl, settings.write, pages, start, blocks);
                 }
                 break;
-
-            //case AccessPattern::RANDOM: // FIXME: This is random-sequential
-            //    dataPages += prepareRange(queue->transfers, ctrl, dataPages, rand() % maxBlock, settings.numBlocks, false);
-            //    break;
 
             case AccessPattern::RANDOM:
-                for (size_t i = 0; i < settings.numBlocks / maxDataBlock; ++i)
-                {
-                    dataPages += prepareRange(queue->transfers, ctrl, dataPages, rand() % maxBlock, maxDataBlock, write);
-                }
-                fprintf(stderr, "blocks=%zu pattern=random", (settings.numBlocks / maxDataBlock) * maxDataBlock);
+                pages = fillRandom(queue->transfers, ctrl, settings.write, settings.numBlocks);
                 break;
         }
-        fprintf(stderr, " (%zu commands)\n", queue->transfers.size());
+
+        fprintf(stderr, "Queue #%02u %s %zu commands\n",
+                no, settings.remote ? "remote" : "local", queue->transfers.size());
 
         queues.push_back(queue);
     }
-
-    return dataPages;
+    
+    return pages;
 }
 
 
-static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Settings& settings, size_t blockSize);
+
+static void copyMemory(const MemPtr& outputBuffer, const DmaPtr& buffer, size_t offset, size_t size, int cudaDevice)
+{
+    void* sourcePtr = (void*) (((unsigned char*) buffer->vaddr) + offset);
+
+    if (cudaDevice != -1)
+    {
+        cudaError_t err = cudaMemcpy(outputBuffer.get(), sourcePtr, size, cudaMemcpyDeviceToHost);
+        if (err != cudaSuccess)
+        {
+            throw runtime_error(string("Failed to copy memory from device: ") + cudaGetErrorString(err));
+        }
+    }
+    else
+    {
+        memcpy(outputBuffer.get(), sourcePtr, size);
+    }
+}
 
 
 
-//static void dumpMemory(const BufferPtr& buffer, bool ascii)
-//{
-//    uint8_t* ptr = (uint8_t*) buffer->vaddr;
-//    size_t byte = 0;
-//    size_t size = buffer->page_size * buffer->n_ioaddrs;
-//    while (byte < size)
-//    {
-//        fprintf(stderr, "%8lx: ", byte);
-//        for (size_t n = byte + (ascii ? 0x80 : 0x20); byte < n; ++byte)
-//        {
-//            uint8_t value = ptr[byte];
-//            if (ascii)
-//            {
-//                if ( !(0x20 <= value && value <= 0x7e) )
-//                {
-//                    value = ' ';
-//                }
-//                fprintf(stdout, "%c", value);
-//            }
-//            else
-//            {
-//                fprintf(stdout, " %02x", value);
-//            }
-//        }
-//        fprintf(stdout, "\n");
-//    }
-//}
+static void writeToFile(const MemPtr& outputBuffer, size_t size, const string& filename)
+{
+    FILE* fp = fopen(filename.c_str(), "wb");
+    if (fp == nullptr)
+    {
+        throw runtime_error(string("Failed to open file: ") + strerror(errno));
+    }
+
+    fwrite(outputBuffer.get(), 1, size, fp);
+    fflush(fp);
+    fclose(fp);
+}
 
 
-static void verify(const Controller& ctrl, const QueueList& queues, const BufferPtr& buffer, const Settings& settings)
+
+static void outputFile(const Controller& ctrl, const QueueList& queues, const DmaPtr& buffer, const Settings& settings)
 {
     size_t fileSize = settings.numBlocks * ctrl.ns.lba_data_size;
 
@@ -159,152 +128,27 @@ static void verify(const Controller& ctrl, const QueueList& queues, const Buffer
         throw runtime_error("Unable to verify written data");
     }
 
-    void* ptr = malloc(fileSize);
-    if (ptr == nullptr)
+    auto outputBuffer = createHostMemory(fileSize);
+
+    if (settings.pattern == AccessPattern::SEQUENTIAL)
     {
-        throw runtime_error(string("Failed to allocate local buffer: ") + strerror(errno));
+        copyMemory(outputBuffer, buffer, 0, fileSize, settings.cudaDevice);
+        writeToFile(outputBuffer, fileSize, string(settings.filename) + "-sequential");
     }
-
-    FILE* fp = fopen(settings.filename, "r");
-    if (fp == nullptr)
+    else if (settings.pattern == AccessPattern::LINEAR)
     {
-        free(ptr);
-        throw runtime_error(string("Failed to open file: ") + strerror(errno));
-    }
-
-    size_t actualSize = fread(ptr, 1, fileSize, fp);
-    fclose(fp);
-
-    if (actualSize != fileSize)
-    {
-        fprintf(stderr, "WARNING: Verification file differs in size!\n");
-    }
-
-    void* bufferPtr = buffer->vaddr;
-    if (settings.cudaDevice != -1)
-    {
-        cudaHostAlloc(&bufferPtr, fileSize, cudaHostAllocDefault);
-        cudaMemcpy(bufferPtr, buffer->vaddr, actualSize, cudaMemcpyDeviceToHost);
-    }
-
-    switch (settings.pattern)
-    {
-        case AccessPattern::SEQUENTIAL:
-            for (const auto& queue: queues)
-            {
-                const auto& start = *queue->transfers.begin();
-
-                //if (memcmp(ptr, NVM_DMA_OFFSET(buffer, start.startPage), actualSize) != 0)
-                if (memcmp(ptr, NVM_PTR_OFFSET(bufferPtr, buffer->page_size, start.startPage), actualSize) != 0)
-                {
-                    free(ptr);
-                    if (settings.cudaDevice != -1)
-                    {
-                        cudaFree(bufferPtr);
-                    }
-                    throw runtime_error("File differs!");
-                }
-            }
-            break;
-
-        case AccessPattern::LINEAR:
-            if (memcmp(ptr, bufferPtr, actualSize) != 0)
-            {
-                free(ptr);
-                if (settings.cudaDevice != -1)
-                {
-                    cudaFree(bufferPtr);
-                }
-                throw runtime_error("File differs!");
-            }
-            break;
-
-        case AccessPattern::RANDOM:
-            free(ptr);
-            if (settings.cudaDevice != -1)
-            {
-                cudaFree(bufferPtr);
-            }
-            throw runtime_error("Unable to verify random blocks!");
-    }
-
-    free(ptr);
-    if (settings.cudaDevice != -1)
-    {
-        cudaFree(bufferPtr);
-    }
-}
-
-
-
-int main(int argc, char** argv)
-{
-    Settings settings;
-
-    // Parse command line arguments
-    try
-    {
-        settings.parseArguments(argc, argv);
-    }
-    catch (const string& s)
-    {
-        fprintf(stderr, "%s\n", s.c_str());
-        return 1;
-    }
-
-#ifdef __DIS_CLUSTER__
-    sci_error_t err;
-    SCIInitialize(0, &err);
-    if (err != SCI_ERR_OK)
-    {
-        fprintf(stderr, "Something went wrong: %s\n", SCIGetErrorString(err));
-        return 1;
-    }
-#endif
-
-    try
-    {
-        fprintf(stderr, "Resetting controller...\n");
-#ifdef __DIS_CLUSTER__
-        Controller ctrl(settings.controllerId, settings.adapter, settings.segmentId++, settings.nvmNamespace, settings.numQueues);
-#else
-        Controller ctrl(settings.controllerPath, settings.nvmNamespace, settings.numQueues);
-#endif
-
-        settings.numQueues = ctrl.numQueues;
-
-        QueueList queues;
-        size_t numPages = createQueues(ctrl, settings, queues);
-
-        fprintf(stderr, "Creating buffer (%zu pages)...\n", numPages);
-        BufferPtr buffer = createBuffer(ctrl.ctrl, settings.adapter, settings.segmentId++, numPages * ctrl.ctrl->page_size, settings.cudaDevice);
-
-        benchmark(queues, buffer, settings, ctrl.ns.lba_data_size);
-
-        if (settings.filename != nullptr && settings.pattern != AccessPattern::RANDOM)
+        for (const auto& queue: queues)
         {
-            fprintf(stderr, "Verifying transfer...\n");
-            verify(ctrl, queues, buffer, settings);
+            size_t offset = NVM_PAGE_ALIGN(fileSize, ctrl.info.page_size) * (queue->no - 1);
+            copyMemory(outputBuffer, buffer, offset, fileSize, settings.cudaDevice);
+            writeToFile(outputBuffer, fileSize, string(settings.filename) + "-linear-q" + std::to_string(queue->no));
         }
     }
-    catch (const runtime_error& e)
-    {
-        fprintf(stderr, "Unexpected error: %s\n", e.what());
-        return 1;
-    }
-
-    fprintf(stderr, "OK!\n");
-
-#ifdef __DIS_CLUSTER__
-    SCITerminate();
-#endif
-    return 0;
 }
 
 
 
-
-static Time sendWindow(QueuePtr& queue, TransferPtr& from, const TransferPtr& to, const BufferPtr& buffer, uint32_t ns, Barrier* barrier)
+static Time sendWindow(QueuePtr& queue, TransferPtr& from, const TransferPtr& to, const DmaPtr& buffer, uint32_t ns, Barrier* barrier)
 {
     size_t numCommands = 0;
     size_t numBlocks = 0;
@@ -387,7 +231,7 @@ static void flush(QueuePtr& queue, uint32_t ns)
 
 
 
-static void measure(QueuePtr queue, const BufferPtr buffer, Times* times, const Settings& settings, Barrier* barrier)
+static void measure(QueuePtr queue, const DmaPtr buffer, Times* times, const Settings& settings, Barrier* barrier)
 {
     for (size_t i = 0; i < settings.repetitions; ++i)
     {
@@ -422,10 +266,16 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
     double avgLat = 0;
 
     size_t blocks = 0;
+    for (const auto& t: queue->transfers)
+    {
+        blocks += t.numBlocks;
+    }
 
     std::vector<double> latencies;
     latencies.reserve(times.size());
 
+    fprintf(stdout, "%5s %8s %12s %12s %12s\n",
+            "queue", "cmds", "blocks", "usecs", "mbytes");
     for (const auto& t: times)
     {
         const auto current = t.time.count();
@@ -442,12 +292,10 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
         avgLat += current;
         latencies.push_back(current);
 
-        blocks += t.blocks;
-
         if (print)
         {
             double bw = (t.blocks * blockSize) / current; 
-            fprintf(stdout, "#%04x %8u %12zu %12.3f %12.3f\n",
+            fprintf(stdout, "%5x %8u %12zu %12.3f %12.3f\n",
                     queue->no, t.commands, t.blocks, current, bw);
         }
     }
@@ -455,15 +303,15 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
     avgLat /= times.size();
 
 
-    fprintf(stderr, "Queue #%02u total-blocks=%zu count=%zu ",
-            queue->no, blocks, times.size());
+    fprintf(stderr, "Queue #%02u cmds=%zu blocks=%zu repeat=%zu ",
+            queue->no, queue->transfers.size(), blocks, times.size());
     fprintf(stderr, "min=%.3f avg=%.3f max=%.3f\n", minLat, avgLat, maxLat);
 
     // Calculate percentiles
     std::sort(latencies.begin(), latencies.end(), std::greater<double>());
     std::reverse(latencies.begin(), latencies.end());
 
-    for (auto p: {.99, .97, .95, .90, .75, .50, .25, .05, .01})
+    for (auto p: {.99, .97, .95, .90, .75, .50})
     {
         fprintf(stderr, "\t%4.2f: %14.3f\n", p, percentile(latencies, p));
     }
@@ -471,7 +319,7 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
 
 
 
-static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Settings& settings, size_t blockSize)
+static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Settings& settings, size_t blockSize)
 {
     cudaError_t err;
     Times times[queues.size()];
@@ -486,27 +334,22 @@ static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Se
         }
     }
 
-    if (settings.cudaDevice == -1)
+    Barrier barrier(queues.size());
+
+    if (settings.latency)
     {
-        memset(buffer->vaddr, 0x00, buffer->page_size * buffer->n_ioaddrs);
+        for (size_t i = 0; i < queues.size(); ++i)
+        {
+            Times* t = &times[i];
+            QueuePtr q = queues[i];
+
+            //threads[i] = thread(measure, &queues[i], &buffer, &times[i], &settings, &barrier);
+            auto func = std::bind(measure, q, buffer, t, settings, &barrier);
+            threads[i] = thread(func);
+        }
     }
     else
     {
-        cudaMemset(buffer->vaddr, 0x00, buffer->page_size * buffer->n_ioaddrs);
-    }
-
-    Barrier barrier(queues.size());
-
-    for (size_t i = 0; i < queues.size(); ++i)
-    {
-        Times* t = &times[i];
-        QueuePtr q = queues[i];
-
-        // TODO: use bind instead
-        //threads[i] = thread(measure, &queues[i], &buffer, &times[i], &settings, &barrier);
-        threads[i] = thread([&q, &buffer, t, &settings, &barrier] {
-            measure(q, buffer, t, settings, &barrier);
-        });
     }
 
     fprintf(stderr, "Running benchmark...\n");
@@ -525,5 +368,81 @@ static void benchmark(const QueueList& queues, const BufferPtr& buffer, const Se
             fprintf(stderr, "Synchronizing CUDA device failed: %s\n", cudaGetErrorString(err));
         }
     }
+}
+
+
+
+int main(int argc, char** argv)
+{
+    Settings settings;
+
+    // Parse command line arguments
+    try
+    {
+        settings.parseArguments(argc, argv);
+    }
+    catch (const string& s)
+    {
+        fprintf(stderr, "%s\n", s.c_str());
+        return 1;
+    }
+
+#ifdef __DIS_CLUSTER__
+    sci_error_t err;
+    SCIInitialize(0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Something went wrong: %s\n", SCIGetErrorString(err));
+        return 1;
+    }
+#endif
+
+    try
+    {
+        fprintf(stderr, "Resetting controller...\n");
+#ifdef __DIS_CLUSTER__
+        Controller ctrl(settings.controllerId, settings.adapter, settings.segmentId++, settings.nvmNamespace, settings.numQueues);
+#else
+        Controller ctrl(settings.controllerPath, settings.nvmNamespace, settings.numQueues);
+#endif
+
+        settings.numQueues = ctrl.numQueues;
+
+        QueueList queues;
+        size_t numPages = createQueues(ctrl, settings, queues);
+
+        fprintf(stderr, "Allocating %zu pages (%s)...\n", 
+                numPages, settings.cudaDevice >= 0 ? "GPU" : "host");
+
+        DmaPtr buffer;
+        if (settings.cudaDevice != -1)
+        {
+            buffer = createDeviceDma(ctrl.ctrl, numPages * ctrl.ctrl->page_size, settings.cudaDevice, settings.adapter, settings.segmentId++);
+        }
+        else
+        {
+            buffer = createHostDma(ctrl.ctrl, numPages * ctrl.ctrl->page_size, settings.adapter, settings.segmentId++);
+        }
+
+        benchmark(queues, buffer, settings, ctrl.ns.lba_data_size);
+
+        if (settings.filename != nullptr && !settings.write && settings.pattern != AccessPattern::RANDOM)
+        {
+            fprintf(stderr, "Writing to file...\n");
+            outputFile(ctrl, queues, buffer, settings);
+        }
+    }
+    catch (const runtime_error& e)
+    {
+        fprintf(stderr, "Unexpected error: %s\n", e.what());
+        return 1;
+    }
+
+    fprintf(stderr, "OK!\n");
+
+#ifdef __DIS_CLUSTER__
+    SCITerminate();
+#endif
+    return 0;
 }
 
