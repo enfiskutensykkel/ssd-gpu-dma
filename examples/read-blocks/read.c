@@ -297,6 +297,14 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
 
         num_cmds += rw_bytes(disk, qp, buffer, &start_block, &size_remaining, NVM_IO_WRITE);
 
+        // Flush written data
+        nvm_cmd_t* cmd = nvm_sq_enqueue(&qp->sq);
+        nvm_cmd_header(cmd, NVM_IO_FLUSH, disk->ns_id);
+        nvm_cmd_data_ptr(cmd, 0, 0);
+        nvm_sq_submit(&qp->sq);
+        ++num_cmds;
+
+
         while (qp->num_cpls < num_cmds)
         {
             usleep(1);
