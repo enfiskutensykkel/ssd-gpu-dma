@@ -52,6 +52,8 @@ static const struct option options[] = {
 #ifdef __DIS_CLUSTER__
     { .name = "local-sq", .has_arg = no_argument, .flag = nullptr, .val = 2 },
 #endif
+    { .name = "bandwidth", .has_arg = no_argument, .flag = nullptr, .val = 'B' },
+    { .name = "bw", .has_arg = no_argument, .flag = nullptr, .val = 'B' },
     { .name = "warmups", .has_arg = required_argument, .flag = nullptr, .val = 'w' },
     { .name = "repeat", .has_arg = required_argument, .flag = nullptr, .val = 'r' },
     { .name = "repetitions", .has_arg = required_argument, .flag = nullptr, .val = 'r' },
@@ -217,7 +219,7 @@ void Settings::parseArguments(int argc, char** argv)
     int option;
 
 #ifdef __DIS_CLUSTER__
-    const char* optstr = ":hc:g:i:a:n:o:q:d:w:r:O:p:s";
+    const char* optstr = ":hc:g:i:a:n:o:q:d:w:r:O:p:sB";
 #else
     const char* optstr = ":hc:g:i:n:o:q:d:w:r:O:p:s";
 #endif
@@ -245,6 +247,10 @@ void Settings::parseArguments(int argc, char** argv)
 
             case 'p':
                 pattern = parsePattern(optarg);
+                break;
+
+            case 'B':
+                latency = false;
                 break;
 
 #ifdef __DIS_CLUSTER__

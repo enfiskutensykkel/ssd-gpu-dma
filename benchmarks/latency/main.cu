@@ -231,7 +231,7 @@ static void flush(QueuePtr& queue, uint32_t ns)
 
 
 
-static void measure(QueuePtr queue, const DmaPtr buffer, Times* times, const Settings& settings, Barrier* barrier)
+static void measureLatency(QueuePtr queue, const DmaPtr buffer, Times* times, const Settings& settings, Barrier* barrier)
 {
     for (size_t i = 0; i < settings.repetitions; ++i)
     {
@@ -251,15 +251,151 @@ static void measure(QueuePtr queue, const DmaPtr buffer, Times* times, const Set
 
 
 
+static size_t consumeCompletions(QueuePtr& queue)
+{
+    nvm_queue_t* cq = &queue->cq;
+    nvm_queue_t* sq = &queue->sq;
+
+    nvm_cpl_t* cpl = nullptr;
+    size_t numCpls = 0;
+
+    while ((cpl = nvm_cq_dequeue(cq)) != nullptr)
+    {
+        nvm_sq_update(sq);
+
+        if (!NVM_ERR_OK(cpl))
+        {
+            fprintf(stderr, "%u: %s\n", queue->no, nvm_strerror(NVM_ERR_STATUS(cpl)));
+        }
+
+        ++numCpls;
+    }
+
+    nvm_cq_update(cq);
+
+    return numCpls;
+}
+
+
+
+static void measureBandwidth(QueuePtr queue, const DmaPtr buffer, Times* times, const Settings& settings, Barrier* barrier)
+{
+    nvm_queue_t* sq = &queue->sq;
+
+    barrier->wait();
+
+    for (size_t i = 0; i < settings.repetitions; ++i)
+    {
+        size_t totalCmds = 0;
+        size_t numCmds = 0;
+        size_t totalCpls = 0;
+        size_t numCpls = 0;
+        size_t numBlocks = 0;
+
+        auto before = std::chrono::high_resolution_clock::now();
+
+        for (const auto& transfer: queue->transfers)
+        {
+            nvm_cmd_t* cmd = nullptr;
+
+            while (numCmds == queue->depth || (cmd = nvm_sq_enqueue(sq)) == nullptr)
+            {
+                nvm_sq_submit(sq);
+                std::this_thread::yield();
+                numCpls = consumeCompletions(queue);
+                numCmds -= numCpls;
+                totalCpls += numCpls;
+            }
+
+            void* prpListPtr = NVM_DMA_OFFSET(queue->sq_mem, 1 + numCmds);
+            uint64_t prpListAddr = queue->sq_mem->ioaddrs[1 + numCmds];
+
+            nvm_cmd_header(cmd, transfer.write ? NVM_IO_WRITE : NVM_IO_READ, settings.nvmNamespace);
+            nvm_cmd_rw_blks(cmd, transfer.startBlock, transfer.numBlocks);
+            nvm_cmd_data(cmd, buffer->page_size, transfer.numPages, prpListPtr, prpListAddr, &buffer->ioaddrs[transfer.startPage]);
+
+            numBlocks += transfer.numBlocks;
+
+            ++numCmds;
+            ++totalCmds;
+        }
+
+        nvm_sq_submit(sq);
+
+        while (totalCpls != totalCmds)
+        {
+            std::this_thread::yield();
+            numCpls = consumeCompletions(queue);
+            totalCpls += numCpls;
+            numCmds -= numCpls;
+        }
+
+        auto after = std::chrono::high_resolution_clock::now();
+        times->push_back(Time(totalCmds, numBlocks, after - before));
+    }
+}
+
+
+
 static double percentile(const std::vector<double>& values, double p)
 {
     double index = ceil(p * values.size());
     return values[index];
 }
-    
 
 
-static void printStatistics(const QueuePtr& queue, const Times& times, size_t blockSize, bool print)
+
+static void bandwidthStats(const QueuePtr& queue, const Times& times, size_t blockSize, bool print)
+{
+    double minBw = std::numeric_limits<double>::max();
+    double maxBw = std::numeric_limits<double>::min();
+    double avgBw = 0;
+
+    size_t blocks = 0;
+    for (const auto& t: queue->transfers)
+    {
+        blocks += t.numBlocks;
+    }
+
+    std::vector<double> bws;
+    bws.reserve(times.size());
+
+    for (const auto& t: times)
+    {
+        const auto currentTime = t.time.count();
+        const auto blocks = t.blocks;
+
+        double bw = (blocks * blockSize) / currentTime;
+        if (bw < minBw)
+        {
+            minBw = bw;
+        }
+        else if (bw > maxBw)
+        {
+            maxBw = bw;
+        } 
+
+        avgBw += bw;
+        bws.push_back(bw);
+    }
+
+    avgBw /= times.size();
+
+    fprintf(stderr, "Queue #%02u cmds=%zu blocks=%zu repeat=%zu ",
+            queue->no, queue->transfers.size(), blocks, times.size());
+    fprintf(stderr, "min=%.3f avg=%.3f max=%.3f\n", minBw, avgBw, maxBw);
+
+    std::sort(bws.begin(), bws.end(), std::greater<double>());
+    std::reverse(bws.begin(), bws.end());
+
+    for (auto p: {.99, .97, .95, .90, .75, .50})
+    {
+        fprintf(stderr, "\t%4.2f: %14.3f\n", p, percentile(bws, p));
+    }
+}
+
+
+static void latencyStats(const QueuePtr& queue, const Times& times, size_t blockSize, bool print)
 {
     double minLat = std::numeric_limits<double>::max();
     double maxLat = std::numeric_limits<double>::min();
@@ -274,8 +410,11 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
     std::vector<double> latencies;
     latencies.reserve(times.size());
 
-    fprintf(stdout, "%5s %8s %12s %12s %12s\n",
-            "queue", "cmds", "blocks", "usecs", "mbytes");
+    if (print)
+    {
+        fprintf(stdout, "#%5s; %8s; %12s; %12s; %12s\n",
+                "queue", "cmds", "blocks", "usecs", "mbytes");
+    }
     for (const auto& t: times)
     {
         const auto current = t.time.count();
@@ -295,7 +434,7 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
         if (print)
         {
             double bw = (t.blocks * blockSize) / current; 
-            fprintf(stdout, "%5x %8u %12zu %12.3f %12.3f\n",
+            fprintf(stdout, " %5x; %8u; %12zu; %12.3f; %12.3f\n",
                     queue->no, t.commands, t.blocks, current, bw);
         }
     }
@@ -316,6 +455,7 @@ static void printStatistics(const QueuePtr& queue, const Times& times, size_t bl
         fprintf(stderr, "\t%4.2f: %14.3f\n", p, percentile(latencies, p));
     }
 }
+
 
 
 
@@ -343,13 +483,24 @@ static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Setti
             Times* t = &times[i];
             QueuePtr q = queues[i];
 
-            //threads[i] = thread(measure, &queues[i], &buffer, &times[i], &settings, &barrier);
-            auto func = std::bind(measure, q, buffer, t, settings, &barrier);
-            threads[i] = thread(func);
+            //auto func = std::bind(measureLatency, q, buffer, t, settings, &barrier);
+            //threads[i] = thread(func);
+            threads[i] = thread([&q, &buffer, &t, &settings, &barrier]() {
+                measureLatency(q, buffer, t, settings, &barrier);
+            });
         }
     }
     else
     {
+        for (size_t i = 0; i < queues.size(); ++i)
+        {
+            Times* t = &times[i];
+            QueuePtr q = queues[i];
+
+            threads[i] = thread([&q, &buffer, &t, &settings, &barrier]() {
+                measureBandwidth(q, buffer, t, settings, &barrier);
+            });
+        }
     }
 
     fprintf(stderr, "Running benchmark...\n");
@@ -357,7 +508,14 @@ static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Setti
     for (size_t i = 0; i < queues.size(); ++i)
     {
         threads[i].join();
-        printStatistics(queues[i], times[i], blockSize, settings.stats);
+        if (settings.latency)
+        {
+            latencyStats(queues[i], times[i], blockSize, settings.stats);
+        }
+        else
+        {
+            bandwidthStats(queues[i], times[i], blockSize, settings.stats);
+        }
     }
 
     if (settings.cudaDevice != -1)
