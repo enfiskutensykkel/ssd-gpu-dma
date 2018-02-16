@@ -246,6 +246,7 @@ static void measureLatency(QueuePtr queue, const DmaPtr buffer, Times* times, co
         }
 
         flush(queue, settings.nvmNamespace);
+
     }
 }
 
@@ -332,6 +333,8 @@ static void measureBandwidth(QueuePtr queue, const DmaPtr buffer, Times* times, 
 
         auto after = std::chrono::high_resolution_clock::now();
         times->push_back(Time(totalCmds, numBlocks, after - before));
+
+        flush(queue, settings.nvmNamespace);
     }
 }
 
@@ -381,7 +384,7 @@ static void bandwidthStats(const QueuePtr& queue, const Times& times, size_t blo
 
     avgBw /= times.size();
 
-    fprintf(stderr, "Queue #%02u cmds=%zu blocks=%zu repeat=%zu ",
+    fprintf(stderr, "Queue #%02u cmds=%zu blocks=%zu count=%zu ",
             queue->no, queue->transfers.size(), blocks, times.size());
     fprintf(stderr, "min=%.3f avg=%.3f max=%.3f\n", minBw, avgBw, maxBw);
 
@@ -442,7 +445,7 @@ static void latencyStats(const QueuePtr& queue, const Times& times, size_t block
     avgLat /= times.size();
 
 
-    fprintf(stderr, "Queue #%02u cmds=%zu blocks=%zu repeat=%zu ",
+    fprintf(stderr, "Queue #%02u cmds=%zu blocks=%zu count=%zu ",
             queue->no, queue->transfers.size(), blocks, times.size());
     fprintf(stderr, "min=%.3f avg=%.3f max=%.3f\n", minLat, avgLat, maxLat);
 
@@ -485,7 +488,7 @@ static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Setti
 
             //auto func = std::bind(measureLatency, q, buffer, t, settings, &barrier);
             //threads[i] = thread(func);
-            threads[i] = thread([&q, &buffer, &t, &settings, &barrier]() {
+            threads[i] = thread([q, buffer, t, settings, &barrier]() {
                 measureLatency(q, buffer, t, settings, &barrier);
             });
         }
@@ -497,7 +500,7 @@ static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Setti
             Times* t = &times[i];
             QueuePtr q = queues[i];
 
-            threads[i] = thread([&q, &buffer, &t, &settings, &barrier]() {
+            threads[i] = thread([q, buffer, t, settings, &barrier]() {
                 measureBandwidth(q, buffer, t, settings, &barrier);
             });
         }
