@@ -45,7 +45,11 @@ static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList
 
     for (uint16_t no = 1; no <= ctrl.numQueues; ++no)
     {
+#ifdef __DIS_CLUSTER__
         auto queue = make_shared<Queue>(ctrl, settings.adapter, settings.segmentId++, no, settings.queueDepth, settings.remote);
+#else
+        auto queue = make_shared<Queue>(ctrl, no, settings.queueDepth);
+#endif
 
         switch (settings.pattern)
         {

@@ -162,6 +162,11 @@ DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t adapter, uint32_t
 
     return DmaPtr(dma, nvm_dma_unmap);
 }
+#else
+DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t, uint32_t)
+{
+    return createDma(ctrl, size);
+}
 #endif
 
 
@@ -188,6 +193,11 @@ DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t a
     dma->vaddr = devicePtr;
 
     return DmaPtr(dma, nvm_dma_unmap);
+}
+#else
+DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t, uint32_t)
+{
+    return createDma(ctrl, size, cudaDevice);
 }
 #endif
 

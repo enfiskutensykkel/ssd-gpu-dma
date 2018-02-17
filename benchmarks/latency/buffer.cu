@@ -224,7 +224,7 @@ DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, size_t size, int device, uint32_t
 #else
 DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, size_t size, int device, uint32_t, uint32_t)
 {
-    return createDeviceDma(ctrl, size);
+    return createDeviceDma(ctrl, size, device);
 }
 #endif
 

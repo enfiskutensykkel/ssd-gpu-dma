@@ -140,7 +140,7 @@ struct Range: public Option<uint64_t>
         , upper(hi)
     { }
 
-    void throwError(const char* str, const char* arg) const override
+    void throwError(const char*, const char*) const override
     {
         if (upper != 0 && lower != 0)
         {
@@ -207,13 +207,14 @@ static string helpString(const string& name, OptionMap& options)
         << setw(10) << "DEFAULT"
         << setw(36) << "DESCRIPTION" 
         << endl;
+
     for (const auto& optPair: options)
     {
         const auto& opt = optPair.second;
         s << "  " << left
             << setw(16) << opt->name
             << setw(16) << opt->type
-            << setw(10) << opt->defaultValue
+            << setw(10) << (opt->defaultValue != nullptr ? opt->defaultValue : "")
             << setw(36) << opt->description
             << endl;
     }
@@ -301,7 +302,7 @@ void Settings::parseArguments(int argc, char** argv)
         {'c', OptionPtr(new Option<const char*>(controllerPath, "path", "ctrl", "NVM controller device path"))},
 #endif
         {'g', OptionPtr(new Option<uint32_t>(cudaDevice, "number", "gpu", "specify CUDA device", "0"))},
-        {'i', OptionPtr(new Option<uint32_t>(nvmNamespace, "identifier", "namespace", "NVM namespace identifier", "0"))},
+        {'i', OptionPtr(new Option<uint32_t>(nvmNamespace, "identifier", "namespace", "NVM namespace identifier", "1"))},
         {'B', OptionPtr(new Option<bool>(doubleBuffered, "bool", "double-buffer", "double buffer disk reads", "false"))},
         {'n', OptionPtr(new Range(numChunks, 1, 0, "chunks", "number of chunks per thread", "32"))},
         {'p', OptionPtr(new Range(numPages, 1, 0, "pages", "number of pages per chunk", "1"))},
