@@ -239,6 +239,7 @@ Setting                 | Default    | Explanation
 `CMAKE_BUILD_TYPE`      | `Debug`    | Set to `Release` to make a release build
 `DIS`	                | `/opt/DIS` | Override the Dolphin installation path
 `NVIDIA`                |            | Override path to Nvidia driver
+`nvidia_archs`		| 30;50;60;61| Specify compute modes and SMs
 `no_smartio`            | `false`    | Don't build API with SmartIO support
 `no_module`             | `false`    | Don't build kernel module
 `no_cuda`               | `false`    | Don't build API with CUDA support
