@@ -26,13 +26,14 @@ buffers directly in GPU memory, **eliminating the need to involve the CPU in
 the IO path entirely**.
 
 A huge benefit of the parallel design of NVMe combined with the possibility of
-using arbitrary memory addresses for buffers and queues also means that 
-**a disk can be shared by multiple computing instances running on remote 
-machines**. This can be done by setting up mappings using a PCIe Non-Transparent 
-Bridge ([PCIe NTB]). The API can be linked with applications using the SISCI 
-[SmartIO] API from Dolphin Interconnect Solutions, allowing the  user to create 
-custom configurations of remote and local devices and NVMe disks in a 
-PCIe cluster. It also enables concurrent low-latency access to NVMe disks from
+using arbitrary memory addresses for buffers and queues also means that a disk
+can be shared concurrently by multiple computing instances. By setting up 
+mappings using a PCIe Non-Transparent Bridge ([PCIe NTB]), it is possible for
+**multiple PCIe root complexes to share a disk concurrently**.
+The API can be linked with applications using the SISCI  [SmartIO] API from 
+Dolphin Interconnect Solutions, allowing the  user to create powerful custom 
+configurations of remote and local devices and NVMe disks in a PCIe cluster. 
+In other words, it enables concurrent low-latency access to NVMe disks from 
 multiple machines in the cluster.
 
 
