@@ -11,7 +11,7 @@
 #include <linux/fs.h>
 #include <linux/err.h>
 #include <linux/device.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/io.h>
 #include <asm/errno.h>
 #include <asm/page.h>
@@ -104,13 +104,19 @@ static long map_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
     switch (cmd)
     {
         case NVM_MAP_HOST_MEMORY:
-            copy_from_user(&request, (void __user*) arg, sizeof(request));
+            if (copy_from_user(&request, (void __user*) arg, sizeof(request)))
+            {
+                return -EFAULT;
+            }
 
             map = map_userspace(&host_list, ctrl, request.vaddr_start, request.n_pages);
 
             if (!IS_ERR_OR_NULL(map))
             {
-                copy_to_user((void __user*) request.ioaddrs, map->addrs, map->n_addrs * sizeof(uint64_t));
+                if (copy_to_user((void __user*) request.ioaddrs, map->addrs, map->n_addrs * sizeof(uint64_t)))
+                {
+                    return -EFAULT;
+                }
                 retval = 0;
             }
             else 
@@ -121,13 +127,19 @@ static long map_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 
 #ifdef _CUDA
         case NVM_MAP_DEVICE_MEMORY:
-            copy_from_user(&request, (void __user*) arg, sizeof(request));
+            if (copy_from_user(&request, (void __user*) arg, sizeof(request)))
+            {
+                return -EFAULT;
+            }
 
             map = map_device_memory(&device_list, ctrl, request.vaddr_start, request.n_pages);
 
             if (!IS_ERR_OR_NULL(map))
             {
-                copy_to_user((void __user*) request.ioaddrs, map->addrs, map->n_addrs * sizeof(uint64_t));
+                if (copy_to_user((void __user*) request.ioaddrs, map->addrs, map->n_addrs * sizeof(uint64_t)))
+                {
+                    return -EFAULT;
+                }
                 retval = 0;
             }
             else 
@@ -138,7 +150,10 @@ static long map_ioctl(struct file* file, unsigned int cmd, unsigned long arg)
 #endif
 
         case NVM_UNMAP_MEMORY:
-            copy_from_user(&addr, (void __user*) arg, sizeof(u64));
+            if (copy_from_user(&addr, (void __user*) arg, sizeof(u64)))
+            {
+                return -EFAULT;
+            }
 
             map = map_find(&host_list, addr);
             if (map != NULL)
