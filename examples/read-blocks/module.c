@@ -71,7 +71,7 @@ static int prepare_and_read(nvm_aq_ref ref, const struct disk_info* disk, const 
         goto leave;
     }
 
-    if (args.input != NULL)
+    if (args->input != NULL)
     {
         status = write_blocks(disk, &queues, buffer, args);
         if (status != 0)
