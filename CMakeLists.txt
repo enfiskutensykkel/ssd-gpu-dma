@@ -207,7 +207,7 @@ endmacro ()
 # We assume all benchmarks are CUDA programs
 macro (make_benchmark target binary_name files)
     if (CUDA_FOUND AND NOT no_cuda)
-        cuda_add_executable (${target} EXCLUDE_FROM_ALL ${files} OPTIONS ) # Ugly bugly
+        cuda_add_executable (${target} EXCLUDE_FROM_ALL ${files} OPTIONS ${GPU_ARCHS} -D__CUDA__) # Ugly bugly
         target_compile_definitions (${target} PRIVATE __CUDA__)
 
         add_dependencies (${target} libnvm)
@@ -221,7 +221,7 @@ endmacro ()
 
 macro (make_sisci_benchmark target binary_name files)
     if (CUDA_FOUND AND NOT no_cuda AND sisci_include AND sisci_lib AND NOT (no_smartio OR no_smartio_benchmarks))
-        cuda_add_executable (${target} ${files} EXCLUDE_FROM_ALL OPTIONS ${GPU_ARRCHS} -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
+        cuda_add_executable (${target} ${files} EXCLUDE_FROM_ALL OPTIONS ${GPU_ARCHS} -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
         target_compile_definitions(${target} PRIVATE __DIS_CLUSTER__ __CUDA__ _REENTRANT)
 
         add_dependencies (${target} libnvm)
