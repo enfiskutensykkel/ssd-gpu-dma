@@ -73,7 +73,7 @@ static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList
                 break;
 
             case AccessPattern::RANDOM:
-                pages = fillRandom(queue->transfers, ctrl, settings.write, settings.numBlocks);
+                pages += fillRandom(queue->transfers, ctrl, settings.write, settings.numBlocks);
                 break;
         }
 
@@ -367,6 +367,11 @@ static void bandwidthStats(const QueuePtr& queue, const Times& times, size_t blo
     std::vector<double> bws;
     bws.reserve(times.size());
 
+    if (print)
+    {
+        fprintf(stdout, "#%5s; %8s; %12s; %12s; %12s\n",
+                "queue", "cmds", "blocks", "usecs", "mbytes/s");
+    }
     for (const auto& t: times)
     {
         const auto currentTime = t.time.count();
@@ -384,6 +389,12 @@ static void bandwidthStats(const QueuePtr& queue, const Times& times, size_t blo
 
         avgBw += bw;
         bws.push_back(bw);
+
+        if (print)
+        {
+            fprintf(stdout, " %5x; %8u; %12zu; %12.3f; %12.3f\n",
+                    queue->no, t.commands, t.blocks, currentTime, bw);
+        }
     }
 
     avgBw /= times.size();
@@ -420,7 +431,7 @@ static void latencyStats(const QueuePtr& queue, const Times& times, size_t block
     if (print)
     {
         fprintf(stdout, "#%5s; %8s; %12s; %12s; %12s\n",
-                "queue", "cmds", "blocks", "usecs", "mbytes");
+                "queue", "cmds", "blocks", "usecs", "mbytes/s");
     }
     for (const auto& t: times)
     {
