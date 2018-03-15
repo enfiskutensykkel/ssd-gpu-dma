@@ -100,7 +100,6 @@ int nvm_dis_dma_map_local(nvm_dma_t** map,              // Mapping descriptor re
                           const nvm_ctrl_t* ctrl,       // NVM controller handle
                           uint32_t dis_adapter,         // Local DIS adapter
                           sci_local_segment_t segment,  // Local segment descriptor
-                          size_t size,                  // Size of segment
                           bool map_vaddr);              // Should function also map segment into local space
 
 #endif /* __DIS_CLUSTER__ */

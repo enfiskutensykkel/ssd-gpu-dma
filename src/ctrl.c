@@ -372,6 +372,7 @@ int nvm_dis_ctrl_init(nvm_ctrl_t** ctrl, uint64_t dev_id, uint32_t adapter)
 
 
 
+#if defined ( __unix__ )
 int nvm_ctrl_init(nvm_ctrl_t** ctrl, int filedes)
 {
     int err;
@@ -423,6 +424,7 @@ int nvm_ctrl_init(nvm_ctrl_t** ctrl, int filedes)
     *ctrl = &container->handle;
     return 0;
 }
+#endif
 
 
 
@@ -438,10 +440,12 @@ void nvm_ctrl_free(nvm_ctrl_t* ctrl)
                 // Do nothing
                 break;
 
+#if defined ( __unix__ )
             case _DEVICE_TYPE_SYSFS:
                 munmap((void*) ctrl->mm_ptr, ctrl->mm_size);
                 close(container->fd);
                 break;
+#endif
 
 #if _SISCI
             case _DEVICE_TYPE_SMARTIO:
