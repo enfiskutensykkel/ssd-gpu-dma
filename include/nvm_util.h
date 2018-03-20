@@ -2,15 +2,21 @@
 #define __NVM_UTIL_H__
 
 #include <nvm_types.h>
+#include <stddef.h>
 #include <stdint.h>
 
-#ifndef __CUDACC__
-#define __device__
-#define __host__
+#ifdef __DIS_CLUSTER__
+#include <sisci_types.h>
+#include <sisci_api.h>
 #endif
 
+
+
 /* Convenience function for creating a bit mask */
-static inline __device__ __host__
+#ifdef __CUDACC__
+__host__ __device__
+#endif
+static inline 
 uint64_t _nvm_bitmask(int hi, int lo)
 {
     uint64_t mask = 0;
@@ -22,6 +28,35 @@ uint64_t _nvm_bitmask(int hi, int lo)
 
     return mask;
 }
+
+
+
+#ifdef __CUDACC__
+__host__ __device__
+#endif
+static inline
+void nvm_cache_flush(void* ptr, size_t size)
+{
+#if defined( __DIS_CLUSTER__ ) && !defined( __CUDA_ARCH__ )
+    sci_error_t err;
+    SCICacheSync(NULL, ptr, size, SCI_FLAG_CACHE_FLUSH, &err);
+#endif
+}
+
+
+
+#ifdef __CUDACC__
+__host__ __device__
+#endif
+static inline
+void nvm_cache_invalidate(void* ptr, size_t size)
+{
+#if defined( __DIS_CLUSTER__ ) && !defined( __CUDA_ARCH__ )
+    sci_error_t err;
+    SCICacheSync(NULL, ptr, size, SCI_FLAG_CACHE_FLUSH | SCI_FLAG_CACHE_INVALIDATE, &err);
+#endif
+}
+
 
 
 /* Extract specific bits */

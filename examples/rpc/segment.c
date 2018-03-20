@@ -70,7 +70,7 @@ int dma_create(nvm_dma_t** window, const nvm_ctrl_t* ctrl, struct segment* segme
         return EIO;
     }
 
-    int status = nvm_dis_dma_map_local(window, ctrl, adapter, segment->segment, segment->size, true);
+    int status = nvm_dis_dma_map_local(window, ctrl, adapter, segment->segment, true);
     if (status != 0)
     {
         do

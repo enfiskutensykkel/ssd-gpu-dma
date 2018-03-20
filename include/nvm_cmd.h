@@ -6,6 +6,7 @@
 #define __host__
 #endif
 
+#include <nvm_util.h>
 #include <nvm_types.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -105,7 +106,7 @@ void nvm_cmd_rw_blks(nvm_cmd_t* cmd, uint64_t start_lba, uint16_t n_blks)
  * Returns the number of PRP entries used. Number of pages should 
  * always be max_data_size (MDTS) for IO commands.
  *
- * Note: currently, only a PRP lists can only be a single page
+ * Note: currently, PRP lists can only be a single page
  */
 __host__ __device__ static inline
 size_t nvm_prp_list(size_t page_size, size_t n_pages, void* list_ptr, const uint64_t* data_ioaddrs)
@@ -124,6 +125,8 @@ size_t nvm_prp_list(size_t page_size, size_t n_pages, void* list_ptr, const uint
     {
         list[i_prp] = data_ioaddrs[i_prp];
     }
+
+    nvm_cache_flush(list_ptr, sizeof(uint64_t) * i_prp);
 
     return i_prp;
 }

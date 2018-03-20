@@ -21,6 +21,7 @@ extern "C" {
 
 
 
+#if defined (__unix__)
 /*
  * Initialize NVM controller handle.
  *
@@ -31,6 +32,7 @@ extern "C" {
  * Note: fd must be opened with O_RDWR and O_NONBLOCK
  */
 int nvm_ctrl_init(nvm_ctrl_t** ctrl, int fd);
+#endif
 
 
 

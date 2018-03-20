@@ -110,12 +110,18 @@ int nvm_dis_dma_map_local(nvm_dma_t** handle,
                           const nvm_ctrl_t* ctrl, 
                           uint32_t adapter, 
                           sci_local_segment_t segment,
-                          size_t size,
                           bool map_va)
 {
     struct map_descriptor* md;
-    size = NVM_CTRL_ALIGN(ctrl, size);
+    size_t size; 
     *handle = NULL;
+
+    size = NVM_CTRL_ALIGN(ctrl, SCIGetLocalSegmentSize(segment));
+    if (size == 0)
+    {
+        dprintf("Local segment has no size");
+        return -ENOSPC;
+    }
 
     // Create mapping descriptor
     int err = create_map_descriptor(&md, ctrl, size);
