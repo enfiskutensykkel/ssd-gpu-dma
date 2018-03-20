@@ -4,7 +4,6 @@
 #ifndef __CUDACC__
 #define __device__
 #define __host__
-#define __syncthreads()
 #endif
 
 #include <nvm_util.h>
@@ -79,6 +78,7 @@ nvm_cmd_t* nvm_sq_enqueue(nvm_queue_t* sq)
  * that all completions are consumed before making successive calls to this function. 
  * It is also assumed that n < max_entries.
  */
+#ifdef __CUDACC__
 __device__ static inline
 nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16_t i)
 {
@@ -110,6 +110,7 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
 
     return cmd;
 }
+#endif
 
 
 
@@ -126,6 +127,8 @@ __host__ __device__ static inline
 nvm_cpl_t* nvm_cq_poll(const nvm_queue_t* cq)
 {
     nvm_cpl_t* cpl = (nvm_cpl_t*) (((unsigned char*) cq->vaddr) + cq->entry_size * cq->head);
+
+    nvm_cache_invalidate((void*) cpl, sizeof(nvm_cpl_t));
 
     // Check if new completion is ready by checking the phase tag
     if (!!_RB(*NVM_CPL_STATUS(cpl), 0, 0) != cq->phase)
@@ -201,6 +204,8 @@ void nvm_sq_submit(nvm_queue_t* sq)
 {
     if (sq->last != sq->tail)
     {
+        nvm_cache_flush((void*) sq->vaddr, sizeof(nvm_cmd_t) * sq->max_entries);
+
         *((volatile uint32_t*) sq->db) = sq->tail;
         sq->last = sq->tail;
     }

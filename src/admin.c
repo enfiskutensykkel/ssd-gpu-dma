@@ -88,6 +88,8 @@ int nvm_admin_ctrl_info(nvm_aq_ref ref, struct nvm_ctrl_info* info, void* ptr, u
     memset(info, 0, sizeof(struct nvm_ctrl_info));
     memset(ptr, 0, 0x1000);
 
+    nvm_cache_invalidate(ptr, 0x1000);
+
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
 
     info->nvme_version = (uint32_t) *VER(ctrl->mm_ptr);
@@ -105,6 +107,8 @@ int nvm_admin_ctrl_info(nvm_aq_ref ref, struct nvm_ctrl_info* info, void* ptr, u
         dprintf("Identify controller failed: %s\n", nvm_strerror(err));
         return err;
     }
+
+    nvm_cache_invalidate(ptr, 0x1000);
 
     const unsigned char* bytes = (const unsigned char*) ptr;
     memcpy(info->pci_vendor, bytes, 4);
@@ -139,6 +143,8 @@ int nvm_admin_ns_info(nvm_aq_ref ref, struct nvm_ns_info* info, uint32_t ns_id, 
     memset(ptr, 0, 0x1000);
     memset(info, 0, sizeof(struct nvm_ns_info));
 
+    nvm_cache_invalidate(ptr, 0x1000);
+
     info->ns_id = ns_id;
 
     _nvm_admin_identify_ns(&command, ns_id, ioaddr);
@@ -150,6 +156,8 @@ int nvm_admin_ns_info(nvm_aq_ref ref, struct nvm_ns_info* info, uint32_t ns_id, 
         return err;
     }
     
+    nvm_cache_invalidate(ptr, 0x1000);
+
     const unsigned char* bytes = (const unsigned char*) ptr;
     info->size = *((uint64_t*) ptr);
     info->capacity = *((uint64_t*) (ptr + 8));
