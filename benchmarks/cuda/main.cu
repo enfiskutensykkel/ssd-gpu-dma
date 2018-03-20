@@ -476,7 +476,24 @@ int main(int argc, char** argv)
         return 1;
     }
     sleep(1); // FIXME: Hack due to race condition in SmartIO
+
+    sci_device_t cudaDev;
+    SCIBorrowDevice(sd, &cudaDev, settings.cudaDeviceId, SCI_FLAG_EXCLUSIVE, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Failed to get SmartIO device reference for CUDA: %s\n", SCIGetErrorString(err));
+        return 1;
+    }
 #endif
+
+    cudaDeviceProp properties;
+    if (cudaGetDeviceProperties(&properties, settings.cudaDevice) != cudaSuccess)
+    {
+        fprintf(stderr, "Failed to get CUDA device properties\n");
+        return 1;
+    }
+
+    fprintf(stderr, "CUDA device: %s\n", properties.name);
 
     try
     {
@@ -514,10 +531,14 @@ int main(int argc, char** argv)
 
         auto outputBuffer = createBuffer(ctrl.info.page_size * totalPages, settings.cudaDevice);
 
+#ifdef __DIS_CLUSTER__
+        nvm_dis_ctrl_map_p2p_device(ctrl.ctrl, cudaDev, nullptr);
+#endif
+
         cudaError_t err = cudaHostRegister((void*) ctrl.ctrl->mm_ptr, NVM_CTRL_MEM_MINSIZE, cudaHostRegisterIoMemory);
         if (err != cudaSuccess)
         {
-            throw error(string("Unexpected error while mapping IO memory: ") + cudaGetErrorString(err));
+            throw error(string("Unexpected error while mapping IO memory (cudaHostRegister): ") + cudaGetErrorString(err));
         }
 
         try
@@ -546,6 +567,7 @@ int main(int argc, char** argv)
     catch (const error& e)
     {
 #ifdef __DIS_CLUSTER__
+        SCIReturnDevice(cudaDev, 0, &err);
         SCIUnregisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, 0, &err);
         SCIClose(sd, 0, &err);
         SCITerminate();
@@ -555,6 +577,7 @@ int main(int argc, char** argv)
     }
 
 #ifdef __DIS_CLUSTER__
+    SCIReturnDevice(cudaDev, 0, &err);
     SCIUnregisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, 0, &err);
     SCIClose(sd, 0, &err);
     SCITerminate();

@@ -85,6 +85,17 @@ int nvm_dis_ctrl_init(nvm_ctrl_t** ctrl, uint64_t smartio_dev_id, uint32_t dis_a
 
 
 
+#ifdef __DIS_CLUSTER__
+int nvm_dis_ctrl_map_p2p_device(const nvm_ctrl_t* ctrl, sci_device_t dev, uint64_t* ioaddr);
+#endif
+
+
+
+#ifdef __DIS_CLUSTER__
+void nvm_dis_ctrl_unmap_p2p_device(const nvm_ctrl_t* ctrl, sci_device_t dev);
+#endif
+
+
 #ifdef __cplusplus
 }
 #endif

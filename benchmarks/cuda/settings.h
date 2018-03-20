@@ -9,6 +9,7 @@
 struct Settings
 {
     uint32_t        cudaDevice;
+    uint64_t        cudaDeviceId;
     const char*     blockDevicePath;
     const char*     controllerPath;
     uint64_t        controllerId;

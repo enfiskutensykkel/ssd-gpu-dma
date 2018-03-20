@@ -458,3 +458,59 @@ void nvm_ctrl_free(nvm_ctrl_t* ctrl)
     }
 }
 
+
+
+#ifdef _SISCI
+void nvm_dis_ctrl_unmap_p2p_device(const nvm_ctrl_t* ctrl, sci_device_t dev)
+{
+    if (ctrl != NULL)
+    {
+        const struct controller* container = const_container(ctrl);
+
+        if (container->type == _DEVICE_TYPE_SMARTIO && container->ref != NULL)
+        {
+            sci_error_t err;
+            do
+            {
+                SCIUnmapRemoteSegmentForDevice(container->ref->bar.segment, dev, 0, &err);
+            }
+            while (err == SCI_ERR_BUSY);
+        }
+    }
+}
+#endif
+
+
+
+#ifdef _SISCI
+int nvm_dis_ctrl_map_p2p_device(const nvm_ctrl_t* ctrl, sci_device_t dev, uint64_t* ioaddr)
+{
+    if (ctrl == NULL)
+    {
+        return EINVAL;
+    }
+
+    const struct controller* container = const_container(ctrl);
+
+    if (container->type != _DEVICE_TYPE_SMARTIO || container->ref == NULL)
+    {
+        return EINVAL;
+    }
+
+    sci_error_t err;
+    sci_ioaddr_t addr;
+    SCIMapRemoteSegmentForDevice(container->ref->bar.segment, dev, &addr, 0, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        dprintf("Failed to map controller BAR for device: %s\n", SCIGetErrorString(err));
+        return EIO;
+    }
+
+    if (ioaddr != NULL)
+    {
+        *ioaddr = addr;
+    }
+    return 0;
+}
+#endif
+

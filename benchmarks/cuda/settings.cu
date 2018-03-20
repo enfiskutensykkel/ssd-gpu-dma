@@ -379,6 +379,7 @@ void Settings::parseArguments(int argc, char** argv)
 Settings::Settings()
 {
     cudaDevice = 0;
+    cudaDeviceId = 0x80100;
     blockDevicePath = nullptr;
     controllerPath = nullptr;
     controllerId = 0;
