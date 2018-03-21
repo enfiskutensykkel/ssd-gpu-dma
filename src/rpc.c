@@ -458,7 +458,6 @@ void nvm_aq_destroy(nvm_aq_ref ref)
     {
         //if (ref->stub == (rpc_stub_t) execute_command)
         //{
-            // TODO: send abort command
             _nvm_ref_put(ref);
         //}
     }

@@ -62,6 +62,15 @@ int nvm_admin_cq_create(nvm_aq_ref ref,               // AQ pair reference
 
 
 /*
+ * Delete IO completion queue (CQ)
+ * After calling this, the queue is no longer used and must be recreated.
+ * All associated submission queues must be deleted first.
+ */
+int nvm_admin_cq_delete(nvm_aq_ref ref, nvm_queue_t* cq);
+
+
+
+/*
  * Create IO submission queue (SQ)
  * Caller must set queue memory to zero manually.
  */
@@ -71,6 +80,16 @@ int nvm_admin_sq_create(nvm_aq_ref ref,               // AQ pair reference
                         uint16_t id,                  // Queue identifier
                         void* qmem,                   // Queue memory (virtual)
                         uint64_t ioaddr);             // Bus address to queue as seen by controller
+
+
+
+/*
+ * Delete IO submission queue (SQ)
+ * After calling this, the queue is no longer used and must be recreated.
+ */
+int nvm_admin_sq_delete(nvm_aq_ref ref, 
+                        nvm_queue_t* sq, 
+                        const nvm_queue_t* cq);
 
 
 #ifdef __cplusplus

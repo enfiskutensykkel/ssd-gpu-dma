@@ -170,12 +170,6 @@ static int remote_command(struct binding* binding, nvm_cmd_t* cmd, nvm_cpl_t* cp
     memcpy(cmd, &reply.cmd, sizeof(nvm_cmd_t));
     memcpy(cpl, &reply.cpl, sizeof(nvm_cpl_t));
 
-    // Check if command was rejected?
-    if (cmd->dword[0] == 0)
-    {
-        return NVM_ERR_PACK(NULL, EPERM);
-    }
-    
     return NVM_ERR_PACK(NULL, 0);
 }
 

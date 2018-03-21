@@ -205,7 +205,7 @@ nvm_cpl_t* nvm_cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout);
 __host__ __device__ static inline
 void nvm_sq_submit(nvm_queue_t* sq)
 {
-    if (sq->last != sq->tail)
+    if (sq->last != sq->tail && sq->db != NULL)
     {
         nvm_cache_flush((void*) sq->vaddr, sizeof(nvm_cmd_t) * sq->max_entries);
 
@@ -223,7 +223,7 @@ __host__ __device__ static inline
 void nvm_sq_update(nvm_queue_t* sq)
 {
     // Update head pointer of submission queue
-    if (++sq->head == sq->max_entries)
+    if (sq->db != NULL && ++sq->head == sq->max_entries)
     {
         sq->head = 0;
     }
@@ -241,7 +241,7 @@ void nvm_sq_update(nvm_queue_t* sq)
 __host__ __device__ static inline
 void nvm_cq_update(nvm_queue_t* cq)
 {
-    if (cq->last != cq->head)
+    if (cq->last != cq->head && cq->db != NULL)
     {
         *((volatile uint32_t*) cq->db) = cq->head;
         cq->last = cq->head;

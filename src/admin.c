@@ -29,6 +29,14 @@ void _nvm_admin_cq_create(nvm_cmd_t* cmd, const nvm_queue_t* cq)
 
 
 
+void _nvm_admin_cq_delete(nvm_cmd_t* cmd, const nvm_queue_t* cq)
+{
+    nvm_cmd_header(cmd, NVM_ADMIN_DELETE_COMPLETION_QUEUE, 0);
+    cmd->dword[10] = cq->no & 0xffff;
+}
+
+
+
 void _nvm_admin_sq_create(nvm_cmd_t* cmd, const nvm_queue_t* sq, const nvm_queue_t* cq)
 {
     nvm_cmd_header(cmd, NVM_ADMIN_CREATE_SUBMISSION_QUEUE, 0);
@@ -36,6 +44,14 @@ void _nvm_admin_sq_create(nvm_cmd_t* cmd, const nvm_queue_t* sq, const nvm_queue
 
     cmd->dword[10] = (((uint32_t) sq->max_entries - 1) << 16) | sq->no;
     cmd->dword[11] = (((uint32_t) cq->no) << 16) | (0x00 << 1) | 0x01;
+}
+
+
+
+void _nvm_admin_sq_delete(nvm_cmd_t* cmd, const nvm_queue_t* sq)
+{
+    nvm_cmd_header(cmd, NVM_ADMIN_DELETE_SUBMISSION_QUEUE, 0);
+    cmd->dword[10] = sq->no & 0xffff;
 }
 
 
@@ -184,7 +200,7 @@ int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, void* vadd
 
     if (id == 0)
     {
-        return EINVAL;
+        return NVM_ERR_PACK(NULL, EINVAL);
     }
 
     nvm_queue_clear(&queue, ctrl, true, id, vaddr, ioaddr);
@@ -206,6 +222,34 @@ int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, void* vadd
 
 
 
+int nvm_admin_cq_delete(nvm_aq_ref ref, nvm_queue_t* cq)
+{
+    nvm_cmd_t command;
+    nvm_cpl_t completion;
+
+    if (cq->db == NULL)
+    {
+        return NVM_ERR_PACK(NULL, EINVAL);
+    }
+
+    memset(&command, 0, sizeof(command));
+    memset(&completion, 0, sizeof(completion));
+    _nvm_admin_cq_delete(&command, cq);
+
+    int err = nvm_raw_rpc(ref, &command, &completion);
+    if (!nvm_ok(err))
+    {
+        dprintf("Deleting completion queue failed: %s\n", nvm_strerror(err));
+        return err;
+    }
+
+    cq->db = NULL;
+
+    return NVM_ERR_PACK(NULL, 0);
+}
+
+
+
 int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, uint16_t id, void* vaddr, uint64_t ioaddr)
 {
     nvm_cmd_t command;
@@ -216,7 +260,7 @@ int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, 
 
     if (id == 0)
     {
-        return EINVAL;
+        return NVM_ERR_PACK(NULL, EINVAL);
     }
 
     nvm_queue_clear(&queue, ctrl, false, id, vaddr, ioaddr);
@@ -233,6 +277,39 @@ int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, 
     }
 
     *sq = queue;
+    return NVM_ERR_PACK(NULL, 0);
+}
+
+
+
+int nvm_admin_sq_delete(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq)
+{
+    nvm_cmd_t command;
+    nvm_cpl_t completion;
+
+    if (cq == NULL || cq->db == NULL)
+    {
+        return NVM_ERR_PACK(NULL, EINVAL);
+    }
+
+    if (sq->db == NULL)
+    {
+        return NVM_ERR_PACK(NULL, EINVAL);
+    }
+
+    memset(&command, 0, sizeof(command));
+    memset(&completion, 0, sizeof(completion));
+    _nvm_admin_sq_delete(&command, sq);
+
+    int err = nvm_raw_rpc(ref, &command, &completion);
+    if (!nvm_ok(err))
+    {
+        dprintf("Deleting submission queue failed: %s\n", nvm_strerror(err));
+        return err;
+    }
+
+    sq->db = NULL;
+
     return NVM_ERR_PACK(NULL, 0);
 }
 

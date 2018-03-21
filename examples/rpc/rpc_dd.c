@@ -67,6 +67,7 @@ static volatile bool signal_caught = false;
 static void catch_signal()
 {
     signal_caught = true;
+    fprintf(stderr, "Stopping!\n");
 }
 
 
@@ -100,9 +101,14 @@ static void disk_w(const struct disk_info* disk, struct queue_pair* qp, FILE* fp
         size_t curr_blks = NVM_PAGE_ALIGN(is, disk->block_size) / disk->block_size;
 
         nvm_cmd_t* cmd;
-        while ((cmd = nvm_sq_enqueue(&qp->sq)) == NULL)
+        while (!signal_caught && (cmd = nvm_sq_enqueue(&qp->sq)) == NULL)
         {
             usleep(1);
+        }
+
+        if (signal_caught)
+        {
+            break;
         }
 
         nvm_cmd_header(cmd, NVM_IO_WRITE, disk->ns_id);
@@ -117,6 +123,11 @@ static void disk_w(const struct disk_info* disk, struct queue_pair* qp, FILE* fp
 
         nvm_cpl_t* cpl;
         while (!signal_caught && (cpl = nvm_cq_dequeue_block(&qp->cq, 50)) == NULL);
+
+        if (caught_signal)
+        {
+            break;
+        }
 
         if (cpl == NULL)
         {
@@ -165,7 +176,7 @@ static void disk_r(const struct disk_info* disk, struct queue_pair* qp, uint64_t
         size_t curr_blks = MIN(blks, count);
 
         nvm_cmd_t* cmd;
-        while ((cmd = nvm_sq_enqueue(&qp->sq)) == NULL)
+        while (!signal_caught && (cmd = nvm_sq_enqueue(&qp->sq)) == NULL)
         {
             usleep(1);
         }
@@ -182,6 +193,11 @@ static void disk_r(const struct disk_info* disk, struct queue_pair* qp, uint64_t
 
         nvm_cpl_t* cpl;
         while (!signal_caught && (cpl = nvm_cq_dequeue_block(&qp->cq, 50)) == NULL);
+
+        if (caught_signal)
+        {
+            break;
+        }
 
         if (cpl == NULL)
         {
@@ -213,12 +229,10 @@ static void disk_r(const struct disk_info* disk, struct queue_pair* qp, uint64_t
 
 static int disk_rw(const struct disk_info* disk, struct queue_pair* qp, const struct arguments* args, nvm_dma_t* window)
 {
+    int status = 0;
     qp->cmds = 0;
     qp->cpls = 0;
     qp->errors = 0;
-
-    signal(SIGTERM, (sig_t) catch_signal);
-    signal(SIGINT, (sig_t) catch_signal);
 
     if (args->input != NULL)
     {
@@ -231,17 +245,19 @@ static int disk_rw(const struct disk_info* disk, struct queue_pair* qp, const st
         disk_r(disk, qp, args->blocks, args->count, args->offset, window);
     }
 
-    if (qp->errors > 0)
-    {
-        fprintf(stderr, "Owf!!\n");
-    }
-
     if (qp->cmds != qp->cpls)
     {
-        fprintf(stderr, "Agh!\n");
+        fprintf(stderr, "Agh! cmds=%zu cpls=%zu\n", qp->cmds, qp->cpls);
+        status = EPIPE;
     }
 
-    return 0;
+    if (qp->errors > 0)
+    {
+        fprintf(stderr, "Owf!! errors: %zu\n", qp->errors);
+        status = EIO;
+    }
+
+    return status;
 }
 
 
@@ -294,12 +310,49 @@ leave:
 }
 
 
-static int prepare_buffer_and_queues(nvm_aq_ref rpc, 
-                                     const struct arguments* args, 
-                                     const struct disk_info* disk, 
-                                     struct segment* segment,
-                                     nvm_dma_t** dma,
-                                     struct queue_pair* queues)
+static void destroy_queues(nvm_aq_ref rpc, struct queue_pair* qp)
+{
+    int err = nvm_admin_sq_delete(rpc, &qp->sq, &qp->cq);
+    if (!nvm_ok(err))
+    {
+        fprintf(stderr, "Failed to delete SQ: %s\n", nvm_strerror(err));
+    }
+
+    err = nvm_admin_cq_delete(rpc, &qp->cq);
+    if (!nvm_ok(err))
+    {
+        fprintf(stderr, "Failed to delete CQ: %s\n", nvm_strerror(err));
+    }
+}
+
+
+static int create_queues(nvm_aq_ref rpc, uint16_t queue_id, nvm_dma_t* dma, struct queue_pair* qp)
+{
+    int status;
+
+    status = nvm_admin_cq_create(rpc, &qp->cq, queue_id, NVM_DMA_OFFSET(dma, 0), dma->ioaddrs[0]);
+    if (!nvm_ok(status))
+    {
+        fprintf(stderr, "Failed to create IO completion queue (CQ): %s\n", nvm_strerror(status));
+        return status;
+    }
+
+    status = nvm_admin_sq_create(rpc, &qp->sq, &qp->cq, queue_id, NVM_DMA_OFFSET(dma, 1), dma->ioaddrs[1]);
+    if (!nvm_ok(status))
+    {
+        fprintf(stderr, "Failed to create IO submission queue (SQ): %s\n", nvm_strerror(status));
+        return status;
+    }
+
+    return 0;
+}
+
+
+static int prepare_buffer(nvm_aq_ref rpc, 
+                          const struct arguments* args, 
+                          const struct disk_info* disk, 
+                          struct segment* segment,
+                          nvm_dma_t** dma)
 {
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(rpc);
     size_t size = 3 * disk->page_size + NVM_CTRL_ALIGN(ctrl, disk->block_size * args->blocks);
@@ -320,24 +373,7 @@ static int prepare_buffer_and_queues(nvm_aq_ref rpc,
     }
 
     memset((*dma)->vaddr, 0, size);
-
-    status = nvm_admin_cq_create(rpc, &queues->cq, args->queue_id, NVM_DMA_OFFSET(*dma, 0), (*dma)->ioaddrs[0]);
-    if (!nvm_ok(status))
-    {
-        dma_remove(*dma, segment, args->adapter);
-        segment_remove(segment);
-        fprintf(stderr, "Failed to create IO completion queue (CQ): %s\n", nvm_strerror(status));
-        return status;
-    }
-
-    status = nvm_admin_sq_create(rpc, &queues->sq, &queues->cq, args->queue_id, NVM_DMA_OFFSET(*dma, 1), (*dma)->ioaddrs[1]);
-    if (!nvm_ok(status))
-    {
-        dma_remove(*dma, segment, args->adapter);
-        segment_remove(segment);
-        fprintf(stderr, "Failed to create IO submission queue (SQ): %s\n", nvm_strerror(status));
-        return status;
-    }
+    nvm_cache_flush((*dma)->vaddr,  size);
 
     return status;
 }
@@ -363,6 +399,10 @@ int main(int argc, char** argv)
         fprintf(stderr, "Failed to initialize SISCI: %s\n", SCIGetErrorString(err));
         exit(1);
     }
+
+    signal(SIGTERM, (sig_t) catch_signal);
+    signal(SIGINT, (sig_t) catch_signal);
+    signal(SIGPIPE, (sig_t) catch_signal);
 
     // Get controller reference
     int status = nvm_dis_ctrl_init(&ctrl, args.controller_id, args.adapter);
@@ -472,16 +512,25 @@ int main(int argc, char** argv)
     }
 
     // Create buffer and set up IO queues
-    struct queue_pair queues;
-    status = prepare_buffer_and_queues(rpc, &args, &disk, &segment, &dma_window, &queues);
+    status = prepare_buffer(rpc, &args, &disk, &segment, &dma_window);
     if (status != 0)
     {
         goto leave;
     }
 
+    struct queue_pair queues;
+    status = create_queues(rpc, args.queue_id, dma_window, &queues);
+    if (status != 0)
+    {
+        goto remove;
+    }
+
     // Do the cool stuff
     status = disk_rw(&disk, &queues, &args, dma_window);
 
+    destroy_queues(rpc, &queues);
+
+remove:
     dma_remove(dma_window, &segment, args.adapter);
     segment_remove(&segment);
 
@@ -502,6 +551,7 @@ leave:
 
     nvm_ctrl_free(ctrl);
     SCITerminate();
+    fprintf(stderr, "Exit status: %s\n", strerror(status));
     exit(status);
 }
 

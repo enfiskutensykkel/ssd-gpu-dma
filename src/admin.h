@@ -27,7 +27,7 @@ void _nvm_admin_sq_create(nvm_cmd_t* cmd, const nvm_queue_t* cq,  const nvm_queu
  *
  * Build an NVM admin command for deleting an SQ.
  */
-void _nvm_admin_sq_delete(nvm_cmd_t* cmd, const nvm_queue_t* cq, const nvm_queue_t* sq);
+void _nvm_admin_sq_delete(nvm_cmd_t* cmd, const nvm_queue_t* sq);
 
 
 
