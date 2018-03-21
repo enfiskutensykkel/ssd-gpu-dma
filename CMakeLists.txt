@@ -18,6 +18,7 @@ set (no_smartio_benchmarks false CACHE BOOL "Do not use SISCI for benchmarks")
 set (no_smartio false CACHE BOOL "Do not use SISCI for library or examples")
 set (no_module false CACHE BOOL "Do not build kernel module")
 set (no_cuda false CACHE BOOL "Do not build library with CUDA support")
+set (no_cc false CACHE BOOL "Do not assume cache-coherent architecture")
 
 if (no_smartio)
     set (no_smartio_samples true)
@@ -38,6 +39,12 @@ set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -g -DDEB
 set (CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
 set (CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -D__CUDA__;-std=c++11;${GPU_ARCHS}")
 set (CUDA_NVCC_FLAGS_RELEASE "${CMAKE_NVCC_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
+
+if (no_cc)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__NO_COHERENCE__")
+    set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -D__NO_COHERENCE__")
+    set(CCUDA_NVCC_FLAGS "${CMAKE_C_FLAGS} -D__NO_COHERENCE__")
+endif ()
 
 
 # Try to find Nvidia driver
@@ -233,10 +240,10 @@ macro (make_sisci_benchmark target binary_name files)
     endif ()
 endmacro ()
 
-macro (make_sisci_ptx prefix files)
-    cuda_compile_ptx (${prefix}_files "${files}" OPTIONS -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
-    add_custom_target (${prefix}-ptx DEPENDS ${prefix_files} SOURCES ${files})
-endmacro ()
+#macro (make_sisci_ptx prefix files)
+#    cuda_compile_ptx (${prefix}_files "${files}" OPTIONS -D__CUDA__ -D__DIS_CLUSTER__ -D_REENTRANT)
+#    add_custom_target (${prefix}-ptx DEPENDS ${prefix_files} SOURCES ${files})
+#endmacro ()
 
 
 # Set preferred ordering for benchmark targets

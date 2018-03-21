@@ -111,6 +111,7 @@ void nvm_cmd_rw_blks(nvm_cmd_t* cmd, uint64_t start_lba, uint16_t n_blks)
 __host__ __device__ static inline
 size_t nvm_prp_list(size_t page_size, size_t n_pages, void* list_ptr, const uint64_t* data_ioaddrs)
 {
+    // TODO #ifdef __NO_COHERENCE__, make a nvm_prp_list_far variant that does not call nvm_cache_flush()
     size_t prps_per_page = page_size / sizeof(uint64_t);
     size_t i_prp;
     uint64_t* list;
@@ -148,7 +149,7 @@ size_t nvm_cmd_data(nvm_cmd_t* cmd,
     uint64_t dptr0 = 0;
     uint64_t dptr1 = 0;
 
-#ifndef NDEBUG
+#if !defined( NDEBUG ) && !defined( __CUDA_ARCH__ )
     if (n_pages == 0)
     {
         return 0;

@@ -4,6 +4,7 @@
 #include <nvm_admin.h>
 #include <nvm_dma.h>
 #include <nvm_util.h>
+#include <nvm_error.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -27,6 +28,8 @@ struct cl_args
     bool        identify_ctrl;      // Indicates if the manager should run an NVM identify controller command
     uint64_t    smartio_dev_id;     // Specify SmartIO device
     uint32_t    ctrl_adapter;       // Controller adapter
+    uint16_t    n_sqs;              // Number of SQs to reserve
+    uint16_t    n_cqs;              // Number of CQs to reserve
     size_t      n_dis_adapters;     // Number of adapters specified
     uint32_t    dis_adapters[MAX_ADAPTS]; // Indicate which local adapters to bind manager to
 };
@@ -92,6 +95,32 @@ static int run_service(const nvm_ctrl_t* ctrl, const nvm_dma_t* q_wnd, const str
     if (args->identify_ctrl)
     {
         identify_controller(ctrl, args->ctrl_adapter, rpc);
+    }
+
+    if (args->n_sqs > 0 && args->n_cqs > 0)
+    {
+        uint16_t n_sqs = args->n_sqs;
+        uint16_t n_cqs = args->n_cqs;
+        status = nvm_admin_request_num_queues(rpc, &n_cqs, &n_sqs);
+        if (!nvm_ok(status))
+        {
+            fprintf(stderr, "Failed to run admin command for reserving IO queues: %s\n", nvm_strerror(status));
+            nvm_aq_destroy(rpc);
+            return 3;
+        }
+
+        if (n_sqs < args->n_sqs || n_cqs < args->n_cqs)
+        {
+            fprintf(stderr, "Attempted to reserve %u CQs and %u SQs, got %u CQs and %u SQs\n",
+                    args->n_cqs, args->n_sqs, n_cqs, n_sqs);
+            nvm_aq_destroy(rpc);
+            return 3;
+        }
+
+        if (verbose)
+        {
+            fprintf(stderr, "Reserved %u CQs and %u SQs\n", n_cqs, n_sqs);
+        }
     }
 
     for (size_t i_adapter = 0; i_adapter < args->n_dis_adapters; ++i_adapter)
@@ -193,8 +222,10 @@ static void parse_opts(int argc, char** argv, struct cl_args* args)
     static struct option opts[] = {
         { "help", no_argument, NULL, 'h' },
         { "identify", no_argument, NULL, 1 },
+        { "sqs", required_argument, NULL, 's' },
+        { "cqs", required_argument, NULL, 'c' },
         { "enable", required_argument, NULL, 'r' },
-        { "ctrl", required_argument, NULL, 'c' },
+        { "ctrl", required_argument, NULL, 'd' },
         { "adapter", required_argument, NULL, 'a' },
         { "verbose", no_argument, NULL, 'v' },
         { NULL, 0, NULL, 0 }
@@ -206,7 +237,7 @@ static void parse_opts(int argc, char** argv, struct cl_args* args)
     memset(args, 0, sizeof(struct cl_args));
 
     // Parse arguments
-    while ((opt = getopt_long(argc, argv, ":hvc:a:", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, ":hvd:c:a:s:", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -232,8 +263,8 @@ static void parse_opts(int argc, char** argv, struct cl_args* args)
                 args->identify_ctrl = true;
                 break;
 
-            case 'c': // device identifier
-                if (parse_u64(optarg, &args->smartio_dev_id, 0) != 0)
+            case 'd': // device identifier
+                if (parse_u64(optarg, &args->smartio_dev_id, 16) != 0)
                 {
                     fprintf(stderr, "Invalid device id: %s\n", optarg);
                     give_usage(argv[0]);
@@ -265,6 +296,24 @@ static void parse_opts(int argc, char** argv, struct cl_args* args)
                 }
                 args->n_dis_adapters++;
                 break;
+
+            case 's': // Set number of SQs to reserve
+                if (parse_u16(optarg, &args->n_sqs, 0) != 0)
+                {
+                    fprintf(stderr, "Invalid number of IO submission queues: %s\n", optarg);
+                    give_usage(argv[0]);
+                    exit('q');
+                }
+                break;
+
+            case 'c': // Set number of CQs to reserve
+                if (parse_u16(optarg, &args->n_cqs, 0) != 0)
+                {
+                    fprintf(stderr, "Invalid number of IO completion queues: %s\n", optarg);
+                    give_usage(argv[0]);
+                    exit('q');
+                }
+                break;
         }
     }
 
@@ -278,6 +327,13 @@ static void parse_opts(int argc, char** argv, struct cl_args* args)
     if (args->n_dis_adapters == 0)
     {
         args->dis_adapters[args->n_dis_adapters++] = args->ctrl_adapter;
+    }
+
+    if ((args->n_cqs > 0 && args->n_sqs == 0) || (args->n_sqs > 0 && args->n_cqs == 0))
+    {
+        fprintf(stderr, "Must specify either both number of submission and completion queues, or none at all\n");
+        give_usage(argv[0]);
+        exit('q');
     }
 }
 
@@ -316,7 +372,7 @@ static void identify_controller(const nvm_ctrl_t* ctrl, uint32_t adapter, nvm_aq
 static void give_usage(const char* program_name)
 {
     fprintf(stderr, 
-            "Usage: %s --ctrl <dev id> [--adapter <adapter>] [--enable <adapter>]...\n", 
+            "Usage: %s --ctrl <fdid> [--adapter <adapter>] [--enable <adapter>]...\n", 
             program_name);
 }
 
@@ -325,10 +381,12 @@ static void show_help(const char* program_name)
 {
     give_usage(program_name);
     fprintf(stderr, 
-            "Run controller manager RPC server in a DIS cluster.\n\n"
-            "    --ctrl             <dev id>    SmartIO device identifier.\n"
+            "\nRun controller manager RPC server in a DIS cluster.\n\n"
+            "    --ctrl             <fdid>      SmartIO device identifier.\n"
             "    --adapter          <adapter>   Local adapter to reach device (default is 0).\n"
             "    --enable           <adapter>   Enable RPC on adapter (defaults to controller adapter).\n"
+            "    --cqs              <number>    Reserve number of completion queues (default is not to reserve).\n"
+            "    --sqs              <number>    Reserver number of submission queues (default is not to reserve).\n"
             "    --identify                     Print controller information.\n"
             "    --verbose                      Print more information.\n"
             "    --help                         Show this information.\n"

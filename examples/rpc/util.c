@@ -110,3 +110,14 @@ void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
     fprintf(fp, "--------------------------------------------------\n");
 }
 
+
+void print_ns_info(FILE* fp, const struct nvm_ns_info* info)
+{
+    fprintf(fp, "------------- Namespace  information -------------\n");
+    fprintf(fp, "Namespace identifier    : %x\n", info->ns_id);
+    fprintf(fp, "Logical block size      : %zu bytes\n", info->lba_data_size);
+    fprintf(fp, "Namespace size          : %zu blocks\n", info->size);
+    fprintf(fp, "Namespace capacity      : %zu blocks\n", info->capacity);
+    fprintf(fp, "--------------------------------------------------\n");
+}
+

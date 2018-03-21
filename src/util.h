@@ -42,12 +42,13 @@ static inline uint32_t _nvm_b2log(uint32_t n)
 /* Delay the minimum of one millisecond and a time remainder */
 static inline uint64_t _nvm_delay_remain(uint64_t remaining_nanoseconds)
 {
+    struct timespec ts;
+
     if (remaining_nanoseconds == 0)
     {
         return 0;
     }
 
-    struct timespec ts;
     ts.tv_sec = 0;
     ts.tv_nsec = _MIN(1000000UL, remaining_nanoseconds);
 

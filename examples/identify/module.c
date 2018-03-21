@@ -20,7 +20,7 @@
 static void parse_args(int argc, char** argv, char** device);
 
 
-static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
+static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info, uint16_t n_cqs, uint16_t n_sqs)
 {
     unsigned char vendor[4];
     memcpy(vendor, &info->pci_vendor, sizeof(vendor));
@@ -50,6 +50,8 @@ static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
     fprintf(fp, "Max data transfer size  : %zu\n", info->max_data_size);
     fprintf(fp, "Max outstanding commands: %zu\n", info->max_out_cmds);
     fprintf(fp, "Max number of namespaces: %zu\n", info->max_n_ns);
+    fprintf(fp, "Current number of CQs   : %u\n", n_cqs);
+    fprintf(fp, "Current number of SQs   : %u\n", n_sqs);
     fprintf(fp, "--------------------------------------------------\n");
 }
 
@@ -68,6 +70,10 @@ static int execute_identify(const nvm_ctrl_t* ctrl, const nvm_dma_t* window, voi
         return 1;
     }
 
+    uint16_t n_cqs = 0;
+    uint16_t n_sqs = 0;
+    status = nvm_admin_get_num_queues(ref, &n_cqs, &n_sqs);
+
     status = nvm_admin_ctrl_info(ref, &info, ptr, ioaddr);
     if (status != 0)
     {
@@ -76,7 +82,7 @@ static int execute_identify(const nvm_ctrl_t* ctrl, const nvm_dma_t* window, voi
         goto out;
     }
 
-    print_ctrl_info(stdout, &info);
+    print_ctrl_info(stdout, &info, n_cqs, n_sqs);
 
 out:
     nvm_aq_destroy(ref);
@@ -165,9 +171,9 @@ static void give_usage(const char* name)
 static void show_help(const char* name)
 {
     give_usage(name);
-    fprintf(stderr, "    Create a manager and run an IDENTIFY CONTROLLER NVM admin command.\n"
+    fprintf(stderr, "\nCreate a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
             "    --ctrl     <path>          Path to controller device (/dev/libnvmXXX)\n"
-            "    --help                     Show this information.\n");
+            "    --help                     Show this information.\n\n");
 }
 
 

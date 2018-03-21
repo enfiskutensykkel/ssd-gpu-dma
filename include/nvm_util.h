@@ -30,32 +30,43 @@ uint64_t _nvm_bitmask(int hi, int lo)
 }
 
 
-
+#if defined( __NO_COHERENCE__ ) && defined( __DIS_CLUSTER__ )
 #ifdef __CUDACC__
 __host__ __device__
 #endif
 static inline
-void nvm_cache_flush(void* ptr, size_t size)
+void _nvm_cache_flush(void* ptr, size_t size)
 {
-#if defined( __DIS_CLUSTER__ ) && !defined( __CUDA_ARCH__ )
+#ifndef __CUDA_ARCH__ 
     sci_error_t err;
     SCICacheSync(NULL, ptr, size, SCI_FLAG_CACHE_FLUSH, &err);
 #endif
 }
 
+#define nvm_cache_flush(ptr, size) _nvm_cache_flush(ptr, size)
+#else
+#define nvm_cache_flush(ptr, size)
+#endif
 
 
+
+#if defined( __NO_COHERENCE__ ) && defined( __DIS_CLUSTER__ )
 #ifdef __CUDACC__
 __host__ __device__
 #endif
 static inline
-void nvm_cache_invalidate(void* ptr, size_t size)
+void _nvm_cache_invalidate(void* ptr, size_t size)
 {
-#if defined( __DIS_CLUSTER__ ) && !defined( __CUDA_ARCH__ )
+#ifndef __CUDA_ARCH__ 
     sci_error_t err;
     SCICacheSync(NULL, ptr, size, SCI_FLAG_CACHE_FLUSH | SCI_FLAG_CACHE_INVALIDATE, &err);
 #endif
 }
+
+#define nvm_cache_invalidate(ptr, size) _nvm_cache_invalidate(ptr, size)
+#else
+#define nvm_cache_invalidate(ptr, size)
+#endif
 
 
 

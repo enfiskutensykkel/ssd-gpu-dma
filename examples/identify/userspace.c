@@ -335,9 +335,9 @@ static void give_usage(const char* name)
 static void show_help(const char* name)
 {
     give_usage(name);
-    fprintf(stderr, "    Create a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
+    fprintf(stderr, "\nCreate a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
             "    --ctrl     <pci bdf>       PCI bus-device-function to controller.\n"
-            "    --help                     Show this information.\n");
+            "    --help                     Show this information.\n\n");
 }
 
 

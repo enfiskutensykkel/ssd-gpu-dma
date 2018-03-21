@@ -169,11 +169,11 @@ static void give_usage(const char* name)
 static void show_help(const char* name)
 {
     give_usage(name);
-    fprintf(stderr, "    Create a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
-            "    --ctrl     <dev id>        SmartIO device identifier.\n"
+    fprintf(stderr, "\nCreate a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
+            "    --ctrl     <fdid>          SmartIO device identifier (fabric device id).\n"
             "    --adapter  <adapter>       DIS adapter number (defaults to 0).\n"
             "    --id       <segment id>    SISCI segment identifier (defaults to 0).\n"
-            "    --help                     Show this information.\n");
+            "    --help                     Show this information.\n\n");
 }
 
 
@@ -213,7 +213,7 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
 
             case 'c': // device identifier
                 dev_set = true;
-                if (parse_u64(optarg, &args->dev_id, 0) != 0)
+                if (parse_u64(optarg, &args->dev_id, 16) != 0)
                 {
                     give_usage(argv[0]);
                     exit('c');

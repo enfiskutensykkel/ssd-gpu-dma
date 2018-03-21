@@ -83,6 +83,9 @@ typedef struct __align__(64)
     uint16_t                entry_size;     // Queue entry size
     uint32_t                head;           // Queue's head pointer
     uint32_t                tail;           // Queue's tail pointer
+    // TODO: Create bitfield for phase, add a remote field indicating
+    //       if queue is far memory nor not, in which case we whould NOT do
+    //       cache operations
     int16_t                 phase;          // Current phase bit
     uint32_t                last;           // Used internally to check db writes
     volatile uint32_t*      db;             // Pointer to doorbell register (NB! write only)
