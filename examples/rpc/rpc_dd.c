@@ -124,7 +124,7 @@ static void disk_w(const struct disk_info* disk, struct queue_pair* qp, FILE* fp
         nvm_cpl_t* cpl;
         while (!signal_caught && (cpl = nvm_cq_dequeue_block(&qp->cq, 50)) == NULL);
 
-        if (caught_signal)
+        if (signal_caught)
         {
             break;
         }
@@ -194,7 +194,7 @@ static void disk_r(const struct disk_info* disk, struct queue_pair* qp, uint64_t
         nvm_cpl_t* cpl;
         while (!signal_caught && (cpl = nvm_cq_dequeue_block(&qp->cq, 50)) == NULL);
 
-        if (caught_signal)
+        if (signal_caught)
         {
             break;
         }
