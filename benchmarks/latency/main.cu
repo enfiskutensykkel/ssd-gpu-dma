@@ -61,7 +61,7 @@ static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList
                 if (no == ctrl.numQueues)
                 {
                     auto start = settings.startBlock + NVM_PAGE_TO_BLOCK(pageSize, blockSize, pages);
-                    auto blocks = settings.numBlocks - start;
+                    auto blocks = settings.numBlocks - NVM_PAGE_TO_BLOCK(pageSize, blockSize, pages);
                     pages += prepareRange(queue->transfers, ctrl, settings.write, pages, start, blocks);
                 }
                 else
@@ -72,9 +72,22 @@ static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList
                 }
                 break;
 
-            case AccessPattern::RANDOM:
-                pages += fillRandom(queue->transfers, ctrl, settings.write, settings.numBlocks);
+            case AccessPattern::RANDOM_LINEAR:
+                pages += fillRandom(queue->transfers, ctrl, settings.write, settings.numBlocks, false, false);
                 break;
+
+            case AccessPattern::RANDOM_CHUNK:
+                pages += fillRandom(queue->transfers, ctrl, settings.write, settings.numBlocks, true, false);
+                break;
+
+            case AccessPattern::RANDOM_PAGE:
+                pages += fillRandom(queue->transfers, ctrl, settings.write, settings.numBlocks, true, true);
+                break;
+        }
+
+        if (queue->transfers.empty())
+        {
+            throw runtime_error("Transfer size is too small for more than one queue");
         }
 
         fprintf(stderr, "Queue #%02u %s %zu commands\n",
@@ -156,6 +169,8 @@ static Time sendWindow(QueuePtr& queue, TransferPtr& from, const TransferPtr& to
 {
     size_t numCommands = 0;
     size_t numBlocks = 0;
+    nvm_cmd_t local;
+    memset(&local, 0, sizeof(local));
 
     // Fill up to queue depth with commands
     for (numCommands = 0; numCommands < queue->depth && from != to; ++numCommands, ++from)
@@ -170,9 +185,13 @@ static Time sendWindow(QueuePtr& queue, TransferPtr& from, const TransferPtr& to
         void* prpListPtr = NVM_DMA_OFFSET(queue->sq_mem, 1 + numCommands);
         uint64_t prpListAddr = queue->sq_mem->ioaddrs[1 + numCommands];
         
-        nvm_cmd_header(cmd, t.write ? NVM_IO_WRITE : NVM_IO_READ, ns);
-        nvm_cmd_rw_blks(cmd, t.startBlock, t.numBlocks);
-        nvm_cmd_data(cmd, buffer->page_size, t.numPages, prpListPtr, prpListAddr, &buffer->ioaddrs[t.startPage]);
+        nvm_cmd_header(&local, t.write ? NVM_IO_WRITE : NVM_IO_READ, ns);
+        nvm_cmd_rw_blks(&local, t.startBlock, t.numBlocks);
+        nvm_cmd_data(&local, buffer->page_size, t.numPages, prpListPtr, prpListAddr, &buffer->ioaddrs[t.startPage]);
+
+        *NVM_CMD_CID(&local) = numCommands;
+
+        *cmd = local;
 
         numBlocks += t.numBlocks;
     }
@@ -286,15 +305,18 @@ static size_t consumeCompletions(QueuePtr& queue)
 static void measureBandwidth(QueuePtr queue, const DmaPtr buffer, Times* times, const Settings& settings, Barrier* barrier)
 {
     nvm_queue_t* sq = &queue->sq;
+    nvm_cmd_t local;
+    memset(&local, 0, sizeof(local));
+
 
     barrier->wait();
 
     for (size_t i = 0; i < settings.repetitions; ++i)
     {
-        size_t totalCmds = 0;
         size_t numCmds = 0;
-        size_t totalCpls = 0;
         size_t numCpls = 0;
+        size_t totalCmds = 0;
+        size_t totalCpls = 0;
         size_t numBlocks = 0;
 
         auto before = std::chrono::high_resolution_clock::now();
@@ -311,13 +333,19 @@ static void measureBandwidth(QueuePtr queue, const DmaPtr buffer, Times* times, 
                 numCmds -= numCpls;
                 totalCpls += numCpls;
             }
-
+            
             void* prpListPtr = NVM_DMA_OFFSET(queue->sq_mem, 1 + numCmds);
             uint64_t prpListAddr = queue->sq_mem->ioaddrs[1 + numCmds];
 
-            nvm_cmd_header(cmd, transfer.write ? NVM_IO_WRITE : NVM_IO_READ, settings.nvmNamespace);
-            nvm_cmd_rw_blks(cmd, transfer.startBlock, transfer.numBlocks);
-            nvm_cmd_data(cmd, buffer->page_size, transfer.numPages, prpListPtr, prpListAddr, &buffer->ioaddrs[transfer.startPage]);
+            nvm_cmd_header(&local, transfer.write ? NVM_IO_WRITE : NVM_IO_READ, settings.nvmNamespace);
+            nvm_cmd_rw_blks(&local, transfer.startBlock, transfer.numBlocks);
+            nvm_cmd_data(&local, buffer->page_size, transfer.numPages, prpListPtr, prpListAddr, &buffer->ioaddrs[transfer.startPage]);
+           
+            // Command may be a pointer to remote memory,
+            // so to avoid issues with write-combining we copy
+            // everything in one go
+            *NVM_CMD_CID(&local) = numCmds;
+            *cmd = local;
 
             numBlocks += transfer.numBlocks;
 
@@ -351,126 +379,54 @@ static double percentile(const std::vector<double>& values, double p)
 }
 
 
-
-static void bandwidthStats(const QueuePtr& queue, const Times& times, size_t blockSize, bool print)
+static void printPercentiles(std::vector<double>& data)
 {
-    double minBw = std::numeric_limits<double>::max();
-    double maxBw = std::numeric_limits<double>::min();
-    double avgBw = 0;
+    std::sort(data.begin(), data.end(), std::greater<double>());
+    std::reverse(data.begin(), data.end());
 
-    size_t blocks = 0;
-    for (const auto& t: queue->transfers)
+    for (auto p: {.99, .97, .95, .90, .75, .50, .25})
     {
-        blocks += t.numBlocks;
+        fprintf(stderr, "%4.2f: %14.3f\n", p, percentile(data, p));
     }
+}
 
-    std::vector<double> bws;
-    bws.reserve(times.size());
+static void printStats(const QueuePtr& queue, const Times& times, size_t blockSize, bool header)
+{
 
-    if (print)
+    if (header)
     {
-        fprintf(stdout, "#%5s; %8s; %12s; %12s; %12s\n",
-                "queue", "cmds", "blocks", "usecs", "mbytes/s");
+        fprintf(stdout, "#%5s; %8s; %12s; %12s; %12s;\n",
+                "queue", "cmds", "blocks", "lat", "bw");
     }
+    for (const auto& t: times)
+    {
+        auto time = t.time.count();
+        auto blocks = t.blocks;
+        
+        double bw = (blocks * blockSize) / time;
+
+        fprintf(stdout, " %5x; %8u; %12zu; %12.3f; %12.3f;\n",
+                queue->no, t.commands, t.blocks, time, bw);
+    }
+}
+
+static void bandwidthStats(const Times& times, size_t blockSize, std::vector<double>& results)
+{
     for (const auto& t: times)
     {
         const auto currentTime = t.time.count();
         const auto blocks = t.blocks;
-
-        double bw = (blocks * blockSize) / currentTime;
-        if (bw < minBw)
-        {
-            minBw = bw;
-        }
-        else if (bw > maxBw)
-        {
-            maxBw = bw;
-        } 
-
-        avgBw += bw;
-        bws.push_back(bw);
-
-        if (print)
-        {
-            fprintf(stdout, " %5x; %8u; %12zu; %12.3f; %12.3f\n",
-                    queue->no, t.commands, t.blocks, currentTime, bw);
-        }
-    }
-
-    avgBw /= times.size();
-
-    fprintf(stderr, "Queue #%02u cmds=%zu blocks=%zu count=%zu ",
-            queue->no, queue->transfers.size(), blocks, times.size());
-    fprintf(stderr, "min=%.3f avg=%.3f max=%.3f\n", minBw, avgBw, maxBw);
-
-    std::sort(bws.begin(), bws.end(), std::greater<double>());
-    std::reverse(bws.begin(), bws.end());
-
-    for (auto p: {.99, .97, .95, .90, .75, .50})
-    {
-        fprintf(stderr, "\t%4.2f: %14.3f\n", p, percentile(bws, p));
+        const double bw = (blocks * blockSize) / currentTime;
+        results.push_back(bw);
     }
 }
 
 
-static void latencyStats(const QueuePtr& queue, const Times& times, size_t blockSize, bool print)
+static void latencyStats(const Times& times, std::vector<double>& results)
 {
-    double minLat = std::numeric_limits<double>::max();
-    double maxLat = std::numeric_limits<double>::min();
-    double avgLat = 0;
-
-    size_t blocks = 0;
-    for (const auto& t: queue->transfers)
-    {
-        blocks += t.numBlocks;
-    }
-
-    std::vector<double> latencies;
-    latencies.reserve(times.size());
-
-    if (print)
-    {
-        fprintf(stdout, "#%5s; %8s; %12s; %12s; %12s\n",
-                "queue", "cmds", "blocks", "usecs", "mbytes/s");
-    }
     for (const auto& t: times)
     {
-        const auto current = t.time.count();
-
-        if (current < minLat)
-        {
-            minLat = current;
-        }
-        else if (current > maxLat)
-        {
-            maxLat = current;
-        }
-
-        avgLat += current;
-        latencies.push_back(current);
-
-        if (print)
-        {
-            double bw = (t.blocks * blockSize) / current; 
-            fprintf(stdout, " %5x; %8u; %12zu; %12.3f; %12.3f\n",
-                    queue->no, t.commands, t.blocks, current, bw);
-        }
-    }
-
-    avgLat /= times.size();
-
-
-    fprintf(stderr, "Queue #%02u cmds=%zu blocks=%zu count=%zu ",
-            queue->no, queue->transfers.size(), blocks, times.size());
-    fprintf(stderr, "min=%.3f avg=%.3f max=%.3f\n", minLat, avgLat, maxLat);
-
-    // Calculate percentiles
-    std::sort(latencies.begin(), latencies.end(), std::greater<double>());
-    std::reverse(latencies.begin(), latencies.end());
-
-    for (auto p: {.99, .97, .95, .90, .75, .50})
-    {
-        fprintf(stderr, "\t%4.2f: %14.3f\n", p, percentile(latencies, p));
+        results.push_back(t.time.count());
     }
 }
 
@@ -490,6 +446,9 @@ static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Setti
         {
             throw runtime_error(string("Failed to set CUDA device: ") + cudaGetErrorString(err));
         }
+
+        auto size = settings.numBlocks * blockSize;
+        err = cudaMemset(buffer.get(), 0, size);
     }
 
     Barrier barrier(queues.size());
@@ -523,18 +482,27 @@ static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Setti
 
     fprintf(stderr, "Running benchmark...\n");
 
+    std::vector<double> all;
     for (size_t i = 0; i < queues.size(); ++i)
     {
         threads[i].join();
         if (settings.latency)
         {
-            latencyStats(queues[i], times[i], blockSize, settings.stats);
+            latencyStats(times[i], all);
         }
         else
         {
-            bandwidthStats(queues[i], times[i], blockSize, settings.stats);
+            bandwidthStats(times[i], blockSize, all);
+        }
+
+        if (settings.stats)
+        {
+            printStats(queues[i], times[i], blockSize, i == 0);
+
         }
     }
+
+    printPercentiles(all);
 
     if (settings.cudaDevice != -1)
     {
@@ -571,6 +539,25 @@ int main(int argc, char** argv)
         fprintf(stderr, "Something went wrong: %s\n", SCIGetErrorString(err));
         return 1;
     }
+
+    sci_desc_t sd;
+    SCIOpen(&sd, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Something went wrong: %s\n", SCIGetErrorString(err));
+        return 1;
+    }
+
+    sci_device_t cudaDev;
+    if (settings.cudaDeviceId)
+    {
+        SCIBorrowDevice(sd, &cudaDev, settings.cudaDeviceId, SCI_FLAG_EXCLUSIVE, &err);
+        if (err != SCI_ERR_OK)
+        {
+            fprintf(stderr, "Something went wrong: %s\n", SCIGetErrorString(err));
+            return 1;
+        }
+    }
 #endif
 
     try
@@ -593,6 +580,7 @@ int main(int argc, char** argv)
         DmaPtr buffer;
         if (settings.cudaDevice != -1)
         {
+            fprintf(stderr, "Using CUDA device: %d %s\n", settings.cudaDevice, settings.getDeviceBDF().c_str());
             buffer = createDeviceDma(ctrl.ctrl, numPages * ctrl.ctrl->page_size, settings.cudaDevice, settings.adapter, settings.segmentId++);
         }
         else
@@ -602,7 +590,7 @@ int main(int argc, char** argv)
 
         benchmark(queues, buffer, settings, ctrl.ns.lba_data_size);
 
-        if (settings.filename != nullptr && !settings.write && settings.pattern != AccessPattern::RANDOM)
+        if (settings.filename != nullptr && !settings.write && !isRandom(settings.pattern))
         {
             fprintf(stderr, "Writing to file...\n");
             outputFile(ctrl, queues, buffer, settings);
@@ -610,6 +598,13 @@ int main(int argc, char** argv)
     }
     catch (const runtime_error& e)
     {
+#ifdef __DIS_CLUSTER__
+        if (settings.cudaDeviceId)
+        {
+            SCIReturnDevice(cudaDev, 0, &err);
+        }
+        SCIClose(sd, 0, &err);
+#endif
         fprintf(stderr, "Unexpected error: %s\n", e.what());
         return 1;
     }
@@ -617,6 +612,11 @@ int main(int argc, char** argv)
     fprintf(stderr, "OK!\n");
 
 #ifdef __DIS_CLUSTER__
+    if (settings.cudaDeviceId)
+    {
+        SCIReturnDevice(cudaDev, 0, &err);
+    }
+    SCIClose(sd, 0, &err);
     SCITerminate();
 #endif
     return 0;

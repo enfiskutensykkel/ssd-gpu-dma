@@ -40,18 +40,29 @@ size_t prepareRange(TransferList& list, const Controller& ctrl, bool write, size
 }
 
 
-size_t fillRandom(TransferList& list, const Controller& ctrl, bool write, size_t numBlocks)
+size_t fillRandom(TransferList& list, const Controller& ctrl, bool write, size_t numBlocks, bool perChunk, bool perPage)
 {
     const size_t blockSize = ctrl.ns.lba_data_size;
     const size_t pageSize = ctrl.info.page_size;
     const size_t maxBlock = ctrl.ns.size / blockSize;
-    const size_t chunkSize = ctrl.info.max_data_size;
+    size_t chunkSize = ctrl.info.max_data_size / blockSize;
 
-    size_t pages = 0;
     uint64_t startBlock = rand() % maxBlock;
+    size_t pages = 0;
+
+    if (perPage)
+    {
+        perChunk = true;
+        chunkSize = pageSize / blockSize;
+    }
 
     for (size_t block = 0; block < numBlocks; block += std::min(chunkSize, numBlocks - block))
     {
+        if (perChunk)
+        {
+            startBlock = rand() % maxBlock;
+        }
+
         Transfer t;
         t.write = write;
         t.startBlock = startBlock + block;

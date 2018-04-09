@@ -29,6 +29,8 @@ static const struct option options[] = {
     { .name = "ns", .has_arg = required_argument, .flag = nullptr, .val = 'i' },
 #ifdef __DIS_CLUSTER__
     { .name = "adapter", .has_arg = required_argument, .flag = nullptr, .val = 'a' },
+    { .name = "fdid", .has_arg = required_argument, .flag = nullptr, .val = 'f'  },
+    { .name = "gpu-fdid", .has_arg = required_argument, .flag = nullptr, .val = 'f'  },
 #endif
     { .name = "num-blocks", .has_arg = required_argument, .flag = nullptr, .val = 'n' },
     { .name = "block-count", .has_arg = required_argument, .flag = nullptr, .val = 'n' },
@@ -108,7 +110,7 @@ static string helpString(const char* name)
     s << std::endl << "Arguments" << std::endl;
     argInfo(s, "help", "show this help");
 #ifdef __DIS_CLUSTER__
-    argInfo(s, "ctrl", "id", "NVM controller identifier");
+    argInfo(s, "ctrl", "fdid", "NVM controller identifier");
     argInfo(s, "adapter", "number", "DIS adapter number (default is 0)");
 #else
     argInfo(s, "ctrl", "path", "Path to controller device");
@@ -120,6 +122,9 @@ static string helpString(const char* name)
     argInfo(s, "depth", "number", "specify number of commands per queue (default is 32)");
     argInfo(s, "repeat", "repetitions", "number of times to repeat measurement (default is 1000)");
     argInfo(s, "gpu", "[device]", "select GPUDirect capable CUDA device (default is none)");
+#ifdef __DIS_CLUSTER__
+    argInfo(s, "fdid", "fdid", "CUDA device identifier");
+#endif
     argInfo(s, "output", "path", "output to file");
     argInfo(s, "write", "write instead of read (WARNING! Will destroy data on disk)");
 #ifdef __DIS_CLUSTER__
@@ -132,7 +137,9 @@ static string helpString(const char* name)
     s << "Access patterns:" << std::endl;
     modeInfo(s, "sequential", "overlapping sequential access pattern, queues access same blocks");
     modeInfo(s, "linear", "linear sequential access pattern, queues do not access same blocks");
-    modeInfo(s, "random", "random access pattern, individual commands start at a random offset");
+    modeInfo(s, "random-offset", "sequential access pattern, queues start at a random offset");
+    modeInfo(s, "chunk", "each read starts at a random offset");
+    modeInfo(s, "page", " each read starts at a random offset");
 
     return s.str();
 }
@@ -148,9 +155,17 @@ static AccessPattern parsePattern(const string& s)
     {
         return AccessPattern::SEQUENTIAL;
     }
-    else if (s == "random")
+    else if (s == "random-offset" || s == "random")
     {
-        return AccessPattern::RANDOM;
+        return AccessPattern::RANDOM_LINEAR;
+    }
+    else if (s == "chunk")
+    {
+        return AccessPattern::RANDOM_CHUNK;
+    }
+    else if (s == "page")
+    {
+        return AccessPattern::RANDOM_CHUNK;
     }
 
     throw string("Invalid access pattern: " + s);
@@ -169,11 +184,40 @@ static int maxCudaDevice()
 }
 
 
+static void setBDF(Settings& settings)
+{
+    cudaDeviceProp props;
+    
+    cudaError_t err = cudaGetDeviceProperties(&props, settings.cudaDevice);
+    if (err != cudaSuccess)
+    {
+        throw string("Failed to get device properties: ") + cudaGetErrorString(err);
+    }
+
+    settings.domain = props.pciDomainID;
+    settings.bus = props.pciBusID;
+    settings.devfn = props.pciDeviceID;
+}
+
+string Settings::getDeviceBDF() const
+{
+    using namespace std;
+    ostringstream s;
+
+    s << setfill('0') << setw(4) << hex << domain
+        << ":" << setfill('0') << setw(2) << hex << bus 
+        << ":" << setfill('0') << setw(2) << hex << devfn
+        << ".0";
+
+    return s.str();
+}
+
 
 Settings::Settings()
 {
     latency = true;
     cudaDevice = -1;
+    cudaDeviceId = 0;
     controllerPath = nullptr;
     controllerId = 0;
     adapter = 0;
@@ -190,6 +234,9 @@ Settings::Settings()
     write = false;
     remote = true;
     stats = false;
+    domain = 0;
+    bus = 0;
+    devfn = 0;
 }
 
 
@@ -220,7 +267,7 @@ void Settings::parseArguments(int argc, char** argv)
     int option;
 
 #ifdef __DIS_CLUSTER__
-    const char* optstr = ":hc:g:i:a:n:o:q:d:w:r:O:p:sB";
+    const char* optstr = ":hc:g:i:a:n:o:q:d:w:r:O:p:sBf:";
 #else
     const char* optstr = ":hc:g:i:n:o:q:d:w:r:O:p:s";
 #endif
@@ -253,6 +300,12 @@ void Settings::parseArguments(int argc, char** argv)
             case 'B':
                 latency = false;
                 break;
+
+#ifdef __DIS_CLUSTER__
+            case 'f':
+                cudaDeviceId = (uint64_t) parseNumber(optarg, 16);
+                break;
+#endif
 
 #ifdef __DIS_CLUSTER__
             case 'c':
@@ -360,7 +413,7 @@ void Settings::parseArguments(int argc, char** argv)
         throw string("No block count is specified!");
     }
 
-    if (pattern == AccessPattern::RANDOM && filename != nullptr)
+    if (isRandom(pattern) && filename != nullptr)
     {
         throw string("Can not output random access pattern!");
     }
@@ -368,6 +421,11 @@ void Settings::parseArguments(int argc, char** argv)
     if (write && filename != nullptr)
     {
         throw string("Can not write and output!");
+    }
+
+    if (cudaDevice != -1)
+    {
+        setBDF(*this);
     }
 }
 

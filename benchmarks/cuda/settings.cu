@@ -107,11 +107,11 @@ void Option<bool>::parseArgument(const char* optstr, const char* optarg)
     string str(optarg);
     std::transform(str.begin(), str.end(), str.begin(), std::ptr_fun<int, int>(std::tolower));
 
-    if (str == "false" || str == "0")
+    if (str == "false" || str == "0" || str == "no" || str == "n" || str == "off" || str == "disable" || str == "disabled") 
     {
         value = false;
     }
-    else if (str == "true" || str == "1")
+    else if (str == "true" || str == "1" || str == "yes" || str == "y" || str == "on" || str == "enable" || str == "enabled")
     {
         value = true;
     }
@@ -181,8 +181,23 @@ static void setBDF(Settings& settings)
         throw string("Failed to get device properties: ") + cudaGetErrorString(err);
     }
 
+    settings.domain = props.pciDomainID;
     settings.bus = props.pciBusID;
     settings.devfn = props.pciDeviceID;
+}
+
+
+string Settings::getDeviceBDF() const
+{
+    using namespace std;
+    ostringstream s;
+
+    s << setfill('0') << setw(4) << hex << domain
+        << ":" << setfill('0') << setw(2) << hex << bus 
+        << ":" << setfill('0') << setw(2) << hex << devfn
+        << ".0";
+
+    return s.str();
 }
 
 
@@ -195,7 +210,7 @@ string Settings::usageString(const string& name)
 
 
 
-static string helpString(const string& name, OptionMap& options)
+static string helpString(const string& /*name*/, OptionMap& options)
 {
     using namespace std;
     ostringstream s;
@@ -295,7 +310,8 @@ void Settings::parseArguments(int argc, char** argv)
 {
     OptionMap parsers = {
 #ifdef __DIS_CLUSTER__
-        {'c', OptionPtr(new Option<uint64_t>(controllerId, "identifier", "ctrl", "NVM controller device identifier"))},
+        {'c', OptionPtr(new Option<uint64_t>(controllerId, "fdid", "ctrl", "NVM controller device identifier"))},
+        {'f', OptionPtr(new Option<uint64_t>(cudaDeviceId, "fdid", "fdid", "CUDA device FDID"))},
         {'a', OptionPtr(new Option<uint32_t>(adapter, "number", "adapter", "DIS adapter number", "0"))},
         {'S', OptionPtr(new Option<uint32_t>(segmentId, "offset", "segment", "DIS segment identifier offset", "0"))},
 #else
@@ -304,6 +320,7 @@ void Settings::parseArguments(int argc, char** argv)
         {'g', OptionPtr(new Option<uint32_t>(cudaDevice, "number", "gpu", "specify CUDA device", "0"))},
         {'i', OptionPtr(new Option<uint32_t>(nvmNamespace, "identifier", "namespace", "NVM namespace identifier", "1"))},
         {'B', OptionPtr(new Option<bool>(doubleBuffered, "bool", "double-buffer", "double buffer disk reads", "false"))},
+        {'r', OptionPtr(new Option<bool>(stats, "bool", "stats", "print statistics", "false"))},
         {'n', OptionPtr(new Range(numChunks, 1, 0, "chunks", "number of chunks per thread", "32"))},
         {'p', OptionPtr(new Range(numPages, 1, 0, "pages", "number of pages per chunk", "1"))},
         {'t', OptionPtr(new Range(numThreads, 1, 32, "threads", "number of CUDA threads", "32"))},
@@ -379,7 +396,7 @@ void Settings::parseArguments(int argc, char** argv)
 Settings::Settings()
 {
     cudaDevice = 0;
-    cudaDeviceId = 0x80100;
+    cudaDeviceId = 0;
     blockDevicePath = nullptr;
     controllerPath = nullptr;
     controllerId = 0;
@@ -393,6 +410,7 @@ Settings::Settings()
     stats = false;
     output = nullptr;
     numThreads = 32;
+    domain = 0;
     bus = 0;
     devfn = 0;
 }

@@ -8,6 +8,7 @@
 #include <nvm_cmd.h>
 #include <string>
 #include <stdexcept>
+#include <vector>
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -25,6 +26,50 @@
 
 using error = std::runtime_error;
 using std::string;
+
+
+struct __align__(64) CmdTime
+{
+    size_t      size;
+    uint64_t    submitTime;
+    uint64_t    completeTime;
+    uint64_t    moveTime;
+};
+
+
+__host__ static
+std::shared_ptr<CmdTime> createReportingList(size_t numEntries, int device)
+{
+    auto err = cudaSetDevice(device);
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
+    CmdTime* list = nullptr;
+    err = cudaMalloc(&list, sizeof(CmdTime) * numEntries);
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
+    return std::shared_ptr<CmdTime>(list, cudaFree);
+}
+
+
+__host__ static
+std::shared_ptr<CmdTime> createReportingList(size_t numEntries)
+{
+    CmdTime* list = nullptr;
+
+    auto err = cudaHostAlloc(&list, sizeof(CmdTime) * numEntries, cudaHostAllocDefault);
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
+    return std::shared_ptr<CmdTime>(list, cudaFreeHost);
+}
 
 
 
@@ -69,6 +114,7 @@ void waitForIoCompletion(nvm_queue_t* cq, nvm_queue_t* sq, uint64_t* errCount)
 __device__ static
 nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, const uint64_t ioaddr, uint16_t offset, uint64_t blockOffset, uint32_t currChunk)
 {
+    nvm_cmd_t local;
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
     const uint16_t threadOffset = threadNum + numThreads * offset;
@@ -96,10 +142,12 @@ nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, const uint64_t ioaddr, u
     nvm_cmd_t* cmd = nvm_sq_enqueue_n(&qp->sq, last, numThreads, threadNum);
 
     // Set command fields
-    nvm_cmd_header(cmd, NVM_IO_READ, nvmNamespace);
-    nvm_cmd_data(cmd, pageSize, chunkPages, prpList, prpListAddr, addrs);
-    nvm_cmd_rw_blks(cmd, currBlock + blockOffset, blocksPerChunk);
-
+    nvm_cmd_header(&local, NVM_IO_READ, nvmNamespace);
+    nvm_cmd_data(&local, pageSize, chunkPages, prpList, prpListAddr, addrs);
+    nvm_cmd_rw_blks(&local, currBlock + blockOffset, blocksPerChunk);
+    *NVM_CMD_CID(&local) = threadNum;
+    
+    *cmd = local;
     __threadfence();
     return cmd;
 }
@@ -145,32 +193,32 @@ static double launchMoveKernelLoop(void* fileMap, BufferPtr destination, size_t 
     const size_t sourceBufferSize = NVM_PAGE_ALIGN(chunkSize * numThreads, 1UL << 16);
     auto source = createBuffer(sourceBufferSize, settings.cudaDevice);
 
-    Event before, after;
-
-    before.record(0);
-    for (size_t currChunk = 0; currChunk < totalChunks; currChunk += numThreads)
-    {
-        launchMoveKernel(pageSize, fileMap, source.get(), destination.get(), currChunk, settings);
-    }
-    after.record(0);
-
-    auto err = cudaDeviceSynchronize();
+    auto err = cudaSetDevice(settings.cudaDevice);
     if (err != cudaSuccess)
     {
         throw err;
     }
 
-    float msecs = 0.0;
-    cudaEventElapsedTime(&msecs, before.event, after.event);
-    double elapsed = msecs * 1e3;
+    Event before;
+    for (size_t currChunk = 0; currChunk < totalChunks; currChunk += numThreads)
+    {
+        launchMoveKernel(pageSize, fileMap, source.get(), destination.get(), currChunk, settings);
+    }
+    Event after;
 
-    return elapsed;
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
+    return after - before;
 }
 
 
 
 __global__ static
-void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t startBlock, uint64_t* errCount)
+void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t startBlock, uint64_t* errCount, CmdTime* times)
 {
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
@@ -182,9 +230,11 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
 
     uint32_t currChunk = 0;
     bool bufferOffset = false;
+    uint32_t i = 0;
 
     nvm_cmd_t* last = prepareChunk(qp, nullptr, ioaddr, bufferOffset, blockOffset, currChunk);
 
+    auto beforeSubmit = clock();
     if (threadNum == 0)
     {
         *errCount = 0;
@@ -198,19 +248,34 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
         last = prepareChunk(qp, last, ioaddr, !bufferOffset, blockOffset, currChunk + numThreads);
 
         // Consume completions for the previous window
+        beforeSubmit = clock();
         if (threadNum == 0)
         {
             waitForIoCompletion(&qp->cq, sq, errCount);
             nvm_sq_submit(sq);
         }
         __syncthreads();
+        auto afterSync = clock();
 
         // Move received chunk
         moveBytes(src, bufferOffset * numThreads * chunkSize, dst, currChunk * chunkSize, chunkSize * numThreads);
+        auto afterMove = clock();
+
+        // Record statistics
+        if (times != nullptr && threadNum == 0)
+        {
+            CmdTime* t = &times[i];
+            t->size = chunkSize * numThreads;
+            t->submitTime = beforeSubmit;
+            t->completeTime = afterSync;
+            t->moveTime = afterMove;
+        }
+        __syncthreads();
     
         // Update position and input buffer
         bufferOffset = !bufferOffset;
         currChunk += numThreads;
+        ++i;
     }
 
     // Wait for final buffer to complete
@@ -219,14 +284,26 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
         waitForIoCompletion(&qp->cq, sq, errCount);
     }
     __syncthreads();
+    auto afterSync = clock();
 
     moveBytes(src, bufferOffset * numThreads * chunkSize, dst, currChunk * chunkSize, chunkSize * numThreads);
+    auto afterMove = clock();
+
+    // Record statistics
+    if (times != nullptr && threadNum == 0)
+    {
+        CmdTime* t = &times[i];
+        t->size = chunkSize * numThreads;
+        t->submitTime = beforeSubmit;
+        t->completeTime = afterSync;
+        t->moveTime = afterMove;
+    }
 }
 
 
 
 __global__ static
-void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t startBlock, uint64_t* errCount)
+void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t startBlock, uint64_t* errCount, CmdTime* times)
 {
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
@@ -237,6 +314,7 @@ void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
     uint64_t blockOffset = startBlock;
 
     uint32_t currChunk = 0;
+    uint32_t i = 0;
 
     nvm_cmd_t* cmd = nullptr;
 
@@ -252,24 +330,71 @@ void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
         cmd = prepareChunk(qp, cmd, ioaddr, 0, blockOffset, currChunk);
 
         // Consume completions for the previous window
+        auto beforeSubmit = clock();
         if (threadNum == 0)
         {
             nvm_sq_submit(sq);
             waitForIoCompletion(&qp->cq, sq, errCount);
         }
         __syncthreads();
+        auto afterSync = clock();
 
         // Move received chunk
         moveBytes(src, 0, dst, currChunk * chunkSize, chunkSize * numThreads);
+        auto afterMove = clock();
+
+        // Record statistics
+        if (times != nullptr && threadNum == 0)
+        {
+            CmdTime* t = &times[i];
+            t->size = chunkSize * numThreads;
+            t->submitTime = beforeSubmit;
+            t->completeTime = afterSync;
+            t->moveTime = afterMove;
+        }
+        __syncthreads();
     
         // Update position and input buffer
         currChunk += numThreads;
+        ++i;
     }
 }
 
 
+static void printStatistics(const Settings& settings, const cudaDeviceProp& prop, const std::shared_ptr<CmdTime> gpuTimes)
+{
+    const size_t numChunks = settings.numChunks;
+    auto hostTimes = createReportingList(numChunks);
 
-static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, const Settings& settings)
+    auto err = cudaMemcpy(hostTimes.get(), gpuTimes.get(), sizeof(CmdTime) * numChunks, cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
+    const auto* times = hostTimes.get();
+    const double rate = ((double) prop.clockRate) / 1e3; // GPU's clock frequency in MHz
+
+    fprintf(stdout, "#%9s; %12s; %12s; %12s; %12s; %12s; %12s;\n",
+            "size", "disk_lat", "disk_bw", "mem_lat", "mem_bw", "cum_lat", "cum_bw");
+    for (size_t i = 0; i < numChunks; ++i)
+    {
+        const auto& t = times[i];
+        auto diskTime = (t.completeTime - t.submitTime) / rate;
+        auto moveTime = (t.moveTime - t.completeTime) / rate;
+        auto totalTime = (t.moveTime - t.submitTime) / rate;
+
+        auto diskBw = times[i].size / diskTime;
+        auto moveBw = times[i].size / moveTime;
+        auto totalBw = times[i].size / totalTime;
+
+        fprintf(stdout, "%10zu; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f;\n", 
+                t.size, diskTime, diskBw, moveTime, moveBw, totalTime, totalBw);
+    }
+}
+
+
+static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, const Settings& settings, const cudaDeviceProp& prop)
 {
     QueuePair queuePair;
     DmaPtr queueMemory = prepareQueuePair(queuePair, ctrl, settings);
@@ -290,6 +415,18 @@ static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, con
     const size_t sourceBufferSize = NVM_PAGE_ALIGN((settings.doubleBuffered + 1) * chunkSize * settings.numThreads, 1UL << 16);
     auto source = createDma(ctrl.ctrl, sourceBufferSize, settings.cudaDevice, settings.adapter, settings.segmentId + 1); // vaddr is a dev ptr
 
+    std::shared_ptr<CmdTime> times;
+    if (settings.stats)
+    {
+        times = createReportingList(settings.numChunks, settings.cudaDevice);
+    }
+
+    err = cudaSetDevice(settings.cudaDevice);
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
+
     // We want to count number of errors
     uint64_t* ec = nullptr;
     err = cudaMalloc(&ec, sizeof(uint64_t));
@@ -302,18 +439,16 @@ static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, con
     double elapsed = 0;
     try
     {
-        Event before, after; 
-
-        before.record(0);
+        Event before;
         if (settings.doubleBuffered)
         {
-            readDoubleBuffered<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalChunks, settings.startBlock, ec);
+            readDoubleBuffered<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalChunks, settings.startBlock, ec, times.get());
         }
         else
         {
-            readSingleBuffered<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalChunks, settings.startBlock, ec);
+            readSingleBuffered<<<1, settings.numThreads>>>((QueuePair*) deviceQueue.get(), source->ioaddrs[0], source->vaddr, destination.get(), totalChunks, settings.startBlock, ec, times.get());
         }
-        after.record(0);
+        Event after;
 
         err = cudaDeviceSynchronize();
         if (err != cudaSuccess)
@@ -321,9 +456,7 @@ static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, con
             throw err;
         }
 
-        float msecs = 0;
-        cudaEventElapsedTime(&msecs, before.event, after.event);
-        elapsed = msecs * 1e3;
+        elapsed = after - before;
     }
     catch (const cudaError_t err)
     {
@@ -346,6 +479,11 @@ static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, con
         fprintf(stderr, "WARNING: There were NVM errors\n");
     }
 
+    if (settings.stats)
+    {
+        printStatistics(settings, prop, times);
+    }
+
     return elapsed;
 }
 
@@ -366,7 +504,7 @@ static void outputFile(BufferPtr data, size_t size, const char* filename)
 }
 
 
-static int useBlockDevice(const Settings& settings)
+static int useBlockDevice(const Settings& settings, const cudaDeviceProp& properties)
 {
     int fd = open(settings.blockDevicePath, O_RDONLY);
     if (fd < 0)
@@ -380,6 +518,10 @@ static int useBlockDevice(const Settings& settings)
     const size_t totalChunks = settings.numChunks * settings.numThreads;
     const size_t totalPages = totalChunks * settings.numPages;
 
+    fprintf(stderr, "CUDA device           : %u %s (%s)\n", settings.cudaDevice, properties.name, settings.getDeviceBDF().c_str());
+#ifdef __DIS_CLUSTER__
+    fprintf(stderr, "CUDA device fdid      : %lx\n", settings.cudaDeviceId);
+#endif
     fprintf(stderr, "Controller page size  : %zu B\n", pageSize);
     fprintf(stderr, "Assumed block size    : %zu B\n", blockSize);
     fprintf(stderr, "Number of threads     : %zu\n", settings.numThreads);
@@ -402,8 +544,8 @@ static int useBlockDevice(const Settings& settings)
 
         double usecs = launchMoveKernelLoop(ptr, outputBuffer, pageSize, settings);
 
-        fprintf(stdout, "Time elapsed: %.3f µs\n", usecs);
-        fprintf(stdout, "Bandwidth   : %.3f MiB/s\n", (totalPages * pageSize) / usecs);
+        fprintf(stderr, "Event time elapsed    : %.3f µs\n", usecs);
+        fprintf(stderr, "Estimated bandwidth   : %.3f MiB/s\n", (totalPages * pageSize) / usecs);
 
         if (settings.output != nullptr)
         {
@@ -446,11 +588,6 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (settings.blockDevicePath != nullptr)
-    {
-        return useBlockDevice(settings);
-    }
-
 #ifdef __DIS_CLUSTER__
     sci_error_t err;
     SCIInitialize(0, &err);
@@ -478,11 +615,14 @@ int main(int argc, char** argv)
     sleep(1); // FIXME: Hack due to race condition in SmartIO
 
     sci_device_t cudaDev;
-    SCIBorrowDevice(sd, &cudaDev, settings.cudaDeviceId, SCI_FLAG_EXCLUSIVE, &err);
-    if (err != SCI_ERR_OK)
+    if (settings.cudaDeviceId != 0)
     {
-        fprintf(stderr, "Failed to get SmartIO device reference for CUDA: %s\n", SCIGetErrorString(err));
-        return 1;
+        SCIBorrowDevice(sd, &cudaDev, settings.cudaDeviceId, SCI_FLAG_EXCLUSIVE, &err);
+        if (err != SCI_ERR_OK)
+        {
+            fprintf(stderr, "Failed to get SmartIO device reference for CUDA device: %s\n", SCIGetErrorString(err));
+            return 1;
+        }
     }
 #endif
 
@@ -493,7 +633,10 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    fprintf(stderr, "CUDA device: %s\n", properties.name);
+    if (settings.blockDevicePath != nullptr)
+    {
+        return useBlockDevice(settings, properties);
+    }
 
     try
     {
@@ -520,6 +663,11 @@ int main(int argc, char** argv)
             throw error("Requesting read size larger than disk size");
         }
 
+        fprintf(stderr, "CUDA device           : %u %s (%s)\n", settings.cudaDevice, properties.name, settings.getDeviceBDF().c_str());
+#ifdef __DIS_CLUSTER__
+        fprintf(stderr, "CUDA device fdid      : %lx\n", settings.cudaDeviceId);
+        fprintf(stderr, "Controller fdid       : %lx\n", settings.controllerId);
+#endif
         fprintf(stderr, "Controller page size  : %zu B\n", pageSize);
         fprintf(stderr, "Namespace block size  : %zu B\n", blockSize);
         fprintf(stderr, "Number of threads     : %zu\n", settings.numThreads);
@@ -532,7 +680,10 @@ int main(int argc, char** argv)
         auto outputBuffer = createBuffer(ctrl.info.page_size * totalPages, settings.cudaDevice);
 
 #ifdef __DIS_CLUSTER__
-        nvm_dis_ctrl_map_p2p_device(ctrl.ctrl, cudaDev, nullptr);
+        if (settings.cudaDeviceId != 0)
+        {
+            nvm_dis_ctrl_map_p2p_device(ctrl.ctrl, cudaDev, nullptr);
+        }
 #endif
 
         cudaError_t err = cudaHostRegister((void*) ctrl.ctrl->mm_ptr, NVM_CTRL_MEM_MINSIZE, cudaHostRegisterIoMemory);
@@ -543,10 +694,10 @@ int main(int argc, char** argv)
 
         try
         {
-            double usecs = launchNvmKernel(ctrl, outputBuffer, settings);
+            double usecs = launchNvmKernel(ctrl, outputBuffer, settings, properties);
 
-            fprintf(stdout, "Time elapsed: %.3f µs\n", usecs);
-            fprintf(stdout, "Bandwidth   : %.3f MiB/s\n", (totalPages * pageSize) / usecs);
+            fprintf(stderr, "Event time elapsed    : %.3f µs\n", usecs);
+            fprintf(stderr, "Estimated bandwidth   : %.3f MiB/s\n", (totalPages * pageSize) / usecs);
 
             if (settings.output != nullptr)
             {
@@ -567,7 +718,10 @@ int main(int argc, char** argv)
     catch (const error& e)
     {
 #ifdef __DIS_CLUSTER__
-        SCIReturnDevice(cudaDev, 0, &err);
+        if (settings.cudaDeviceId)
+        {
+            SCIReturnDevice(cudaDev, 0, &err);
+        }
         SCIUnregisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, 0, &err);
         SCIClose(sd, 0, &err);
         SCITerminate();
@@ -577,7 +731,10 @@ int main(int argc, char** argv)
     }
 
 #ifdef __DIS_CLUSTER__
-    SCIReturnDevice(cudaDev, 0, &err);
+    if (settings.cudaDeviceId)
+    {
+        SCIReturnDevice(cudaDev, 0, &err);
+    }
     SCIUnregisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, 0, &err);
     SCIClose(sd, 0, &err);
     SCITerminate();

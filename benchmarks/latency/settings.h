@@ -3,20 +3,30 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 
 enum AccessPattern : int
 {
     LINEAR,              // All threads read the same sequential chunk
     SEQUENTIAL,          // All threads read the same (larger) sequential chunk with different offsets
-    RANDOM               // All threads read random blocks
+    RANDOM_LINEAR,       // All threads read linear range offset by random block count
+    RANDOM_CHUNK,        // All threads read linear chunk offset by random block count
+    RANDOM_PAGE,         // All threads read one page, offset by random block count
 };
+
+
+constexpr bool isRandom(AccessPattern p)
+{
+    return p == AccessPattern::LINEAR || p == AccessPattern::SEQUENTIAL;
+}
 
 
 struct Settings
 {
     bool            latency;
     int             cudaDevice;
+    uint64_t        cudaDeviceId;
     const char*     controllerPath;
     uint64_t        controllerId;
     uint32_t        adapter;
@@ -33,9 +43,14 @@ struct Settings
     bool            write;
     bool            stats;
     bool            remote;
+    uint32_t        domain;
+    uint32_t        bus;
+    uint32_t        devfn;
 
     Settings();
     void parseArguments(int argc, char** argv);
+
+    std::string getDeviceBDF() const;
 };
 
 #endif

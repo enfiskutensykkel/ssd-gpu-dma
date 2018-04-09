@@ -39,6 +39,7 @@ struct local_admin
     nvm_queue_t         acq;        // Admin completion queue (ACQ)
     nvm_queue_t         asq;        // Admin submission queue (ASQ)
     uint64_t            timeout;    // Controller timeout
+    uint16_t            cmd_id;
 };
 
 
@@ -262,6 +263,7 @@ void _nvm_ref_put(nvm_aq_ref ref)
  */
 static int execute_command(struct local_admin* admin, const nvm_cmd_t* cmd, nvm_cpl_t* cpl)
 {
+    nvm_cmd_t local_copy;
     nvm_cmd_t* in_queue_cmd;
     nvm_cpl_t* in_queue_cpl;
 
@@ -273,9 +275,10 @@ static int execute_command(struct local_admin* admin, const nvm_cmd_t* cmd, nvm_
     }
 
     // Copy command into queue slot (but keep original id)
-    uint16_t in_queue_id = *NVM_CMD_CID(in_queue_cmd);
-    memcpy(in_queue_cmd, cmd, sizeof(nvm_cmd_t));
-    *NVM_CMD_CID(in_queue_cmd) = in_queue_id;
+    uint16_t in_queue_id = admin->cmd_id++;
+    memcpy(&local_copy, cmd, sizeof(nvm_cmd_t));
+    *NVM_CMD_CID(&local_copy) = in_queue_id;
+    *in_queue_cmd = local_copy;
 
     // Submit command and wait for completion
     nvm_sq_submit(&admin->asq);
@@ -319,6 +322,7 @@ static struct local_admin* create_admin(const nvm_ctrl_t* ctrl, const nvm_dma_t*
     memset(window->vaddr, 0, 2 * window->page_size);
 
     admin->timeout = ctrl->timeout;
+    admin->cmd_id = 0;
 
     return admin;
 }

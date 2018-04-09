@@ -23,6 +23,7 @@ struct Settings
     bool            stats;
     const char*     output;
     size_t          numThreads;
+    uint32_t        domain;
     uint32_t        bus;
     uint32_t        devfn;
 
@@ -30,6 +31,8 @@ struct Settings
     void parseArguments(int argc, char** argv);
 
     static std::string usageString(const std::string& name);
+
+    std::string getDeviceBDF() const;
 };
 
 #endif
