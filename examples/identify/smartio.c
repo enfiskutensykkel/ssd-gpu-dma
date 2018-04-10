@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <string.h>
 #include <limits.h>
+#include "common.h"
 
 
 /*
@@ -25,46 +26,8 @@ struct cl_args
     uint64_t    dev_id;
     uint32_t    dis_adapter;
     uint32_t    segment_id;
+    uint32_t    namespace_id;
 };
-
-
-/*
- * Print controller information.
- */
-static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info, uint16_t n_cqs, uint16_t n_sqs)
-{
-    unsigned char vendor[4];
-    memcpy(vendor, &info->pci_vendor, sizeof(vendor));
-
-    char serial[21];
-    memset(serial, 0, 21);
-    memcpy(serial, info->serial_no, 20);
-
-    char model[41];
-    memset(model, 0, 41);
-    memcpy(model, info->model_no, 40);
-
-    char revision[9];
-    memset(revision, 0, 9);
-    memcpy(revision, info->firmware, 8);
-
-    fprintf(fp, "------------- Controller information -------------\n");
-    fprintf(fp, "PCI Vendor ID           : %x %x\n", vendor[0], vendor[1]);
-    fprintf(fp, "PCI Subsystem Vendor ID : %x %x\n", vendor[2], vendor[3]);
-    fprintf(fp, "NVM Express version     : %u.%u.%u\n",
-            info->nvme_version >> 16, (info->nvme_version >> 8) & 0xff, info->nvme_version & 0xff);
-    fprintf(fp, "Controller page size    : %zu\n", info->page_size);
-    fprintf(fp, "Max queue entries       : %u\n", info->max_entries);
-    fprintf(fp, "Serial Number           : %s\n", serial);
-    fprintf(fp, "Model Number            : %s\n", model);
-    fprintf(fp, "Firmware revision       : %s\n", revision);
-    fprintf(fp, "Max data transfer size  : %zu\n", info->max_data_size);
-    fprintf(fp, "Max outstanding commands: %zu\n", info->max_out_cmds);
-    fprintf(fp, "Max number of namespaces: %zu\n", info->max_n_ns);
-    fprintf(fp, "Current number of CQs   : %u\n", n_cqs);
-    fprintf(fp, "Current number of SQs   : %u\n", n_sqs);
-    fprintf(fp, "--------------------------------------------------\n");
-}
 
 
 static void parse_args(int argc, char** argv, struct cl_args* args);
@@ -97,33 +60,32 @@ int main(int argc, char** argv)
     }
     memset(window->vaddr, 0, 3 * 0x1000);
 
-    fprintf(stderr, "Resetting controller and setting up admin queues...\n");
     nvm_aq_ref aq;
-    status = nvm_aq_create(&aq, ctrl, window);
+    aq = reset_ctrl(ctrl, window);
+    if (aq == NULL)
+    {
+        status = 1;
+        goto leave;
+    }
+
+    status = identify_ctrl(aq, NVM_DMA_OFFSET(window, 2), window->ioaddrs[2]);
     if (status != 0)
     {
-        nvm_dma_unmap(window);
-        nvm_ctrl_free(ctrl);
-        fprintf(stderr, "Failed to create admin queues: %s\n", strerror(status));
-        exit(status);
+        goto leave;
     }
 
-    uint16_t n_cqs = 0;
-    uint16_t n_sqs = 0;
-    status = nvm_admin_get_num_queues(aq, &n_cqs, &n_sqs);
-
-    struct nvm_ctrl_info info;
-    status = nvm_admin_ctrl_info(aq, &info, NVM_DMA_OFFSET(window, 2), window->ioaddrs[2]);
-
-    if (status == 0)
+    if (args.namespace_id != 0)
     {
-        print_ctrl_info(stdout, &info, n_cqs, n_sqs);
+        status = identify_ns(aq, args.namespace_id, NVM_DMA_OFFSET(window, 2), window->ioaddrs[2]);
     }
 
+leave:
     nvm_aq_destroy(aq);
     nvm_dma_unmap(window);
     nvm_ctrl_free(ctrl);
     SCITerminate();
+
+    fprintf(stderr, "Goodbye!\n");
     exit(status);
 }
 
@@ -171,8 +133,9 @@ static void show_help(const char* name)
     give_usage(name);
     fprintf(stderr, "\nCreate a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
             "    --ctrl     <fdid>          SmartIO device identifier (fabric device id).\n"
+            "    --ns       <namespace id>  Show information about NVM namespace.\n"
             "    --adapter  <adapter>       DIS adapter number (defaults to 0).\n"
-            "    --id       <segment id>    SISCI segment identifier (defaults to 0).\n"
+            "    --segment  <segment id>    SISCI segment identifier (defaults to 0).\n"
             "    --help                     Show this information.\n\n");
 }
 
@@ -185,7 +148,8 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
         { "help", no_argument, NULL, 'h' },
         { "ctrl", required_argument, NULL, 'c' },
         { "adapter", required_argument, NULL, 'a' },
-        { "id", required_argument, NULL, 'i' },
+        { "ns", required_argument, NULL, 'n' },
+        { "segment", required_argument, NULL, 's' },
         { NULL, 0, NULL, 0 }
     };
 
@@ -196,8 +160,9 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
     args->dev_id = 0;
     args->dis_adapter = 0;
     args->segment_id = 0;
+    args->namespace_id = 0;
 
-    while ((opt = getopt_long(argc, argv, ":hc:a:i:", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, ":hc:a:s:n:", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -228,11 +193,19 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
                 }
                 break;
 
-            case 'i':
+            case 's':
                 if (parse_u32(optarg, &args->segment_id, 0) != 0)
                 {
                     give_usage(argv[0]);
-                    exit('i');
+                    exit('s');
+                }
+                break;
+
+            case 'n':
+                if (parse_u32(optarg, &args->namespace_id, 0) != 0)
+                {
+                    give_usage(argv[0]);
+                    exit('n');
                 }
                 break;
 

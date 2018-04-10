@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include "common.h"
 
 
 /* 
@@ -29,39 +30,6 @@ struct bdf
     int     function;
 };
 
-
-static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
-{
-    unsigned char vendor[4];
-    memcpy(vendor, &info->pci_vendor, sizeof(vendor));
-
-    char serial[21];
-    memset(serial, 0, 21);
-    memcpy(serial, info->serial_no, 20);
-
-    char model[41];
-    memset(model, 0, 41);
-    memcpy(model, info->model_no, 40);
-
-    char revision[9];
-    memset(revision, 0, 9);
-    memcpy(revision, info->firmware, 8);
-
-    fprintf(fp, "------------- Controller information -------------\n");
-    fprintf(fp, "PCI Vendor ID           : %x %x\n", vendor[0], vendor[1]);
-    fprintf(fp, "PCI Subsystem Vendor ID : %x %x\n", vendor[2], vendor[3]);
-    fprintf(fp, "NVM Express version     : %u.%u.%u\n",
-            info->nvme_version >> 16, (info->nvme_version >> 8) & 0xff, info->nvme_version & 0xff);
-    fprintf(fp, "Controller page size    : %zu\n", info->page_size);
-    fprintf(fp, "Max queue entries       : %u\n", info->max_entries);
-    fprintf(fp, "Serial Number           : %s\n", serial);
-    fprintf(fp, "Model Number            : %s\n", model);
-    fprintf(fp, "Firmware revision       : %s\n", revision);
-    fprintf(fp, "Max data transfer size  : %zu\n", info->max_data_size);
-    fprintf(fp, "Max outstanding commands: %zu\n", info->max_out_cmds);
-    fprintf(fp, "Max number of namespaces: %zu\n", info->max_n_ns);
-    fprintf(fp, "--------------------------------------------------\n");
-}
 
 
 static int lookup_ioaddrs(void* ptr, size_t page_size, size_t n_pages, uint64_t* ioaddrs)
@@ -107,42 +75,13 @@ static int lookup_ioaddrs(void* ptr, size_t page_size, size_t n_pages, uint64_t*
 }
 
 
-static int execute_identify(const nvm_ctrl_t* ctrl, const nvm_dma_t* queues, void* ptr, uint64_t ioaddr)
-{
-    int status;
-    nvm_aq_ref ref;
-    struct nvm_ctrl_info info;
 
-    fprintf(stderr, "Resetting controller and setting up admin queues...\n");
-    status = nvm_aq_create(&ref, ctrl, queues);
-    if (status != 0)
-    {
-        fprintf(stderr, "Failed to reset controller: %s\n", strerror(errno));
-        return 1;
-    }
-
-    status = nvm_admin_ctrl_info(ref, &info, ptr, ioaddr);
-    if (status != 0)
-    {
-        fprintf(stderr, "Failed to identify controller: %s\n", strerror(errno));
-        status = 1;
-        goto out;
-    }
-
-    print_ctrl_info(stdout, &info);
-
-out:
-
-    nvm_aq_destroy(ref);
-    return status;
-}
-
-
-static int identify_ctrl(const nvm_ctrl_t* ctrl)
+static int identify(const nvm_ctrl_t* ctrl, uint32_t nvm_ns_id)
 {
     int status;
     void* memory;
-    nvm_dma_t* window;
+    nvm_dma_t* window = NULL;
+    nvm_aq_ref admin = NULL;
     uint64_t ioaddrs[3];
 
     long page_size = sysconf(_SC_PAGESIZE);
@@ -183,11 +122,26 @@ static int identify_ctrl(const nvm_ctrl_t* ctrl)
         goto out;
     }
 
-    status = execute_identify(ctrl, window, ((unsigned char*) memory) + 2 * ctrl->page_size, ioaddrs[2]);
+    admin = reset_ctrl(ctrl, window);
+    if (admin == NULL)
+    {
+        goto out;
+    }
 
-    nvm_dma_unmap(window);
+    status = identify_ctrl(admin, ((unsigned char*) memory) + 2 * ctrl->page_size, ioaddrs[2]);
+    if (status != 0)
+    {
+        goto out;
+    }
+
+    if (nvm_ns_id != 0)
+    {
+        status = identify_ns(admin, nvm_ns_id, ((unsigned char*) memory) + 2 * ctrl->page_size, ioaddrs[2]);
+    }
 
 out:
+    nvm_aq_destroy(admin);
+    nvm_dma_unmap(window);
     munlock(memory, 3 * page_size);
     free(memory);
     return status;
@@ -262,7 +216,7 @@ static int pci_open_bar(const struct bdf* dev, int bar)
 }
 
 
-static void parse_args(int argc, char** argv, struct bdf* device);
+static void parse_args(int argc, char** argv, struct bdf* device, uint32_t* nvm_ns_id);
 
 
 int main(int argc, char** argv)
@@ -270,8 +224,9 @@ int main(int argc, char** argv)
     int status;
     nvm_ctrl_t* ctrl;
 
+    uint32_t nvm_ns_id;
     struct bdf device;
-    parse_args(argc, argv, &device);
+    parse_args(argc, argv, &device, &nvm_ns_id);
 
     // Enable device
     status = pci_enable_device(&device);
@@ -317,11 +272,13 @@ int main(int argc, char** argv)
         exit(4);
     }
 
-    status = identify_ctrl(ctrl);
+    status = identify(ctrl, nvm_ns_id);
 
     nvm_ctrl_free(ctrl);
     munmap((void*) ctrl_registers, NVM_CTRL_MEM_MINSIZE);
     close(fd);
+
+    fprintf(stderr, "Goodbye!\n");
     exit(status);
 }
 
@@ -337,6 +294,7 @@ static void show_help(const char* name)
     give_usage(name);
     fprintf(stderr, "\nCreate a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
             "    --ctrl     <pci bdf>       PCI bus-device-function to controller.\n"
+            "    --ns       <namespace>     Show information about NVM namespace.\n"
             "    --help                     Show this information.\n\n");
 }
 
@@ -406,21 +364,24 @@ static int parse_bdf(char* str, struct bdf* dev)
 
 
 
-static void parse_args(int argc, char** argv, struct bdf* dev)
+static void parse_args(int argc, char** argv, struct bdf* dev, uint32_t* nvm_ns_id)
 {
     // Command line options
     static struct option opts[] = {
         { "help", no_argument, NULL, 'h' },
         { "ctrl", required_argument, NULL, 'c' },
+        { "ns", required_argument, NULL, 'n' },
         { NULL, 0, NULL, 0 }
     };
 
     int opt;
     int idx;
-
+    char* endptr = NULL;
+    
+    *nvm_ns_id = 0;
     memset(dev, 0, sizeof(struct bdf));
 
-    while ((opt = getopt_long(argc, argv, ":hc:", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, ":hc:n:", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -439,6 +400,15 @@ static void parse_args(int argc, char** argv, struct bdf* dev)
                 {
                     give_usage(argv[0]);
                     exit('c');
+                }
+                break;
+
+            case 'n': // namespace identifier
+                *nvm_ns_id = strtoul(optarg, &endptr, 0);
+                if (endptr == NULL || *endptr != '\0')
+                {
+                    fprintf(stderr, "Invalid NVM namespace!\n");
+                    exit('n');
                 }
                 break;
 
