@@ -460,19 +460,9 @@ void nvm_aq_destroy(nvm_aq_ref ref)
 {
     if (ref != NULL)
     {
-        //if (ref->stub == (rpc_stub_t) execute_command)
-        //{
-            _nvm_ref_put(ref);
-        //}
+        _nvm_ref_put(ref);
     }
 }
-
-
-
-//const nvm_ctrl_t* _nvm_ctrl_from_aq_ref(const struct nvm_admin_reference* ref)
-//{
-//    return ref->ctrl;
-//}
 
 
 
@@ -516,10 +506,10 @@ void nvm_rpc_unbind(nvm_aq_ref ref)
 {
     if (ref != NULL)
     {
-        //if (ref->stub != (rpc_stub_t) execute_command)
-        //{
+        if (ref->stub != (rpc_stub_t) execute_command)
+        {
             _nvm_ref_put(ref);
-        //}
+        }
     }
 }
 

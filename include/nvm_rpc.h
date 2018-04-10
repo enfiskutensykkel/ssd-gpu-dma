@@ -23,8 +23,10 @@ int nvm_dis_rpc_bind(nvm_aq_ref* ref, const nvm_ctrl_t* ctrl, uint32_t adapter);
 #endif
 
 
+
 /*
  * Unbind admin queue-pair reference.
+ * If reference is not bound (i.e., it is local), this function will do nothing.
  */
 void nvm_rpc_unbind(nvm_aq_ref ref);
 

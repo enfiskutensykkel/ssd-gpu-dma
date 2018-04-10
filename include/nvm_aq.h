@@ -30,6 +30,8 @@ int nvm_aq_create(nvm_aq_ref* ref, const nvm_ctrl_t* ctrl, const nvm_dma_t* aq_m
  *
  * After calling this function, all admin queue references are invalid.
  * This also means that remote references will no longer be valid.
+ *
+ * This function will also work for unbinding remote references.
  */
 void nvm_aq_destroy(nvm_aq_ref ref);
 
