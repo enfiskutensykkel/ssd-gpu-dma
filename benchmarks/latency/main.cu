@@ -33,6 +33,31 @@ using std::thread;
 
 
 
+static string patternString(const Settings& settings)
+{
+    switch (settings.pattern)
+    {
+        case AccessPattern::LINEAR:
+            return "linear";
+
+        case AccessPattern::SEQUENTIAL:
+            return "sequential";
+
+        case AccessPattern::RANDOM_LINEAR:
+            return "random-offset";
+
+        case AccessPattern::RANDOM_CHUNK:
+            return "random-chunks";
+
+        case AccessPattern::RANDOM_PAGE:
+            return "random-pages";
+    }
+
+    throw runtime_error("Unknown access pattern");
+}
+
+
+
 static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList& queues)
 {
     const size_t pageSize = ctrl.info.page_size;
@@ -384,20 +409,33 @@ static void printPercentiles(std::vector<double>& data)
     std::sort(data.begin(), data.end(), std::greater<double>());
     std::reverse(data.begin(), data.end());
 
+    fprintf(stderr, " max: %14.3f\n", data.back());
     for (auto p: {.99, .97, .95, .90, .75, .50, .25})
     {
         fprintf(stderr, "%4.2f: %14.3f\n", p, percentile(data, p));
     }
+    fprintf(stderr, " min: %14.3f\n", data.front());
 }
 
-static void printStats(const QueuePtr& queue, const Times& times, size_t blockSize, bool header)
+static void printStats(const QueuePtr& queue, const Times& times, size_t blockSize, const Settings& settings)
 {
-
-    if (header)
+    if (queue->no == 1)
     {
-        fprintf(stdout, "#%5s; %8s; %12s; %12s; %12s;\n",
-                "queue", "cmds", "blocks", "lat", "bw");
+        fprintf(stdout, "#%5s; %6s; %4s; %13s; %8s; %8s; %12s; %12s; %12s;\n",
+                "queue", "sqhost", "type", "pattern", "depth", "cmds", "blocks", "lat", "bw");
     }
+
+    auto pattern = patternString(settings);
+    auto patternPtr = pattern.c_str();
+
+#ifdef __DIS_CLUSTER__
+    bool local = !settings.remote;
+#else
+    bool local = true;
+#endif
+
+    bool gpu = settings.cudaDevice != -1;
+
     for (const auto& t: times)
     {
         auto time = t.time.count();
@@ -405,8 +443,9 @@ static void printStats(const QueuePtr& queue, const Times& times, size_t blockSi
         
         double bw = (blocks * blockSize) / time;
 
-        fprintf(stdout, " %5x; %8u; %12zu; %12.3f; %12.3f;\n",
-                queue->no, t.commands, t.blocks, time, bw);
+        fprintf(stdout, " %5x; %6s; %4s; %13s; %8zu; %8u; %12zu; %12.3f; %12.3f;\n",
+                queue->no, local ? "local" : "remote", gpu ? "gpu" : "ram", patternPtr,
+                queue->depth, t.commands, t.blocks, time, bw);
     }
 }
 
@@ -429,8 +468,6 @@ static void latencyStats(const Times& times, std::vector<double>& results)
         results.push_back(t.time.count());
     }
 }
-
-
 
 
 static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Settings& settings, size_t blockSize)
@@ -480,7 +517,7 @@ static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Setti
         }
     }
 
-    fprintf(stderr, "Running benchmark...\n");
+    fprintf(stderr, "Running benchmark... (pattern=%s)\n", patternString(settings).c_str());
 
     std::vector<double> all;
     for (size_t i = 0; i < queues.size(); ++i)
@@ -497,8 +534,7 @@ static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Setti
 
         if (settings.stats)
         {
-            printStats(queues[i], times[i], blockSize, i == 0);
-
+            printStats(queues[i], times[i], blockSize, settings);
         }
     }
 
