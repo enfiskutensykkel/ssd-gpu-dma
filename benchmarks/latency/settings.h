@@ -46,6 +46,7 @@ struct Settings
     uint32_t        domain;
     uint32_t        bus;
     uint32_t        devfn;
+    std::string     cudaDeviceName;
 
     Settings();
     void parseArguments(int argc, char** argv);

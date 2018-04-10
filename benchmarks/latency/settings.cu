@@ -197,6 +197,8 @@ static void setBDF(Settings& settings)
     settings.domain = props.pciDomainID;
     settings.bus = props.pciBusID;
     settings.devfn = props.pciDeviceID;
+
+    settings.cudaDeviceName = props.name;
 }
 
 string Settings::getDeviceBDF() const

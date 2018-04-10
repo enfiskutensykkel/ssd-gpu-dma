@@ -580,7 +580,7 @@ int main(int argc, char** argv)
         DmaPtr buffer;
         if (settings.cudaDevice != -1)
         {
-            fprintf(stderr, "Using CUDA device: %d %s\n", settings.cudaDevice, settings.getDeviceBDF().c_str());
+            fprintf(stderr, "Using CUDA device: %d %s (%s)\n", settings.cudaDevice, settings.cudaDeviceName.c_str(), settings.getDeviceBDF().c_str());
             buffer = createDeviceDma(ctrl.ctrl, numPages * ctrl.ctrl->page_size, settings.cudaDevice, settings.adapter, settings.segmentId++);
         }
         else
