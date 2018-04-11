@@ -406,12 +406,13 @@ static void printPercentiles(std::vector<double>& data)
     std::sort(data.begin(), data.end(), std::greater<double>());
     std::reverse(data.begin(), data.end());
 
-    fprintf(stderr, " max: %14.3f\n", data.back());
+    fprintf(stderr, "count: %14zu\n", data.size());
+    fprintf(stderr, "  max: %14.3f\n", data.back());
     for (auto p: {.99, .97, .95, .90, .75, .50, .25})
     {
-        fprintf(stderr, "%4.2f: %14.3f\n", p, percentile(data, p));
+        fprintf(stderr, " %4.2f: %14.3f\n", p, percentile(data, p));
     }
-    fprintf(stderr, " min: %14.3f\n", data.front());
+    fprintf(stderr, "  min: %14.3f\n", data.front());
 }
 
 static void printStats(const QueuePtr& queue, const Times& times, size_t blockSize, const Settings& settings)
@@ -514,7 +515,8 @@ static void benchmark(const QueueList& queues, const DmaPtr& buffer, const Setti
         }
     }
 
-    fprintf(stderr, "Running benchmark... (pattern=%s)\n", patternString(settings).c_str());
+    fprintf(stderr, "Running benchmark... (mode=%s, pattern=%s)\n", 
+            settings.latency ? "latency" : "bandwidth", patternString(settings).c_str());
 
     std::vector<double> all;
     for (size_t i = 0; i < queues.size(); ++i)
