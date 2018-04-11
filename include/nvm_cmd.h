@@ -49,10 +49,9 @@ enum nvm_admin_command_set
  * Set command's DWORD0 and DWORD1
  */
 __device__ __host__ static inline
-void nvm_cmd_header(nvm_cmd_t* cmd, uint8_t opcode, uint32_t ns_id)
+void nvm_cmd_header(nvm_cmd_t* cmd, uint16_t cid, uint8_t opcode, uint32_t ns_id)
 {
-    cmd->dword[0] &= 0xffff0000;
-    cmd->dword[0] |= (0x00 << 14) | (0x00 << 8) | (opcode & 0x7f);
+    cmd->dword[0] = ((uint32_t) cid << 16) | (0x00 << 14) | (0x00 << 8) | (opcode & 0x7f);
     cmd->dword[1] = ns_id;
 }
 

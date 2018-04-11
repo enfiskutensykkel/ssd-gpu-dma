@@ -178,6 +178,9 @@ void _nvm_cache_invalidate(void* ptr, size_t size)
 #define NVM_CPL_STATUS(p)           _REG(p, 14, 16)
 
 
+/* Convenience macro for creating a default CID based on submission queue */
+#define NVM_DEFAULT_CID(sq)         ((sq)->tail + (!(sq)->phase) * (sq)->max_entries)
+
 
 #ifdef __cplusplus
 extern "C" {

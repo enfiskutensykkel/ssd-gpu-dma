@@ -142,10 +142,9 @@ nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, const uint64_t ioaddr, u
     nvm_cmd_t* cmd = nvm_sq_enqueue_n(&qp->sq, last, numThreads, threadNum);
 
     // Set command fields
-    nvm_cmd_header(&local, NVM_IO_READ, nvmNamespace);
+    nvm_cmd_header(&local, threadNum, NVM_IO_READ, nvmNamespace);
     nvm_cmd_data(&local, pageSize, chunkPages, prpList, prpListAddr, addrs);
     nvm_cmd_rw_blks(&local, currBlock + blockOffset, blocksPerChunk);
-    *NVM_CMD_CID(&local) = threadNum;
     
     *cmd = local;
     __threadfence();

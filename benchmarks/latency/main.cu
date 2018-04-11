@@ -210,12 +210,11 @@ static Time sendWindow(QueuePtr& queue, TransferPtr& from, const TransferPtr& to
         void* prpListPtr = NVM_DMA_OFFSET(queue->sq_mem, 1 + numCommands);
         uint64_t prpListAddr = queue->sq_mem->ioaddrs[1 + numCommands];
         
-        nvm_cmd_header(&local, t.write ? NVM_IO_WRITE : NVM_IO_READ, ns);
+        nvm_cmd_header(&local, NVM_DEFAULT_CID(&queue->sq), t.write ? NVM_IO_WRITE : NVM_IO_READ, ns);
         nvm_cmd_rw_blks(&local, t.startBlock, t.numBlocks);
         nvm_cmd_data(&local, buffer->page_size, t.numPages, prpListPtr, prpListAddr, &buffer->ioaddrs[t.startPage]);
 
-        *NVM_CMD_CID(&local) = numCommands;
-
+        // Write command to remote memory in one go (due to write combining)
         *cmd = local;
 
         numBlocks += t.numBlocks;
@@ -264,7 +263,7 @@ static void flush(QueuePtr& queue, uint32_t ns)
         throw runtime_error(string("Queue is full, should not happen!"));
     }
 
-    nvm_cmd_header(cmd, NVM_IO_FLUSH, ns);
+    nvm_cmd_header(cmd, NVM_DEFAULT_CID(&queue->sq), NVM_IO_FLUSH, ns);
     nvm_cmd_data_ptr(cmd, 0, 0);
 
     nvm_sq_submit(&queue->sq);
@@ -333,7 +332,6 @@ static void measureBandwidth(QueuePtr queue, const DmaPtr buffer, Times* times, 
     nvm_cmd_t local;
     memset(&local, 0, sizeof(local));
 
-
     barrier->wait();
 
     for (size_t i = 0; i < settings.repetitions; ++i)
@@ -362,14 +360,13 @@ static void measureBandwidth(QueuePtr queue, const DmaPtr buffer, Times* times, 
             void* prpListPtr = NVM_DMA_OFFSET(queue->sq_mem, 1 + numCmds);
             uint64_t prpListAddr = queue->sq_mem->ioaddrs[1 + numCmds];
 
-            nvm_cmd_header(&local, transfer.write ? NVM_IO_WRITE : NVM_IO_READ, settings.nvmNamespace);
+            nvm_cmd_header(&local, NVM_DEFAULT_CID(sq), transfer.write ? NVM_IO_WRITE : NVM_IO_READ, settings.nvmNamespace);
             nvm_cmd_rw_blks(&local, transfer.startBlock, transfer.numBlocks);
             nvm_cmd_data(&local, buffer->page_size, transfer.numPages, prpListPtr, prpListAddr, &buffer->ioaddrs[transfer.startPage]);
            
             // Command may be a pointer to remote memory,
             // so to avoid issues with write-combining we copy
             // everything in one go
-            *NVM_CMD_CID(&local) = numCmds;
             *cmd = local;
 
             numBlocks += transfer.numBlocks;

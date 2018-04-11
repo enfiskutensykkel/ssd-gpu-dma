@@ -142,7 +142,7 @@ void parse_options(int argc, char** argv, struct options* args)
 
 #ifdef __DIS_CLUSTER__
             case 'c':
-                args->controller_id = strtoul(optarg, &endptr, 0);
+                args->controller_id = strtoul(optarg, &endptr, 16);
                 if (endptr == NULL || *endptr != '\0')
                 {
                     fprintf(stderr, "Invalid controller id: `%s'\n", optarg);

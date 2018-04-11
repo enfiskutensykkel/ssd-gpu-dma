@@ -105,7 +105,7 @@ static struct producer* produce_commands(struct producer* p)
             pthread_yield();
         }
 
-        nvm_cmd_header(cmd, p->write ? NVM_IO_WRITE : NVM_IO_READ, ns_id);
+        nvm_cmd_header(cmd, NVM_DEFAULT_CID(sq), p->write ? NVM_IO_WRITE : NVM_IO_READ, ns_id);
 
         size_t n_blocks = NVM_PAGE_TO_BLOCK(page_size, block_size, transfer_pages);
         size_t start_block = p->start_block + NVM_PAGE_TO_BLOCK(page_size, block_size, page_offset);
@@ -123,7 +123,7 @@ static struct producer* produce_commands(struct producer* p)
     if (p->write)
     {
         while ((cmd = nvm_sq_enqueue(sq)) == NULL);
-        nvm_cmd_header(cmd, NVM_IO_FLUSH, ns_id);
+        nvm_cmd_header(cmd, NVM_DEFAULT_CID(sq), NVM_IO_FLUSH, ns_id);
         nvm_cmd_data_ptr(cmd, 0, 0);
         nvm_cmd_rw_blks(cmd, 0, 0);
         queue->counter++;

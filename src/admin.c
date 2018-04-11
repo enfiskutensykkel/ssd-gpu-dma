@@ -20,7 +20,7 @@
 
 void _nvm_admin_cq_create(nvm_cmd_t* cmd, const nvm_queue_t* cq)
 {
-    nvm_cmd_header(cmd, NVM_ADMIN_CREATE_COMPLETION_QUEUE, 0);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_CREATE_COMPLETION_QUEUE, 0);
     nvm_cmd_data_ptr(cmd, cq->ioaddr, 0);
 
     cmd->dword[10] = (((uint32_t) cq->max_entries - 1) << 16) | cq->no;
@@ -31,7 +31,7 @@ void _nvm_admin_cq_create(nvm_cmd_t* cmd, const nvm_queue_t* cq)
 
 void _nvm_admin_cq_delete(nvm_cmd_t* cmd, const nvm_queue_t* cq)
 {
-    nvm_cmd_header(cmd, NVM_ADMIN_DELETE_COMPLETION_QUEUE, 0);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_DELETE_COMPLETION_QUEUE, 0);
     cmd->dword[10] = cq->no & 0xffff;
 }
 
@@ -39,7 +39,7 @@ void _nvm_admin_cq_delete(nvm_cmd_t* cmd, const nvm_queue_t* cq)
 
 void _nvm_admin_sq_create(nvm_cmd_t* cmd, const nvm_queue_t* sq, const nvm_queue_t* cq)
 {
-    nvm_cmd_header(cmd, NVM_ADMIN_CREATE_SUBMISSION_QUEUE, 0);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_CREATE_SUBMISSION_QUEUE, 0);
     nvm_cmd_data_ptr(cmd, sq->ioaddr, 0);
 
     cmd->dword[10] = (((uint32_t) sq->max_entries - 1) << 16) | sq->no;
@@ -50,7 +50,7 @@ void _nvm_admin_sq_create(nvm_cmd_t* cmd, const nvm_queue_t* sq, const nvm_queue
 
 void _nvm_admin_sq_delete(nvm_cmd_t* cmd, const nvm_queue_t* sq)
 {
-    nvm_cmd_header(cmd, NVM_ADMIN_DELETE_SUBMISSION_QUEUE, 0);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_DELETE_SUBMISSION_QUEUE, 0);
     cmd->dword[10] = sq->no & 0xffff;
 }
 
@@ -58,7 +58,7 @@ void _nvm_admin_sq_delete(nvm_cmd_t* cmd, const nvm_queue_t* sq)
 
 void _nvm_admin_current_num_queues(nvm_cmd_t* cmd, bool set, uint16_t n_cqs, uint16_t n_sqs)
 {
-    nvm_cmd_header(cmd, set ? NVM_ADMIN_SET_FEATURES : NVM_ADMIN_GET_FEATURES, 0);
+    nvm_cmd_header(cmd, 0, set ? NVM_ADMIN_SET_FEATURES : NVM_ADMIN_GET_FEATURES, 0);
     nvm_cmd_data_ptr(cmd, 0, 0);
 
     cmd->dword[10] = (0x00 << 8) | 0x07;
@@ -69,7 +69,7 @@ void _nvm_admin_current_num_queues(nvm_cmd_t* cmd, bool set, uint16_t n_cqs, uin
 
 void _nvm_admin_identify_ctrl(nvm_cmd_t* cmd, uint64_t ioaddr)
 {
-    nvm_cmd_header(cmd, NVM_ADMIN_IDENTIFY, 0);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_IDENTIFY, 0);
     nvm_cmd_data_ptr(cmd, ioaddr, 0);
 
     cmd->dword[10] = (0 << 16) | 0x01;
@@ -80,7 +80,7 @@ void _nvm_admin_identify_ctrl(nvm_cmd_t* cmd, uint64_t ioaddr)
 
 void _nvm_admin_identify_ns(nvm_cmd_t* cmd, uint32_t ns_id, uint64_t ioaddr)
 {
-    nvm_cmd_header(cmd, NVM_ADMIN_IDENTIFY, ns_id);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_IDENTIFY, ns_id);
     nvm_cmd_data_ptr(cmd, ioaddr, 0);
 
     cmd->dword[10] = (0 << 16) | 0x00;

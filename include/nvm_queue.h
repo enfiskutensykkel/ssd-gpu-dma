@@ -63,9 +63,6 @@ nvm_cmd_t* nvm_sq_enqueue(nvm_queue_t* sq)
         sq->tail = 0;
     }
 
-    // Set command identifier to tail pointer
-    // User may override this by setting the CID manually
-    //*NVM_CMD_CID(cmd) = sq->tail + (!sq->phase) * sq->max_entries;
     return cmd;
 }
 
@@ -99,8 +96,6 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
             cmd = (nvm_cmd_t*) (start + (((unsigned char*) cmd) - end));
         }
     }
-
-    //*NVM_CMD_CID(cmd) = i;
 
     if (i == 0)
     {

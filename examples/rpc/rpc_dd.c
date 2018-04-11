@@ -111,7 +111,7 @@ static void disk_w(const struct disk_info* disk, struct queue_pair* qp, FILE* fp
             break;
         }
 
-        nvm_cmd_header(cmd, NVM_IO_WRITE, disk->ns_id);
+        nvm_cmd_header(cmd, NVM_DEFAULT_CID(&qp->sq), NVM_IO_WRITE, disk->ns_id);
         nvm_cmd_data(cmd, disk->page_size, NVM_PAGE_ALIGN(curr_blks * disk->block_size, disk->page_size),
                     prp_ptr, prp_ioaddr, buf_ioaddrs);
         nvm_cmd_rw_blks(cmd, offset, curr_blks);
@@ -157,7 +157,7 @@ static void disk_w(const struct disk_info* disk, struct queue_pair* qp, FILE* fp
         return;
     }
 
-    nvm_cmd_header(cmd, NVM_IO_FLUSH, disk->ns_id);
+    nvm_cmd_header(cmd, NVM_DEFAULT_CID(&qp->sq), NVM_IO_FLUSH, disk->ns_id);
     nvm_cmd_data_ptr(cmd, 0, 0);
     nvm_sq_submit(&qp->sq);
 }
@@ -181,7 +181,7 @@ static void disk_r(const struct disk_info* disk, struct queue_pair* qp, uint64_t
             usleep(1);
         }
 
-        nvm_cmd_header(cmd, NVM_IO_READ, disk->ns_id);
+        nvm_cmd_header(cmd, NVM_DEFAULT_CID(&qp->sq), NVM_IO_READ, disk->ns_id);
         nvm_cmd_data(cmd, disk->page_size, NVM_PAGE_ALIGN(curr_blks * disk->block_size, disk->page_size),
                     prp_ptr, prp_ioaddr, buf_ioaddrs);
         nvm_cmd_rw_blks(cmd, offset, curr_blks);

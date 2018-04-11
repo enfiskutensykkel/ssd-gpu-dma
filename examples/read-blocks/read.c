@@ -194,7 +194,7 @@ static size_t rw_bytes(const struct disk_info* disk, struct queue_pair* qp, cons
     while (page < chunk_pages)
     {
         num_pages = MIN(buffer->n_ioaddrs - page, num_pages);
-    
+
         nvm_cmd_t* cmd;
         while ((cmd = nvm_sq_enqueue(&qp->sq)) == NULL)
         {
@@ -202,11 +202,11 @@ static size_t rw_bytes(const struct disk_info* disk, struct queue_pair* qp, cons
             usleep(1);
         }
 
-        uint16_t prp_list = (*NVM_CMD_CID(cmd) % qp->sq.max_entries) + 1;
+        uint16_t prp_list = (num_cmds % qp->sq.max_entries) + 1;
         size_t num_blocks = NVM_PAGE_TO_BLOCK(disk->page_size, disk->block_size, num_pages);
         size_t start_block = offset + NVM_PAGE_TO_BLOCK(disk->page_size, disk->block_size, page);
 
-        nvm_cmd_header(cmd, op, disk->ns_id);
+        nvm_cmd_header(cmd, NVM_DEFAULT_CID(&qp->sq), op, disk->ns_id);
 
         page += nvm_cmd_data(cmd, disk->page_size, num_pages, NVM_DMA_OFFSET(qp->sq_mem, prp_list),
                 qp->sq_mem->ioaddrs[prp_list], &buffer->ioaddrs[page]);
@@ -295,15 +295,23 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
                 buffer->n_ioaddrs * disk->page_size, 
                 args->num_blocks * disk->block_size - size_remaining);
 
+        if (!feof(args->input) && !ferror(args->input))
+        {
+            fread(buffer->vaddr, 1, buffer->n_ioaddrs * buffer->page_size, args->input);
+        }
+        else
+        {
+            fprintf(stderr, "WARNING: End of file was reached\n");
+        }
+
         num_cmds += rw_bytes(disk, qp, buffer, &start_block, &size_remaining, NVM_IO_WRITE);
 
         // Flush written data
         nvm_cmd_t* cmd = nvm_sq_enqueue(&qp->sq);
-        nvm_cmd_header(cmd, NVM_IO_FLUSH, disk->ns_id);
+        nvm_cmd_header(cmd, NVM_DEFAULT_CID(&qp->sq), NVM_IO_FLUSH, disk->ns_id);
         nvm_cmd_data_ptr(cmd, 0, 0);
         nvm_sq_submit(&qp->sq);
         ++num_cmds;
-
 
         while (qp->num_cpls < num_cmds)
         {
