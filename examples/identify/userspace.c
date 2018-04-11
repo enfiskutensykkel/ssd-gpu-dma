@@ -377,6 +377,7 @@ static void parse_args(int argc, char** argv, struct bdf* dev, uint32_t* nvm_ns_
     int opt;
     int idx;
     char* endptr = NULL;
+    bool dev_set = false;
     
     *nvm_ns_id = 0;
     memset(dev, 0, sizeof(struct bdf));
@@ -401,6 +402,7 @@ static void parse_args(int argc, char** argv, struct bdf* dev, uint32_t* nvm_ns_
                     give_usage(argv[0]);
                     exit('c');
                 }
+                dev_set = true;
                 break;
 
             case 'n': // namespace identifier
@@ -416,6 +418,13 @@ static void parse_args(int argc, char** argv, struct bdf* dev, uint32_t* nvm_ns_
                 show_help(argv[0]);
                 exit(0);
         }
+    }
+
+    // Check if controller is set
+    if (!dev_set)
+    {
+        fprintf(stderr, "Controller is not specified!\n");
+        exit('c');
     }
 
     // Check if device actually exists
