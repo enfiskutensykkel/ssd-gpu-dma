@@ -21,6 +21,7 @@ static void _nvm_dprintf(const char* func, const char* format, ...)
 #define dprintf(...)            _nvm_dprintf(__func__, __VA_ARGS__)
 
 #define _nvm_strerror(status)   nvm_strerror(status)
+#define _SCIGetErrorString(err) SCIGetErrorString(err)
 
 #endif /* ! NDEBUG */
 
@@ -36,6 +37,7 @@ static void _nvm_dprintf(const char* func, const char* format, ...)
 /* If no debug print, don't lookup completions */
 #ifndef _nvm_strerror
 #define _nvm_strerror(status)
+#define _SCIGetErrorString(err)
 #endif
 
 

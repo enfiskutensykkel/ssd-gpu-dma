@@ -33,7 +33,7 @@ static int create_segment(struct local_memory* m, uint32_t id, size_t size, uint
     SCIOpen(&m->sd, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to open SISCI descriptor: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to open SISCI descriptor: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 
@@ -53,7 +53,7 @@ static int create_segment(struct local_memory* m, uint32_t id, size_t size, uint
             return EEXIST;
 
         default:
-            dprintf("Unknown error while creating local segment: %s\n", SCIGetErrorString(status));
+            dprintf("Unknown error while creating local segment: %s\n", _SCIGetErrorString(status));
             return EIO;
     }
 }
@@ -73,7 +73,7 @@ void _nvm_local_memory_put(struct local_memory* mem)
 #ifndef NDEBUG
     if (err != SCI_ERR_OK)
     {
-        dprintf("Unknown error while removing local segment: %s\n", SCIGetErrorString(err));
+        dprintf("Unknown error while removing local segment: %s\n", _SCIGetErrorString(err));
     }
 #endif
 }
@@ -114,7 +114,7 @@ int _nvm_local_memory_get_attached(struct local_memory* mem, uint32_t id, void* 
     if (err != SCI_ERR_OK)
     {
         _nvm_local_memory_put(mem);
-        dprintf("Failed to attach memory to local segment: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to attach memory to local segment: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 
@@ -162,7 +162,7 @@ int _nvm_local_memory_get_registered(struct local_memory* mem, uint32_t id, void
 
         default:
             _nvm_local_memory_put(mem);
-            dprintf("Unknown error when registering host memory: %s\n", SCIGetErrorString(err));
+            dprintf("Unknown error when registering host memory: %s\n", _SCIGetErrorString(err));
             return EIO;
     }
 

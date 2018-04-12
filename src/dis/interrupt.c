@@ -29,7 +29,7 @@ static sci_callback_action_t interrupt_callback(struct local_intr* interrupt,
 {
     if (status != SCI_ERR_OK)
     {
-        dprintf("Unexpected status in interrupt handler routine: %s\n", SCIGetErrorString(status));
+        dprintf("Unexpected status in interrupt handler routine: %s\n", _SCIGetErrorString(status));
         return SCI_CALLBACK_CANCEL;
     }
 
@@ -55,7 +55,7 @@ int _nvm_local_intr_get(struct local_intr* intr, uint32_t adapter, void* cb_data
 #ifndef NDEBUG
     if (err != SCI_ERR_OK)
     {
-        dprintf("Unexpected error: %s\n", SCIGetErrorString(err));
+        dprintf("Unexpected error: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 #endif
@@ -65,7 +65,7 @@ int _nvm_local_intr_get(struct local_intr* intr, uint32_t adapter, void* cb_data
 #ifndef NDEBUG
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to open SISCI virtual device: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to open SISCI virtual device: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 #endif
@@ -89,7 +89,7 @@ int _nvm_local_intr_get(struct local_intr* intr, uint32_t adapter, void* cb_data
     SCICreateDataInterrupt(intr->sd, &intr->intr, adapter, &intr->intr_no, callback, data, flags, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to create data interrupt: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to create data interrupt: %s\n", _SCIGetErrorString(err));
         SCIClose(intr->sd, 0, &err);
         return ENOSPC;
     }
@@ -130,7 +130,7 @@ int _nvm_local_intr_wait(struct local_intr* intr, void* data, uint16_t maxlen, u
             return ETIMEDOUT;
 
         default:
-            dprintf("Waiting for data interrupt unexpectedly failed: %s\n", SCIGetErrorString(err));
+            dprintf("Waiting for data interrupt unexpectedly failed: %s\n", _SCIGetErrorString(err));
             return EIO;
     }
 }
@@ -145,7 +145,7 @@ int _nvm_remote_intr_get(struct remote_intr* intr, uint32_t adapter, uint32_t no
 #ifndef NDEBUG
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to open SISCI virtual device: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to open SISCI virtual device: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 #endif

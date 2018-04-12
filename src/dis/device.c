@@ -35,14 +35,14 @@ int _nvm_device_get(struct device* dev, uint64_t dev_id)
     SCIOpen(&dev->sd, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to create virtual device: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to create virtual device: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 
     SCIBorrowDevice(dev->sd, &dev->device, dev_id, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to increase device reference: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to increase device reference: %s\n", _SCIGetErrorString(err));
         SCIClose(dev->sd, 0, &err);
         return ENODEV;
     }
@@ -94,7 +94,7 @@ int _nvm_device_memory_get(struct device_memory* mem,
     SCIConnectDeviceMemory(d->sd, &mem->segment, mem->adapter, d->device, segment_no, 0, flags, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to connect to device memory: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to connect to device memory: %s\n", _SCIGetErrorString(err));
         status = ENODEV;
         goto release;
     }
@@ -126,7 +126,7 @@ void _nvm_device_memory_put(struct device_memory* mem)
 #ifndef NDEBUG
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to disconnect from device memory: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to disconnect from device memory: %s\n", _SCIGetErrorString(err));
     }
 #endif
 

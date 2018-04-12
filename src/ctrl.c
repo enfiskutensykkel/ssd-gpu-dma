@@ -506,7 +506,7 @@ int nvm_dis_ctrl_map_p2p_device(const nvm_ctrl_t* ctrl, sci_device_t dev, uint64
     SCIMapRemoteSegmentForDevice(container->ref->bar.segment, dev, &addr, 0, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to map controller BAR for device: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to map controller BAR for device: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 

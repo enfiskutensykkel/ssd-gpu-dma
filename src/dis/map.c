@@ -40,7 +40,7 @@ int _nvm_va_map_local(struct va_map* m, size_t size, sci_local_segment_t segment
             return EINVAL;
 
         default:
-            dprintf("Mapping segment into virtual address space failed: %s\n", SCIGetErrorString(err));
+            dprintf("Mapping segment into virtual address space failed: %s\n", _SCIGetErrorString(err));
             return EIO;
     }
 }
@@ -73,7 +73,7 @@ int _nvm_va_map_remote(struct va_map* m, size_t size, sci_remote_segment_t segme
             return ENOTCONN;
 
         default:
-            dprintf("Mapping segment into virtual address space failed: %s\n", SCIGetErrorString(err));
+            dprintf("Mapping segment into virtual address space failed: %s\n", _SCIGetErrorString(err));
             return EIO;
     }
 }
@@ -109,7 +109,7 @@ void _nvm_va_unmap(struct va_map* m)
 #ifndef NDEBUG
     if (err != SCI_ERR_OK)
     {
-        dprintf("Unmapping segment from virtual address space failed: %s\n", SCIGetErrorString(err));
+        dprintf("Unmapping segment from virtual address space failed: %s\n", _SCIGetErrorString(err));
     }
 #endif
 }
@@ -139,14 +139,14 @@ int _nvm_io_map_local(struct io_map* m, sci_device_t device, sci_local_segment_t
             return EINVAL;
 
         default:
-            dprintf("Failed to set segment available: %s\n", SCIGetErrorString(err));
+            dprintf("Failed to set segment available: %s\n", _SCIGetErrorString(err));
             return EIO;
     }
 
     SCIMapLocalSegmentForDevice(m->lsegment, m->adapter, m->device, &m->ioaddr, 0, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to map segment for device: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to map segment for device: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 
@@ -171,7 +171,7 @@ int _nvm_io_map_remote(struct io_map* m, sci_device_t device, sci_remote_segment
     
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to map segment for device: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to map segment for device: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 
@@ -215,7 +215,7 @@ void _nvm_io_unmap(struct io_map* m)
 #ifndef NDEBUG
     if (err != SCI_ERR_OK)
     {
-        dprintf("Unmapping segment for device failed: %s\n", SCIGetErrorString(err));
+        dprintf("Unmapping segment for device failed: %s\n", _SCIGetErrorString(err));
     }
 #endif
 
@@ -238,7 +238,7 @@ int _nvm_io_map_local_memory(struct io_map* m, const struct device* dev, const s
     SCIPrepareSegment(mem->segment, adapter, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to prepare local segment: %s\n", SCIGetErrorString(err));
+        dprintf("Failed to prepare local segment: %s\n", _SCIGetErrorString(err));
         return ENOSPC;
     }
 
