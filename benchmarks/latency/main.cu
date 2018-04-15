@@ -421,6 +421,7 @@ static void printStats(const QueuePtr& queue, const Times& times, size_t blockSi
     {
         fprintf(stdout, "#%5s; %6s; %4s; %13s; %8s; %8s; %12s; %12s; %12s;\n",
                 "queue", "sqhost", "type", "pattern", "depth", "cmds", "blocks", "lat", "bw");
+        fflush(stdout);
     }
 
     auto pattern = patternString(settings);
@@ -444,6 +445,7 @@ static void printStats(const QueuePtr& queue, const Times& times, size_t blockSi
         fprintf(stdout, " %5x; %6s; %4s; %13s; %8zu; %8u; %12zu; %12.3f; %12.3f;\n",
                 queue->no, local ? "local" : "remote", gpu ? "gpu" : "ram", patternPtr,
                 queue->depth, t.commands, t.blocks, time, bw);
+        fflush(stdout);
     }
 }
 

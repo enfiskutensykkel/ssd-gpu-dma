@@ -376,6 +376,7 @@ static void printStatistics(const Settings& settings, const cudaDeviceProp& prop
 
     fprintf(stdout, "#%9s; %12s; %12s; %12s; %12s; %12s; %12s;\n",
             "size", "disk_lat", "disk_bw", "mem_lat", "mem_bw", "cum_lat", "cum_bw");
+    fflush(stdout);
     for (size_t i = 0; i < numChunks; ++i)
     {
         const auto& t = times[i];
@@ -389,6 +390,7 @@ static void printStatistics(const Settings& settings, const cudaDeviceProp& prop
 
         fprintf(stdout, "%10zu; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f;\n", 
                 t.size, diskTime, diskBw, moveTime, moveBw, totalTime, totalBw);
+        fflush(stdout);
     }
 }
 
