@@ -87,8 +87,9 @@ static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList
     for (uint16_t no = 1; no <= ctrl.numQueues; ++no)
     {
 #ifdef __DIS_CLUSTER__
-        auto queue = make_shared<Queue>(ctrl, settings.adapter, settings.segmentId++, 
+        auto queue = make_shared<Queue>(ctrl, settings.adapter, settings.segmentId, 
                 no, settings.queueDepth, settings.cudaDevice, settings.queueLocation);
+        settings.segmentId += 2;
 #else
         auto queue = make_shared<Queue>(ctrl, no, settings.queueDepth);
 #endif
@@ -568,6 +569,16 @@ int main(int argc, char** argv)
 {
     Settings settings;
 
+#ifdef __DIS_CLUSTER__
+    sci_error_t err;
+    SCIInitialize(0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        fprintf(stderr, "Something went wrong: %s\n", SCIGetErrorString(err));
+        return 1;
+    }
+#endif
+
     // Parse command line arguments
     try
     {
@@ -580,14 +591,6 @@ int main(int argc, char** argv)
     }
 
 #ifdef __DIS_CLUSTER__
-    sci_error_t err;
-    SCIInitialize(0, &err);
-    if (err != SCI_ERR_OK)
-    {
-        fprintf(stderr, "Something went wrong: %s\n", SCIGetErrorString(err));
-        return 1;
-    }
-
     sci_desc_t sd;
     SCIOpen(&sd, 0, &err);
     if (err != SCI_ERR_OK)

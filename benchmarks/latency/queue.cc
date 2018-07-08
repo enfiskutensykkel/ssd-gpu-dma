@@ -58,7 +58,7 @@ Queue::Queue(const Controller& ctrl, uint32_t adapter, uint32_t segmentId, uint1
             cqPtr = cq_mem->vaddr;
             cqAddr = cq_mem->ioaddrs[0];
 
-            sq_mem = createDeviceDmaMapped(ctrl.ctrl, ctrl.ctrl->page_size, dev, adapter, segmentId);
+            sq_mem = createDeviceDmaMapped(ctrl.ctrl, ctrl.ctrl->page_size, dev, adapter, segmentId + 1);
             sqPtr = sq_mem->vaddr;
             sqAddr = sq_mem->ioaddrs[0];
             break;

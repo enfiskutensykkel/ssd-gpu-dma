@@ -233,9 +233,6 @@ static void setBDF(Settings& settings)
 
 static int lookupCudaDevice(uint64_t fdid)
 {
-    std::stringstream ss;
-
-#if 0
     sci_query_dev_t query;
     sci_dev_info_t info;
 
@@ -244,25 +241,33 @@ static int lookupCudaDevice(uint64_t fdid)
     query.data = (void*) &info;
 
     sci_error_t err;
-    SCIQuery(SCI_Q_DEVICE, (void*) &query, 0, &error);
+    SCIQuery(SCI_Q_DEVICE, (void*) &query, 0, &err);
     if (err != SCI_ERR_OK)
     {
         throw string("Failed to query device: ") + SCIGetErrorString(err);
     }
 
-    ss << std::hex << ((info.bdf >> 8) & 0xff);
-    ss << ":" << std::hex << ((info.bdf >> 3) & 0x1f);
-    ss << "." << std::hex << (info.bdf & 0x7);
-#endif
+    int domain = 0; // FIXME: Implement this
+    int bus = (info.bdf >> 8) & 0xff;
+    int dev = (info.bdf >> 3) & 0x1f;
 
-    int device = -1;
-    auto error = cudaDeviceGetByPCIBusId(&device, ss.str().c_str());
-    if (error != cudaSuccess)
+    for (int device = 0, max = maxCudaDevice(); device < max; ++device)
     {
-        throw string("Failed to find CUDA device with specified fdid: ") + cudaGetErrorString(error);
+        cudaDeviceProp props;
+
+        auto err = cudaGetDeviceProperties(&props, device);
+        if (err != cudaSuccess)
+        {
+            throw string("Failed to get device properties: ") + cudaGetErrorString(err);
+        }
+
+        if (domain == props.pciDomainID && bus == props.pciBusID && dev == props.pciDeviceID)
+        {
+            return device;
+        }
     }
 
-    return device;
+    throw string("Failed to find CUDA device by fdid");
 }
 
 
