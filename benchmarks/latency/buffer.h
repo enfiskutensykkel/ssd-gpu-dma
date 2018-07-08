@@ -25,6 +25,10 @@ DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint
 
 
 
+DmaPtr createDeviceDmaMapped(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t adapter, uint32_t id);
+
+
+
 DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice);
 
 

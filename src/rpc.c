@@ -504,10 +504,10 @@ void nvm_rpc_unbind(nvm_aq_ref ref)
 {
     if (ref != NULL)
     {
-        if (ref->stub != (rpc_stub_t) execute_command)
-        {
+        //if (ref->stub != (rpc_stub_t) execute_command)
+        //{
             _nvm_ref_put(ref);
-        }
+        //}
     }
 }
 

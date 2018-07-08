@@ -17,7 +17,12 @@ struct Controller
     uint16_t                numQueues;
 
 #ifdef __DIS_CLUSTER__
-    Controller(uint64_t controllerId, uint32_t adapter, uint32_t segmentId, uint32_t nvmNamespace, uint16_t numQueues);
+    Controller(uint64_t controllerId, 
+               uint32_t adapter, 
+               uint32_t segmentId, 
+               uint32_t nvmNamespace, 
+               uint16_t numQueues, 
+               bool manager);
 #endif
 
     Controller(const char* path, uint32_t nvmNamespace, uint16_t numQueues);

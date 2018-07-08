@@ -13,8 +13,25 @@
 #include <cstring>
 #include "buffer.h"
 
+#ifdef __DIS_CLUSTER__
+#include <sisci_api.h>
+#endif
+
 using error = std::runtime_error;
 using std::string;
+
+
+#ifdef __DIS_CLUSTER__
+struct SegmentHolder
+{
+    void*               handle;
+    sci_desc_t          descriptor;
+    sci_local_segment_t segment;
+};
+
+
+typedef std::shared_ptr<SegmentHolder> SegmentPtr;
+#endif
 
 
 
@@ -74,6 +91,82 @@ static void* lookupDevicePointer(void* pointer)
 
     return attrs.devicePointer;
 }
+
+
+
+#ifdef __DIS_CLUSTER__
+static void unmapAndRemoveDeviceMemory(SegmentHolder* s)
+{
+    sci_error_t err;
+
+    do
+    {
+        SCIRemoveSegment(s->segment, 0, &err);
+    }
+    while (err == SCI_ERR_BUSY);
+
+    SCIClose(s->descriptor, 0, &err);
+    cudaFree(s->handle);
+    delete s;
+}
+#endif
+
+
+
+#ifdef __DIS_CLUSTER__
+static SegmentPtr allocateDeviceMemoryAndMap(size_t size, int device, uint32_t id)
+{
+    void* buffer = allocateDeviceMemory(size, device);
+    
+    void* devicePointer = lookupDevicePointer(buffer);
+    if (devicePointer == nullptr)
+    {
+        cudaFree(buffer);
+        throw error("Failed to look up device pointer");
+    }
+
+    SegmentHolder* s = new (std::nothrow) SegmentHolder;
+    if (s == nullptr)
+    {
+        cudaFree(buffer);
+        throw error("Failed to allocate segment holder");
+    }
+
+    s->handle = buffer;
+
+    sci_error_t err;
+    SCIOpen(&s->descriptor, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        cudaFree(buffer);
+        delete s;
+        throw error("Failed to open SISCI descriptor: " + string(SCIGetErrorString(err)));
+    }
+    
+    SCICreateSegment(s->descriptor, &s->segment, id, size, nullptr, nullptr, SCI_FLAG_EMPTY, &err);
+    if (err != SCI_ERR_OK)
+    {
+        auto fail = err;
+        SCIClose(s->descriptor, 0, &err);
+        cudaFree(buffer);
+        delete s;
+        throw error("Failed to create segment: " + string(SCIGetErrorString(fail)));
+    }
+
+    SCIAttachPhysicalMemory(0, devicePointer, 0, size, s->segment, SCI_FLAG_CUDA_BUFFER, &err);
+    if (err != SCI_ERR_OK)
+    {
+        auto fail = err;
+        SCIRemoveSegment(s->segment, 0, &err);
+        SCIClose(s->descriptor, 0, &err);
+        cudaFree(buffer);
+        delete s;
+        throw error("Failed to create segment: " + string(SCIGetErrorString(fail)));
+    }
+
+    return SegmentPtr(s, unmapAndRemoveDeviceMemory);
+}
+#endif
 
 
 
@@ -228,3 +321,44 @@ DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, size_t size, int device, uint32_t
 }
 #endif
 
+
+
+#ifdef __DIS_CLUSTER__
+DmaPtr createDeviceDmaMapped(const nvm_ctrl_t* ctrl, size_t size, int device, uint32_t adapter, uint32_t id)
+{
+    SegmentPtr segment = allocateDeviceMemoryAndMap(size, device, id);
+
+    sci_error_t err;
+    SCIPrepareSegment(segment->segment, adapter, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        throw error("Failed to prepare segment on adapter: " + string(SCIGetErrorString(err)));
+    }
+
+    SCISetSegmentAvailable(segment->segment, adapter, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        throw error("Failed to set segment avaialable: " + string(SCIGetErrorString(err)));
+    }
+
+    nvm_dma_t* dma = nullptr;
+    int status = nvm_dis_dma_map_local(&dma, ctrl, adapter, segment->segment, true);
+    if (!nvm_ok(status))
+    {
+        throw error("Failed to map device memory segment for device: " + string(nvm_strerror(status)));
+    }
+
+    return DmaPtr(dma, [segment, adapter](nvm_dma_t* dma) mutable {
+        nvm_dma_unmap(dma);
+
+        sci_error_t err;
+        do
+        {
+            SCISetSegmentUnavailable(segment->segment, adapter, 0, &err);
+        }
+        while (err == SCI_ERR_BUSY);
+
+        segment.reset();
+    });
+}
+#endif

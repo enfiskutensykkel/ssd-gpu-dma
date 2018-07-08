@@ -53,7 +53,12 @@ static const struct option options[] = {
     { .name = "queue-length", .has_arg = required_argument, .flag = nullptr, .val = 'd' },
     { .name = "depth", .has_arg = required_argument, .flag = nullptr, .val = 'd' },
 #ifdef __DIS_CLUSTER__
-    { .name = "local-sq", .has_arg = no_argument, .flag = nullptr, .val = 2 },
+    { .name = "queue-location", .has_arg = required_argument, .flag = nullptr, .val = 'l' },
+    { .name = "location", .has_arg = required_argument, .flag = nullptr, .val = 'l' },
+    { .name = "qloc", .has_arg = required_argument, .flag = nullptr, .val = 'l' },
+    { .name = "ql", .has_arg = required_argument, .flag = nullptr, .val = 'l' },
+    { .name = "manager", .has_arg = no_argument, .flag = nullptr, .val = 'm' },
+    { .name = "mngr", .has_arg = no_argument, .flag = nullptr, .val = 'm' },
 #endif
     { .name = "bandwidth", .has_arg = no_argument, .flag = nullptr, .val = 'B' },
     { .name = "bw", .has_arg = no_argument, .flag = nullptr, .val = 'B' },
@@ -128,10 +133,11 @@ static string helpString(const char* name)
     argInfo(s, "output", "path", "output to file");
     argInfo(s, "write", "write instead of read (WARNING! Will destroy data on disk)");
 #ifdef __DIS_CLUSTER__
-    argInfo(s, "local-sq", "host submission queue and PRP lists in local memory");
+    argInfo(s, "location", "What kind of memory to host submission queues and PRP lists (default is remote)");
 #endif
     argInfo(s, "stats", "print latency statistics to stdout");
     argInfo(s, "pattern", "mode", "specify access pattern (default is sequential)");
+    argInfo(s, "manager", "take ownership of admin queues and reset controller");
 
     s << std::endl;
     s << "Access patterns:" << std::endl;
@@ -140,6 +146,10 @@ static string helpString(const char* name)
     modeInfo(s, "random-offset", "sequential access pattern, queues start at a random offset");
     modeInfo(s, "chunk", "each read starts at a random offset");
     modeInfo(s, "page", " each read starts at a random offset");
+
+    s << std::endl;
+    s << "Queue locations:" << std::endl;
+    modeInfo(s, "local", "overlapping sequential access pattern, queues access same blocks");
 
     return s.str();
 }
@@ -172,6 +182,25 @@ static AccessPattern parsePattern(const string& s)
 }
 
 
+static QueueLocation parseLocation(const string& s)
+{
+    if (s == "local")
+    {
+        return QueueLocation::LOCAL;
+    }
+    else if (s == "remote")
+    {
+        return QueueLocation::REMOTE;
+    }
+    else if (s == "gpu" || s == "dev" || s == "device")
+    {
+        return QueueLocation::GPU;
+    }
+
+    throw string("Invalid queue location: " + s);
+}
+
+
 static int maxCudaDevice()
 {
     int deviceCount = 0;
@@ -200,6 +229,42 @@ static void setBDF(Settings& settings)
 
     settings.cudaDeviceName = props.name;
 }
+
+
+static int lookupCudaDevice(uint64_t fdid)
+{
+    std::stringstream ss;
+
+#if 0
+    sci_query_dev_t query;
+    sci_dev_info_t info;
+
+    query.global_devid = fdid;
+    query.subcommand = SCI_Q_DEVICE_INFO;
+    query.data = (void*) &info;
+
+    sci_error_t err;
+    SCIQuery(SCI_Q_DEVICE, (void*) &query, 0, &error);
+    if (err != SCI_ERR_OK)
+    {
+        throw string("Failed to query device: ") + SCIGetErrorString(err);
+    }
+
+    ss << std::hex << ((info.bdf >> 8) & 0xff);
+    ss << ":" << std::hex << ((info.bdf >> 3) & 0x1f);
+    ss << "." << std::hex << (info.bdf & 0x7);
+#endif
+
+    int device = -1;
+    auto error = cudaDeviceGetByPCIBusId(&device, ss.str().c_str());
+    if (error != cudaSuccess)
+    {
+        throw string("Failed to find CUDA device with specified fdid: ") + cudaGetErrorString(error);
+    }
+
+    return device;
+}
+
 
 string Settings::getDeviceBDF() const
 {
@@ -234,11 +299,12 @@ Settings::Settings()
     pattern = SEQUENTIAL;
     filename = nullptr;
     write = false;
-    remote = true;
     stats = false;
     domain = 0;
     bus = 0;
     devfn = 0;
+    queueLocation = QueueLocation::REMOTE;
+    manager = false;
 }
 
 
@@ -269,7 +335,7 @@ void Settings::parseArguments(int argc, char** argv)
     int option;
 
 #ifdef __DIS_CLUSTER__
-    const char* optstr = ":hc:g:i:a:n:o:q:d:w:r:O:p:sBf:";
+    const char* optstr = ":hc:g:i:a:n:o:q:d:w:r:O:p:sBf:ml:";
 #else
     const char* optstr = ":hc:g:i:n:o:q:d:w:r:O:p:s";
 #endif
@@ -288,9 +354,17 @@ void Settings::parseArguments(int argc, char** argv)
                 write = true;
                 break;
 
-            case 2:
-                remote = false;
+#ifdef __DIS_CLUSTER__
+            case 'm':
+                manager = true;
                 break;
+#endif
+
+#ifdef __DIS_CLUSTER__
+            case 'l':
+                queueLocation = parseLocation(optarg);
+                break;
+#endif
 
             case 'h':
                 throw helpString(argv[0]);
@@ -305,7 +379,13 @@ void Settings::parseArguments(int argc, char** argv)
 
 #ifdef __DIS_CLUSTER__
             case 'f':
+                if (cudaDevice != -1)
+                {
+                    throw string("CUDA device already set, either use -f or -g, not both");
+                }
+
                 cudaDeviceId = (uint64_t) parseNumber(optarg, 16);
+                cudaDevice = lookupCudaDevice(cudaDeviceId);
                 break;
 #endif
 
@@ -320,8 +400,14 @@ void Settings::parseArguments(int argc, char** argv)
 #endif
 
             case 'g':
+                if (cudaDeviceId != 0)
+                {
+                    throw string("CUDA device fdid already set, either use -f or -g, not both");
+                }
+
                 if (optarg != nullptr)
                 {
+                    cudaDeviceId = 0;
                     cudaDevice = (int) parseNumber(optarg, 10);
                     if (cudaDevice < 0 || cudaDevice >= maxCudaDevice())
                     {
@@ -331,6 +417,7 @@ void Settings::parseArguments(int argc, char** argv)
                 else
                 {
                     cudaDevice = -1;
+                    cudaDeviceId = 0;
                 }
                 break;
 

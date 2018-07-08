@@ -9,6 +9,7 @@
 #include "transfer.h"
 #include "buffer.h"
 #include "ctrl.h"
+#include "settings.h"
 
 
 struct Queue
@@ -23,7 +24,13 @@ struct Queue
     TransferList            transfers;
 
 #ifdef __DIS_CLUSTER__
-    Queue(const Controller& ctrl, uint32_t adapter, uint32_t segmentId, uint16_t no, size_t depth, bool remote);
+    Queue(const Controller& ctrl, 
+          uint32_t adapter, 
+          uint32_t segmentId, 
+          uint16_t no, 
+          size_t depth, 
+          int device,
+          QueueLocation loc);
 #endif
 
     Queue(const Controller& ctrl, uint16_t no, size_t depth);

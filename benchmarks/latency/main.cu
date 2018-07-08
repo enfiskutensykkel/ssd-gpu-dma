@@ -57,6 +57,22 @@ static string patternString(const Settings& settings)
 }
 
 
+static string queueType(const Settings& settings)
+{
+    switch (settings.queueLocation)
+    {
+        case QueueLocation::REMOTE:
+            return "remote";
+
+        case QueueLocation::LOCAL:
+            return "local";
+
+        case QueueLocation::GPU:
+            return "gpu";
+    }
+
+    throw runtime_error("Unknown queue location");
+}
 
 static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList& queues)
 {
@@ -71,7 +87,8 @@ static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList
     for (uint16_t no = 1; no <= ctrl.numQueues; ++no)
     {
 #ifdef __DIS_CLUSTER__
-        auto queue = make_shared<Queue>(ctrl, settings.adapter, settings.segmentId++, no, settings.queueDepth, settings.remote);
+        auto queue = make_shared<Queue>(ctrl, settings.adapter, settings.segmentId++, 
+                no, settings.queueDepth, settings.cudaDevice, settings.queueLocation);
 #else
         auto queue = make_shared<Queue>(ctrl, no, settings.queueDepth);
 #endif
@@ -116,7 +133,7 @@ static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList
         }
 
         fprintf(stderr, "Queue #%02u %s %zu commands\n",
-                no, settings.remote ? "remote" : "local", queue->transfers.size());
+                no, queueType(settings).c_str(), queue->transfers.size());
 
         queues.push_back(queue);
     }
@@ -427,12 +444,6 @@ static void printStats(const QueuePtr& queue, const Times& times, size_t blockSi
     auto pattern = patternString(settings);
     auto patternPtr = pattern.c_str();
 
-#ifdef __DIS_CLUSTER__
-    bool local = !settings.remote;
-#else
-    bool local = true;
-#endif
-
     bool gpu = settings.cudaDevice != -1;
 
     for (const auto& t: times)
@@ -443,7 +454,7 @@ static void printStats(const QueuePtr& queue, const Times& times, size_t blockSi
         double bw = (blocks * blockSize) / time;
 
         fprintf(stdout, " %5x; %6s; %4s; %13s; %8zu; %8u; %12zu; %12.3f; %12.3f;\n",
-                queue->no, local ? "local" : "remote", gpu ? "gpu" : "ram", patternPtr,
+                queue->no, queueType(settings).c_str(), gpu ? "gpu" : "ram", patternPtr,
                 queue->depth, t.commands, t.blocks, time, bw);
         fflush(stdout);
     }
@@ -601,7 +612,7 @@ int main(int argc, char** argv)
     {
         fprintf(stderr, "Resetting controller...\n");
 #ifdef __DIS_CLUSTER__
-        Controller ctrl(settings.controllerId, settings.adapter, settings.segmentId++, settings.nvmNamespace, settings.numQueues);
+        Controller ctrl(settings.controllerId, settings.adapter, settings.segmentId++, settings.nvmNamespace, settings.numQueues, settings.manager);
 #else
         Controller ctrl(settings.controllerPath, settings.nvmNamespace, settings.numQueues);
 #endif

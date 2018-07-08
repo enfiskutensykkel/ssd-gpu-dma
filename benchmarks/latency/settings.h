@@ -16,6 +16,14 @@ enum AccessPattern : int
 };
 
 
+enum QueueLocation : int
+{
+    REMOTE,
+    LOCAL,
+    GPU
+};
+
+
 constexpr bool isRandom(AccessPattern p)
 {
     return p == AccessPattern::LINEAR || p == AccessPattern::SEQUENTIAL;
@@ -42,11 +50,12 @@ struct Settings
     const char*     filename;
     bool            write;
     bool            stats;
-    bool            remote;
     uint32_t        domain;
     uint32_t        bus;
     uint32_t        devfn;
     std::string     cudaDeviceName;
+    QueueLocation   queueLocation;
+    bool            manager;
 
     Settings();
     void parseArguments(int argc, char** argv);
