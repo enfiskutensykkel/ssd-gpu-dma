@@ -175,7 +175,7 @@ static AccessPattern parsePattern(const string& s)
     }
     else if (s == "page")
     {
-        return AccessPattern::RANDOM_CHUNK;
+        return AccessPattern::RANDOM_PAGE;
     }
 
     throw string("Invalid access pattern: " + s);
@@ -520,6 +520,16 @@ void Settings::parseArguments(int argc, char** argv)
     if (cudaDevice != -1)
     {
         setBDF(*this);
+    }
+
+    if (cudaDevice == -1 && cudaDeviceId != 0)
+    {
+        throw string("Invalid state");
+    }
+    
+    if (cudaDeviceId == 0 && queueLocation == QueueLocation::GPU)
+    {
+        throw string("Queue location can not be GPU without a CUDA device fdid specified");
     }
 }
 

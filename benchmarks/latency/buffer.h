@@ -13,6 +13,10 @@ typedef std::shared_ptr<void> MemPtr;
 
 
 
+void* lookupDevicePointer(MemPtr ptr);
+
+
+
 DmaPtr createHostDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t adapter, uint32_t id);
 
 
@@ -22,10 +26,6 @@ DmaPtr createHostDma(const nvm_ctrl_t* ctrl, size_t size);
 
 
 DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t adapter, uint32_t id);
-
-
-
-DmaPtr createDeviceDmaMapped(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t adapter, uint32_t id);
 
 
 

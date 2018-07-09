@@ -1,6 +1,7 @@
 #include "queue.h"
 #include "buffer.h"
 #include "ctrl.h"
+#include "map.h"
 #include <nvm_admin.h>
 #include <nvm_types.h>
 #include <nvm_util.h>
@@ -20,31 +21,33 @@ using error = std::runtime_error;
 
 
 #ifdef __DIS_CLUSTER__
-Queue::Queue(const Controller& ctrl, uint32_t adapter, uint32_t segmentId, uint16_t no, size_t depth, int dev, QueueLocation location)
+Queue::Queue(const Controller& ctrl, uint16_t no, Settings& settings)
     : no(no)
-    , depth(std::min(depth, ctrl.ctrl->page_size / sizeof(nvm_cmd_t)))
+    , depth(std::min(settings.queueDepth, ctrl.ctrl->page_size / sizeof(nvm_cmd_t)))
 {
     void* sqPtr = nullptr;
     void* cqPtr = nullptr;
     uint64_t sqAddr = 0;
     uint64_t cqAddr = 0;
+    MemPtr memory;
+    SegPtr segment;
 
-    switch (location)
+    switch (settings.queueLocation)
     {
         case QueueLocation::REMOTE:
             // Allocate submission queue and PRP lists in RAM closest to disk
-            cq_mem = createHostDma(ctrl.ctrl, ctrl.ctrl->page_size, adapter, segmentId);
+            cq_mem = createHostDma(ctrl.ctrl, ctrl.ctrl->page_size, settings.adapter, settings.segmentId++);
             cqPtr = cq_mem->vaddr;
             cqAddr = cq_mem->ioaddrs[0];
 
-            sq_mem = createRemoteDma(ctrl.ctrl, ctrl.ctrl->page_size * (this->depth + 1), adapter, no);
+            sq_mem = createRemoteDma(ctrl.ctrl, ctrl.ctrl->page_size * (this->depth + 1), settings.adapter, no);
             sqPtr = sq_mem->vaddr;
             sqAddr = sq_mem->ioaddrs[0];
             break;
 
         case QueueLocation::LOCAL:
             // Allocate submission queue and PRP lists in local RAM
-            sq_mem = createHostDma(ctrl.ctrl, ctrl.ctrl->page_size * (this->depth + 2), adapter, segmentId);
+            sq_mem = createHostDma(ctrl.ctrl, ctrl.ctrl->page_size * (this->depth + 2), settings.adapter, settings.segmentId++);
             sqPtr = sq_mem->vaddr;
             sqAddr = sq_mem->ioaddrs[0];
 
@@ -54,11 +57,14 @@ Queue::Queue(const Controller& ctrl, uint32_t adapter, uint32_t segmentId, uint1
 
         case QueueLocation::GPU:
             // Allocate submission queue and PRP lists in GPU memory
-            cq_mem = createHostDma(ctrl.ctrl, ctrl.ctrl->page_size, adapter, segmentId);
+            cq_mem = createHostDma(ctrl.ctrl, ctrl.ctrl->page_size, settings.adapter, settings.segmentId++);
             cqPtr = cq_mem->vaddr;
             cqAddr = cq_mem->ioaddrs[0];
 
-            sq_mem = createDeviceDmaMapped(ctrl.ctrl, ctrl.ctrl->page_size, dev, adapter, segmentId + 1);
+            memory = createDeviceMemory(ctrl.ctrl->page_size * (this->depth + 1), settings.cudaDevice);
+            segment = createGpuMapping(memory, ctrl.ctrl->page_size * (this->depth + 1), settings.cudaDeviceId, 0, settings.segmentId++);
+
+            sq_mem = createDeviceDma(ctrl.ctrl, settings.adapter, segment);
             sqPtr = sq_mem->vaddr;
             sqAddr = sq_mem->ioaddrs[0];
             break;

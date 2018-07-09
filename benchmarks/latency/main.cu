@@ -87,9 +87,7 @@ static size_t createQueues(const Controller& ctrl, Settings& settings, QueueList
     for (uint16_t no = 1; no <= ctrl.numQueues; ++no)
     {
 #ifdef __DIS_CLUSTER__
-        auto queue = make_shared<Queue>(ctrl, settings.adapter, settings.segmentId, 
-                no, settings.queueDepth, settings.cudaDevice, settings.queueLocation);
-        settings.segmentId += 2;
+        auto queue = make_shared<Queue>(ctrl, no, settings);
 #else
         auto queue = make_shared<Queue>(ctrl, no, settings.queueDepth);
 #endif
@@ -646,6 +644,8 @@ int main(int argc, char** argv)
             fprintf(stderr, "Writing to file...\n");
             outputFile(ctrl, queues, buffer, settings);
         }
+
+        // TODO: iterate queues and delete them if not settings.manager
     }
     catch (const runtime_error& e)
     {

@@ -160,6 +160,8 @@ int _nvm_io_map_remote(struct io_map* m, sci_device_t device, sci_remote_segment
 {
     sci_error_t err = SCI_ERR_OK;
 
+    dprintf("1\n");
+
     m->type = _IO_MAP_NOT_MAPPED;
     m->lsegment = NULL;
     m->rsegment = segment;
@@ -167,7 +169,9 @@ int _nvm_io_map_remote(struct io_map* m, sci_device_t device, sci_remote_segment
     m->adapter = 0;
     m->ioaddr = 0;
 
+    dprintf("2\n");
     SCIMapRemoteSegmentForDevice(m->rsegment, m->device, &m->ioaddr, 0, 0, &err);
+    dprintf("3\n");
     
     if (err != SCI_ERR_OK)
     {

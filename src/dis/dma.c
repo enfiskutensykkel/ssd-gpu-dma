@@ -189,6 +189,8 @@ int nvm_dis_dma_map_remote(nvm_dma_t** handle,
         return err;
     }
 
+    dprintf("1\n");
+
     // Set up device-local mapping
     err = _nvm_io_map_remote(&md->io_mapping, md->device.device, segment);
     if (err != 0)
@@ -196,6 +198,8 @@ int nvm_dis_dma_map_remote(nvm_dma_t** handle,
         remove_map_descriptor(md);
         return err;
     }
+
+    dprintf("2\n");
 
     // Map into local address space
     if (map_va)
@@ -209,6 +213,8 @@ int nvm_dis_dma_map_remote(nvm_dma_t** handle,
 
         md->dma_mapping.vaddr = (void*) md->va_mapping.vaddr;
     }
+
+    dprintf("3\n");
 
     // Create handle container
     err = _nvm_dma_create(handle, ctrl, (struct dma_map*) md, (dma_map_free_t) remove_map_descriptor);

@@ -24,13 +24,7 @@ struct Queue
     TransferList            transfers;
 
 #ifdef __DIS_CLUSTER__
-    Queue(const Controller& ctrl, 
-          uint32_t adapter, 
-          uint32_t segmentId, 
-          uint16_t no, 
-          size_t depth, 
-          int device,
-          QueueLocation loc);
+    Queue(const Controller& ctrl, uint16_t no, Settings& settings);
 #endif
 
     Queue(const Controller& ctrl, uint16_t no, size_t depth);
