@@ -6,8 +6,15 @@ find_package (Threads REQUIRED)
 
 find_package (CUDA 8.0 REQUIRED)
 
-make_sisci_benchmark (latency-benchmark-smartio latency-bench "main.cu;settings.cu;buffer.cu;ctrl.cc;queue.cc;barrier.cc;transfer.cc;map.cc")
+# CUDA targets doesn't support target_include_directories
+#include_directories ("${CMAKE_CURRENT_SOURCE_DIR}/include" )
+include_directories ("include")
 
-make_benchmark (latency-benchmark-module latency-bench "main.cu;settings.cu;buffer.cu;ctrl.cc;queue.cc;barrier.cc;transfer.cc")
+file (GLOB module_files "src/*.cu" "src/*.cc")
+file (GLOB smartio_files "src/*.cu" "src/*.cc" "smartio/*.cu" "smartio/*.cc")
+
+make_benchmark (latency-benchmark-module latency-bench "${module_files}")
+
+make_sisci_benchmark (latency-benchmark-smartio latency-bench "${smartio_files}")
 
 make_benchmark_choice (latency-benchmark latency-benchmark-smartio latency-benchmark-module)

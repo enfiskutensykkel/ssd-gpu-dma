@@ -28,7 +28,7 @@ extern "C" {
 
 /* Extract value from status field from NVM completion */
 #define NVM_ERR_STATUS(cpl)         \
-    ((int) ( (cpl) != NULL ? -(NVM_ERR_SCT(cpl) << 8 | NVM_ERR_SC(cpl)) : 0 ))
+    ((int) ( (cpl) != NULL ? -((NVM_ERR_SCT(cpl) << 8) | NVM_ERR_SC(cpl)) : 0 ))
 
 
 

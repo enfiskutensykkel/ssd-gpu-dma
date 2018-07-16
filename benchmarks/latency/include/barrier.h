@@ -1,5 +1,5 @@
-#ifndef __BARRIER_H__
-#define __BARRIER_H__
+#ifndef __LATENCY_BENCHMARK_BARRIER_H__
+#define __LATENCY_BENCHMARK_BARRIER_H__
 
 
 #include <mutex>

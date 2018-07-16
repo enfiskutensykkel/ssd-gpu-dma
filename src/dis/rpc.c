@@ -313,7 +313,7 @@ static int try_bind(struct binding* binding, size_t max)
     }
 
     _nvm_va_unmap(&mapping);
-    dprintf("Failed to connect to remote interrupt\n");
+    //dprintf("Failed to connect to remote interrupt\n");
     return ECONNREFUSED;
 }
 
