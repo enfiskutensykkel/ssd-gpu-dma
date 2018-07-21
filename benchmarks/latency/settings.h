@@ -26,7 +26,7 @@ enum QueueLocation : int
 
 constexpr bool isRandom(AccessPattern p)
 {
-    return p == AccessPattern::LINEAR || p == AccessPattern::SEQUENTIAL;
+    return p != AccessPattern::LINEAR && p != AccessPattern::SEQUENTIAL;
 }
 
 

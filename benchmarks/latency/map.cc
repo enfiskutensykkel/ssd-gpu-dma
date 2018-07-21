@@ -99,6 +99,7 @@ static void releaseSegment(Segment* segment)
 
 SegPtr createGpuMapping(MemPtr gpuBuffer, size_t size, uint64_t gpuDeviceId, uint32_t adapter, uint32_t segmentId)
 {
+    size = NVM_PAGE_ALIGN(size, 0x10000);
     sci_error_t err;
     string errStr;
     Segment* segment = new Segment;
@@ -200,8 +201,9 @@ freeSegment:
 DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, uint32_t adapter, SegPtr segment)
 {
     sci_error_t err;
+    sci_error_t err2;
 
-    SCIPrepareSegment(segment->localHandle, adapter, 0, &err);
+    SCIPrepareSegment(segment->localHandle, adapter, 0, &err2);
     /* ignore error */
 
     SCISetSegmentAvailable(segment->localHandle, adapter, 0, &err);
