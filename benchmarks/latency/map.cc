@@ -222,11 +222,6 @@ DmaPtr createDeviceDma(const nvm_ctrl_t* ctrl, uint32_t adapter, SegPtr segment)
 
     dma->vaddr = (void*) (((unsigned char*) segment->addr) + segment->offset);
 
-    for (size_t i = 0; i < dma->n_ioaddrs; ++i)
-    {
-        dma->ioaddrs[i] += segment->offset;
-    }
-
     return DmaPtr(dma, [segment, adapter](nvm_dma_t* dma) mutable {
         sci_error_t err;
         nvm_dma_unmap(dma);
