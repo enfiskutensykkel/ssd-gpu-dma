@@ -511,11 +511,11 @@ int main(int argc, char** argv)
         // Show some statistics
         if (settings.stats)
         {
-            printStatistics(readTimes, writeTimes, transfers, settings);
+            printStatistics(ctrl, readTimes, writeTimes, transfers, settings);
         }
 
-        printPercentiles(writeTimes, queues, settings.latency, true);
-        printPercentiles(readTimes, queues, settings.latency, false);
+        calculatePercentiles(ctrl, writeTimes, true);
+        calculatePercentiles(ctrl, readTimes, false);
     }
     catch (const logic_error& e)
     {

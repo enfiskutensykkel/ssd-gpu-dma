@@ -39,14 +39,23 @@ struct Event
      */
     double estimateIops() const
     {
-        return 1e6 / averageUsecs();
+        return 1e6 / averageLatencyPerCommand();
+    }
+
+
+    /*
+     * Calculate average number of microseconds per block.
+     */
+    double averageLatencyPerBlock() const
+    {
+        return time.count() / blocks;
     }
 
 
     /*
      * Calculate average number of microseconds per command.
      */
-    double averageUsecs() const
+    double averageLatencyPerCommand() const
     {
         return (time.count() / commands);
     }

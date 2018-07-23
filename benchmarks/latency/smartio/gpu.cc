@@ -293,7 +293,7 @@ DmaPtr Gpu::allocateBufferAndMap(const Ctrl& ctrl, size_t size, uint32_t segment
     }
 
     segment->size = SCIGetRemoteSegmentSize(segment->bar);
-    mappedPointer = SCIMapRemoteSegment(segment->bar, &segment->mapping, 0, segment->size, nullptr, SCI_FLAG_IO_MAP_IOSPACE, &err);
+    mappedPointer = SCIMapRemoteSegment(segment->bar, &segment->mapping, 0, segment->size, nullptr, /*SCI_FLAG_IO_MAP_IOSPACE*/ 0, &err);
     if (err != SCI_ERR_OK)
     {
         errStr = "Failed to map remote device memory: " + string(SCIGetErrorString(err));

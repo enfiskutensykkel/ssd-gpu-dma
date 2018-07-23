@@ -2,6 +2,10 @@
 #include "benchmark.h"
 #include "buffer.h"
 #include "queue.h"
+#include <nvm_util.h>
+#include <sstream>
+#include <iomanip>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <algorithm>
@@ -19,86 +23,129 @@ using std::string;
 using std::to_string;
 using std::sort;
 using std::vector;
-
-
-static double percentile(const vector<double>& data, double k)
-{
-    double i = k * data.size();
-    double idx = ceil(i);
-
-    double p = data[idx];
-    if (i == idx)
-    {
-        p = (data[idx] + data[idx+1]) / 2.0;
-    }
-
-    return p;
-}
+using Percentiles = std::map<double, double>;
 
 
 
-static void printSummary(vector<double>& data)
+static void percentiles(Percentiles& percentiles, vector<double>& data)
 {
     sort(data.begin(), data.end(), std::less<double>());
-    fprintf(stderr, "count: %14zu\n", data.size());
-    fprintf(stderr, "  max: %14.3f\n", data.back());
 
     for (auto k: {.99, .97, .95, .90, .75, .50, .25, .10, .05, .01})
     {
-        fprintf(stderr, " %4.2f: %14.3f\n", k, percentile(data, k));
+        double i = k * data.size();
+        double idx = ceil(i);
+        double p = data[idx];
+
+        if (i == idx)
+        {
+            p = (data[idx] + data[idx+1]) / 2.0;
+        }
+
+        percentiles.insert(Percentiles::value_type(k, p));
     }
-    fprintf(stderr, "  min: %14.3f\n", data.front());
+
+    percentiles[1] = data.back();
+    percentiles[0] = data.front();
 }
 
 
 
-void printPercentiles(const EventMap& events, const QueueMap& queues, bool latency, bool write)
+static void printSummary(const Ctrl& ctrl, uint16_t queueNo, const EventList& events, bool write)
+{
+    const size_t blockSize = ctrl.blockSize;
+    const size_t blocksPerPrp = NVM_PAGE_TO_BLOCK(ctrl.pageSize, blockSize, 1);
+
+    vector<double> data;
+    data.reserve(events.size());
+
+    // Calculate bandwidth
+    Percentiles bandwidth;
+    for (const auto& event: events)
+    {
+        data.push_back(event.bandwidth(blockSize));
+    }
+    percentiles(bandwidth, data);
+
+    // Estimate IOPS
+    data.clear();
+    data.reserve(events.size());
+    Percentiles iops;
+    for (const auto& event: events)
+    {
+        data.push_back(event.estimateIops());
+    }
+    percentiles(iops, data);
+
+    // Estimate average latency per command
+    data.clear();
+    data.reserve(events.size());
+    Percentiles cmdLatency;
+    for (const auto& event: events)
+    {
+        data.push_back(event.averageLatencyPerCommand());
+    }
+    percentiles(cmdLatency, data);
+
+    // Estimate average latency per PRP/page
+    data.clear();
+    data.reserve(events.size());
+    Percentiles prpLatency;
+    for (const auto& event: events)
+    {
+        data.push_back(event.averageLatencyPerBlock() * blocksPerPrp);
+    }
+    percentiles(prpLatency, data);
+
+    data.clear();
+
+    if (queueNo != 0)
+    {
+        fprintf(stderr, "Queue #%02u %s percentiles (%zu samples)\n", queueNo, write ? "write" : "read", events.size());
+    }
+    else
+    {
+        fprintf(stderr, "Aggregated %s percentiles (%zu samples)\n", write ? "write" : "read", events.size());
+    }
+
+    fprintf(stderr, "       %14s, %14s, %14s, %14s\n", "bandwidth", "iops", "cmd latency", "prp latency");
+    fprintf(stderr, "  max: %14.3f, %14.3f, %14.3f, %14.3f\n",
+            bandwidth[1], iops[1], cmdLatency[1], prpLatency[1]);
+
+    for (auto k: {.99, .97, .95, .90, .75, .50, .25, .10, .05, .01})
+    {
+        fprintf(stderr, " %4.2f: %14.3f, %14.3f, %14.3f, %14.3f\n",
+                k, bandwidth[k], iops[k], cmdLatency[k], prpLatency[k]);
+    }
+
+    fprintf(stderr, "  min: %14.3f, %14.3f, %14.3f, %14.3f\n",
+            bandwidth[0], iops[0], cmdLatency[0], prpLatency[0]);
+}
+
+
+
+void calculatePercentiles(const Ctrl& ctrl, const EventMap& events, bool write)
 {
     if (events.empty())
     {
         return;
     }
 
-    size_t blockSize = 0;
-
     fprintf(stderr, "Calculating percentiles...\n");
-    for (const auto& qp: queues)
+    for (const auto& ep: events)
     {
-        const auto queueNo = qp.first;
-        const auto& eventList = events.at(queueNo);
-        const auto& queue = queues.at(queueNo);
-        blockSize = queue->getController().blockSize;
-
-        vector<double> data;
-        data.reserve(eventList->size());
-
-        for (const Event& event: *eventList)
+        const auto queueNo = ep.first;
+        if (queueNo == 0)
         {
-            if (!latency)
-            {
-                data.push_back(event.bandwidth(blockSize));
-            }
-            else
-            {
-                data.push_back(event.averageUsecs());
-            }
+            continue;
         }
 
-        fprintf(stderr, "Queue #%02u %s percentiles (%s)\n", 
-                queueNo, write ? "write" : "read", latency ? "microseconds" : "MB/s");
-        printSummary(data);
-
+        printSummary(ctrl, queueNo, *ep.second, write);
     }
 
-    if (!latency && events.find(0) != events.end())
+    if (events.size() > 2 && events.find(0) != events.end())
     {
-        vector<double> data;
-        for (const Event& event: *events.at(0))
-        {
-            data.push_back(event.bandwidth(blockSize));
-        }
-        fprintf(stderr, "Aggregated %s percentiles (MB/s)\n", write ? "write" : "read");
-        printSummary(data);
+        printSummary(ctrl, 0, *events.at(0), write);
     }
 
     fprintf(stderr, "End percentiles\n");
@@ -144,7 +191,7 @@ static void printGpuMetadata(FILE* fp, const Gpu& gpu)
 
 
 
-static void showTransferMetadata(FILE* fp, const TransferMap& transfers, const Settings& settings)
+static void showTransferMetadata(FILE* fp, const TransferMap& transfers, const Settings& settings, const Ctrl& ctrl)
 {
     // Print queue metadata
     for (const auto& tp: transfers)
@@ -200,7 +247,22 @@ static void showTransferMetadata(FILE* fp, const TransferMap& transfers, const S
                 transfer->chunks.size());
     }
 
-    fprintf(fp, "### benchmark: type=%s; write=%s; verified=%s; parallel=%s; shared=%s; random=%s; repetitions=%zu;\n",
+    string ctrlString;
+    if (!settings.ctrl.path.empty())
+    {
+        ctrlString = "'" + settings.ctrl.path + "'";
+    }
+    else
+    {
+        std::ostringstream s;
+        s << std::hex << ctrl.fdid;
+        ctrlString = s.str();
+    }
+
+    fprintf(fp, "### benchmark: ctrl=%s; block-size=%zu; prp-size=%zu; type=%s; write=%s; verified=%s; parallel=%s; shared=%s; random=%s; repetitions=%zu;\n",
+            ctrlString.c_str(),
+            ctrl.blockSize,
+            ctrl.pageSize,
             settings.latency ? "latency" : "bandwidth",
             settings.write ? "true" : "false",
             settings.verify ? "true" : "false",
@@ -212,20 +274,33 @@ static void showTransferMetadata(FILE* fp, const TransferMap& transfers, const S
 
 
 
-static void printRecords(FILE* fp, uint16_t queueNo, const EventList& events, size_t blockSize, bool write)
+static void printRecords(FILE* fp, uint16_t queueNo, const EventList& events, size_t prpSize, size_t blockSize, bool write)
 {
+    std::ostringstream s;
+    if (queueNo != 0)
+    {
+        s << std::right << std::setw(4) << std::setfill(' ') << std::hex << queueNo;
+    }
+    else
+    {
+        s << std::right << std::setw(4) << std::setfill(' ') << "aggr";
+    }
+    string q(s.str());
+
+    const size_t blocksPerPrp = NVM_PAGE_TO_BLOCK(prpSize, blockSize, 1);
+
     for (const auto& event: events)
     {
-        fprintf(fp, "  %4x; %5s; %8zu; %12.3f; %12zu; %12zu; %12.3f; %12.3f; %12.3f;\n",
-                queueNo, write ? "write" : "read", event.commands, event.time.count(), event.blocks,
-                event.transferSize(blockSize), event.averageUsecs(), event.bandwidth(blockSize),
-                event.estimateIops());
+		fprintf(fp, "  %4s; %5s; %8zu; %12.3f; %12zu; %12zu; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f;\n",
+				q.c_str(), write ? "write" : "read", event.commands, event.time.count(), event.blocks, event.transferSize(blockSize),
+				event.averageLatencyPerCommand(), event.averageLatencyPerBlock(), event.averageLatencyPerBlock() * blocksPerPrp,
+				event.bandwidth(blockSize), event.estimateIops());
     }
 }
 
 
 
-void printStatistics(const EventMap& readEvents, const EventMap& writeEvents, const TransferMap& transfers, const Settings& settings)
+void printStatistics(const Ctrl& ctrl, const EventMap& readEvents, const EventMap& writeEvents, const TransferMap& transfers, const Settings& settings)
 {
     FILE* fp = stdout;
     if (!settings.statsFilename.empty())
@@ -237,36 +312,42 @@ void printStatistics(const EventMap& readEvents, const EventMap& writeEvents, co
         }
     }
 
+    const size_t blockSize = ctrl.blockSize;
+    const size_t pageSize = ctrl.pageSize;
+
     if (settings.transferInfo)
     {
-        showTransferMetadata(fp, transfers, settings);
+        showTransferMetadata(fp, transfers, settings, ctrl);
     }
 
-    fprintf(fp, "#%5s; %5s; %8s; %12s; %12s; %12s; %12s; %12s; %12s;\n",
-          "queue", "rwdir", "cmds", "usecs", "blocks", "size", "lat", "bw", "iops");
-    size_t estBlockSize = 0;
+//1;  read;      256;      878.042;         2048;      1048576;        3.430;        0.429;        3.430;     1194.221;   291557.807;
+
+    fprintf(fp, "#%5s; %5s; %8s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s;\n",
+          "queue", "rwdir", "cmds", "usecs", "blocks", "size", "cmd-lat", "block-lat", "prp-lat", "bw", "iops");
     for (const auto& tp: transfers)
     {
         const auto queueNo = tp.first;
-        const auto blockSize = tp.second->queue->getController().blockSize;
-        estBlockSize = blockSize;
 
         if (settings.write)
         {
-            printRecords(fp, queueNo, *writeEvents.at(queueNo), blockSize, true);
+            printRecords(fp, queueNo, *writeEvents.at(queueNo), pageSize, blockSize, true);
         }
 
-        printRecords(fp, queueNo, *readEvents.at(queueNo), blockSize, false);
+        printRecords(fp, queueNo, *readEvents.at(queueNo), pageSize, blockSize, false);
+        fflush(fp);
     }
 
-    if (!settings.latency)
+    if (!settings.latency && readEvents.size() > 2)
     {
-        if (settings.write)
+        if (settings.write && writeEvents.find(0) != writeEvents.end())
         {
-            printRecords(fp, 0, *writeEvents.at(0), estBlockSize, true);
+            printRecords(fp, 0, *writeEvents.at(0), pageSize, blockSize, true);
         }
 
-        printRecords(fp, 0, *readEvents.at(0), estBlockSize, false);
+        if (readEvents.find(0) != readEvents.end())
+        {
+            printRecords(fp, 0, *readEvents.at(0), pageSize, blockSize, false);
+        }
     }
 
     fclose(fp);

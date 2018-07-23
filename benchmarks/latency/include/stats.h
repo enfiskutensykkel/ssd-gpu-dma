@@ -8,10 +8,10 @@
 #include "transfer.h"
 
 
-void printPercentiles(const EventMap& events, const QueueMap& transfers, bool latency, bool write);
+void calculatePercentiles(const Ctrl& controller, const EventMap& events, bool write);
 
 
-void printStatistics(const EventMap& readEvents, const EventMap& writeEvents, const TransferMap& transfers, const Settings& settings);
+void printStatistics(const Ctrl& controller, const EventMap& readEvents, const EventMap& writeEvents, const TransferMap& transfers, const Settings& settings);
 
 
 #endif /* __LATENCY_BENCHMARK_STATISTICS_H__ */
