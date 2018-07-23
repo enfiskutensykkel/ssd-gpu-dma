@@ -203,6 +203,7 @@ void nvm_sq_submit(nvm_queue_t* sq)
     if (sq->last != sq->tail && sq->db != NULL)
     {
         nvm_cache_flush((void*) sq->vaddr, sizeof(nvm_cmd_t) * sq->max_entries);
+        nvm_wcb_flush(); 
 
         *((volatile uint32_t*) sq->db) = sq->tail;
         sq->last = sq->tail;

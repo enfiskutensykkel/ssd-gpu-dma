@@ -70,6 +70,25 @@ void _nvm_cache_invalidate(void* ptr, size_t size)
 
 
 
+#if defined( __DIS_CLUSTER__ )
+#ifdef __CUDACC__
+__host__ __device__
+#endif
+static inline
+void _nvm_wcb_flush()
+{
+#ifndef __CUDA_ARCH__
+    SCIFlush(NULL, 0);
+#endif
+}
+
+#define nvm_wcb_flush() _nvm_wcb_flush()
+#else
+#define nvm_wcb_flush()
+#endif
+
+
+
 /* Extract specific bits */
 #define _RB(v, hi, lo)      \
     ( ( (v) & _nvm_bitmask((hi), (lo)) ) >> (lo) )
