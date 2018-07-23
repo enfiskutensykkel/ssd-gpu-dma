@@ -291,8 +291,8 @@ static void printRecords(FILE* fp, uint16_t queueNo, const EventList& events, si
 
     for (const auto& event: events)
     {
-		fprintf(fp, "  %4s; %5s; %8zu; %12.3f; %12zu; %12zu; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f;\n",
-				q.c_str(), write ? "write" : "read", event.commands, event.time.count(), event.blocks, event.transferSize(blockSize),
+		fprintf(fp, "  %4s; %5s; %8zu; %12.3f; %12zu; %12zu; %12zu; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f;\n",
+				q.c_str(), write ? "write" : "read", event.commands, event.time.count(), event.blocks, event.blocks / blocksPerPrp, event.transferSize(blockSize),
 				event.averageLatencyPerCommand(), event.averageLatencyPerBlock(), event.averageLatencyPerBlock() * blocksPerPrp,
 				event.bandwidth(blockSize), event.estimateIops());
     }
@@ -320,10 +320,8 @@ void printStatistics(const Ctrl& ctrl, const EventMap& readEvents, const EventMa
         showTransferMetadata(fp, transfers, settings, ctrl);
     }
 
-//1;  read;      256;      878.042;         2048;      1048576;        3.430;        0.429;        3.430;     1194.221;   291557.807;
-
-    fprintf(fp, "#%5s; %5s; %8s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s;\n",
-          "queue", "rwdir", "cmds", "usecs", "blocks", "size", "cmd-lat", "block-lat", "prp-lat", "bw", "iops");
+    fprintf(fp, "#%5s; %5s; %8s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s;\n",
+          "queue", "rwdir", "cmds", "usecs", "blocks", "prps", "size", "cmd-lat", "block-lat", "prp-lat", "bw", "iops");
     for (const auto& tp: transfers)
     {
         const auto queueNo = tp.first;
@@ -337,7 +335,7 @@ void printStatistics(const Ctrl& ctrl, const EventMap& readEvents, const EventMa
         fflush(fp);
     }
 
-    if (!settings.latency && readEvents.size() > 2)
+    if (readEvents.size() > 2)
     {
         if (settings.write && writeEvents.find(0) != writeEvents.end())
         {

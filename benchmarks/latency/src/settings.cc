@@ -299,7 +299,8 @@ static string helpString(const string& progname)
 #ifdef __DIS_CLUSTER__
     argInfo(s, "gpu", "<fdid>:<ntb>", "host memory on remote CUDA device instead of RAM (NB! must be borrowed)");
 #endif
-    argInfo(s, "bandwidth", "use naive algorithm for bandwidth benchmarking");
+    argInfo(s, "bandwidth", "use a simpler algorithm for benchmarking bandwidth");
+    argInfo(s, "bw", "alias for --bandwidth");
     argInfo(s, "stats", "[<file>]", "print benchmark statistics");
     argInfo(s, "info", "print information about transfers, buffers and queues");
     argInfo(s, "repetitions", "<count>", "repeat benchmark <count> times (default is 1000)");

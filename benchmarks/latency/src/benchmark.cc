@@ -154,7 +154,7 @@ static void measureLatency(const TransferPtr& transfer, const Settings& settings
             events->push_back(event);
         }
 
-        //barrier->wait();
+        barrier->wait();
 
         if (write)
         {
@@ -239,11 +239,11 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
         }
 
         auto after = std::chrono::high_resolution_clock::now();
-        events->emplace_back(totalCmds, numBlocks, after - before);
-
-        std::this_thread::yield();
 
         //barrier->wait();
+        std::this_thread::yield();
+        
+        events->emplace_back(totalCmds, numBlocks, after - before);
 
         if (write)
         {
@@ -257,8 +257,8 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
 void benchmark(EventMap& times, const TransferMap& transfers, const Settings& settings, bool write)
 {
     thread threads[transfers.size()];
-    //Barrier barrier(transfers.size() + 1);
-    Barrier barrier(transfers.size());
+    Barrier barrier(transfers.size() + settings.latency);
+    //Barrier barrier(transfers.size());
 
     size_t totalBlocks = 0;
     size_t totalChunks = 0;
@@ -292,25 +292,22 @@ void benchmark(EventMap& times, const TransferMap& transfers, const Settings& se
     fprintf(stderr, "Running %s benchmark (%s, %s)... ", 
             settings.latency ? "latency" : "bandwidth", write ? "writing" : "reading", settings.random ? "random" : "sequential");
 
-//    // Create aggregated statistics
-//    auto aggregated = std::make_shared<EventList>();
-//    for (size_t i = 0; i < settings.repeat; ++i)
-//    {
-//        barrier.wait();
-//        auto before = std::chrono::high_resolution_clock::now();
-//        barrier.wait();
-//        auto after = std::chrono::high_resolution_clock::now();
-//
-//        if (!settings.latency)
-//        {
-//            aggregated->emplace_back(Event(totalChunks, totalBlocks, after - before));
-//        }
-//    }
-//
-//    if (!settings.latency)
-//    {
-//        times.insert(EventMap::value_type(0, aggregated));
-//    }
+    // Create aggregated statistics
+    if (settings.latency)
+    {
+        auto aggregated = std::make_shared<EventList>();
+        for (size_t i = 0; i < settings.repeat; ++i)
+        {
+            barrier.wait();
+            auto before = std::chrono::high_resolution_clock::now();
+            barrier.wait();
+            auto after = std::chrono::high_resolution_clock::now();
+
+            aggregated->emplace_back(Event(totalChunks, totalBlocks, after - before));
+        }
+
+        times.insert(EventMap::value_type(0, aggregated));
+    }
 
     // Wait for all threads to complete
     for (size_t i = 0; i < transfers.size(); ++i)
