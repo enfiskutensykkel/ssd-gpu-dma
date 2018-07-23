@@ -29,7 +29,7 @@ QueuePair::QueuePair()
 
 QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t pages, DmaPtr cqPtr, DmaPtr sqPtr)
     : no(no)
-    , depth(std::max(std::min(depth, ctrl->handle->page_size / sizeof(nvm_cmd_t)), (size_t) 1))
+    , depth(std::max(std::min(depth, ctrl->maxEntries - 1), (size_t) 1))
     , pages(std::max(pages, (size_t) 1))
     , controller(ctrl)
     , cqMemory(cqPtr)
@@ -66,7 +66,7 @@ QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t page
 
 QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t pages, DmaPtr queueMemory)
     : no(no)
-    , depth(std::max((size_t) 1, std::min(depth, ctrl->maxEntries)))
+    , depth(std::max((size_t) 1, std::min(depth, ctrl->maxEntries - 1)))
     , pages(std::max(pages, (size_t) 1))
     , controller(ctrl)
     , cqMemory(nullptr)

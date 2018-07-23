@@ -28,7 +28,7 @@ using std::to_string;
 using std::string;
 
 
-static size_t consumeCompletions(const QueuePtr& queue)
+static size_t consumeCompletions(const QueuePair* queue)
 {
     nvm_queue_t* cq = &queue->cq;
     nvm_queue_t* sq = &queue->sq;
@@ -57,7 +57,7 @@ static size_t consumeCompletions(const QueuePtr& queue)
 }
 
 
-static void flush(const QueuePtr& queue, uint32_t ns)
+static void flush(const QueuePair* queue, uint32_t ns)
 {
     nvm_cmd_t local;
     memset(&local, 0, sizeof(local));
@@ -90,9 +90,9 @@ static Event sendWindow(const TransferPtr& transfer, ChunkPtr& from, const Chunk
     size_t numBlocks = 0;
     nvm_cmd_t local;
 
-    const QueuePtr& queue = transfer->queue;
-    const DmaPtr& queueMemory = queue->getQueueMemory();
-    const DmaPtr& buffer = transfer->buffer->buffer;
+    const QueuePair* queue = transfer->queue.get();
+    const nvm_dma_t* queueMemory = queue->getQueueMemory().get();
+    const nvm_dma_t* buffer = transfer->buffer->buffer.get();
 
     memset(&local, 0, sizeof(local));
 
@@ -154,11 +154,11 @@ static void measureLatency(const TransferPtr& transfer, const Settings& settings
             events->push_back(event);
         }
 
-        barrier->wait();
+        //barrier->wait();
 
         if (write)
         {
-            flush(transfer->queue, settings.nvmNamespace);
+            flush(transfer->queue.get(), settings.nvmNamespace);
         }
     }
 }
@@ -171,11 +171,14 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
     nvm_cmd_t local;
     memset(&local, 0, sizeof(local));
 
-    const QueuePtr& queue = transfer->queue;
-    const DmaPtr& sqMemory = queue->getQueueMemory();
-    const DmaPtr& buffer = transfer->buffer->buffer;
+    const QueuePair* queue = transfer->queue.get();
+    const nvm_dma_t* sqMemory = queue->getQueueMemory().get();
+    const nvm_dma_t* buffer = transfer->buffer->buffer.get();
     auto op = write ? NVM_IO_WRITE : NVM_IO_READ;
     auto ns = settings.nvmNamespace;
+
+    // Synch with other threads
+    barrier->wait();
 
     for (size_t i = 0; i < settings.repeat; ++i)
     {
@@ -186,7 +189,7 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
         size_t numBlocks = 0;
 
         // Synch with other threads
-        barrier->wait();
+        //barrier->wait();
 
         auto before = std::chrono::high_resolution_clock::now();
 
@@ -226,8 +229,11 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
         // Wait until everything is completed
         while (totalCpls != totalCmds)
         {
-            std::this_thread::yield();
             numCpls = consumeCompletions(queue);
+            if (numCpls == 0)
+            {
+                std::this_thread::yield();
+            }
             totalCpls += numCpls;
             numCmds -= numCpls;
         }
@@ -235,7 +241,9 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
         auto after = std::chrono::high_resolution_clock::now();
         events->emplace_back(totalCmds, numBlocks, after - before);
 
-        barrier->wait();
+        std::this_thread::yield();
+
+        //barrier->wait();
 
         if (write)
         {

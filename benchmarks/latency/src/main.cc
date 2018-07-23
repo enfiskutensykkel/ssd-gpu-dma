@@ -34,7 +34,7 @@ static QueuePtr createQueue(const CtrlPtr& ctrl, const QueueParam& qp, Settings&
     uint16_t depth = qp.depth;
     if (depth == 0)
     {
-        depth = settings.latency ? 1 : ctrl->maxEntries;
+        depth = ctrl->maxEntries;
     }
 
     size_t chunk = qp.pages;
