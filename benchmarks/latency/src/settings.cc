@@ -269,9 +269,9 @@ static string helpString(const string& progname)
     using namespace std;
     ostringstream s;
 
-    s << "Usage: " << progname << " --ctrl <path> --queue <string>... --blocks <count>" << endl;
+    s << "Usage: " << progname << " --ctrl <path> --queue <string>... --blocks <count> [--bw]" << endl;
 #ifdef __DIS_CLUSTER__
-    s << "   or: " << progname << " --ctrl <fdid>[:<ntb>] [--client] --queue <string>... --blocks <count>" << endl;
+    s << "   or: " << progname << " --ctrl <fdid>[:<ntb>] [--client] --queue <string>... --blocks <count> [--bw]" << endl;
 #endif
     s << endl;
 
@@ -299,7 +299,8 @@ static string helpString(const string& progname)
 #ifdef __DIS_CLUSTER__
     argInfo(s, "gpu", "<fdid>:<ntb>", "host memory on remote CUDA device instead of RAM (NB! must be borrowed)");
 #endif
-    argInfo(s, "bandwidth", "measure bandwidth/throughput instead of latency");
+    argInfo(s, "bandwidth", "benchmark maximum bandwidth/throughput instead of latency");
+    argInfo(s, "bw", "alias for --bandwidth");
     argInfo(s, "stats", "[<file>]", "print benchmark statistics");
     argInfo(s, "info", "print information about transfers, buffers and queues");
     argInfo(s, "repetitions", "<count>", "repeat benchmark <count> times (default is 1000)");
