@@ -34,12 +34,22 @@ struct Event
 
 
     /*
-     * Try to calcluate number of IO operations per second (IOPS).
+     * Calcluate number of IO operations per second (IOPS).
      * This will only be an estimate, unless commands == 1.
      */
     double estimateIops() const
     {
         return 1e6 / averageLatencyPerCommand();
+    }
+
+
+    /*
+     * Estimate number of IO operations per second (IOPS) 
+     * adjusted for increased transfer sizes.
+     */
+    double adjustedIops(size_t blocksPerPrp = 1) const
+    {
+        return 1e6 / (averageLatencyPerBlock() * blocksPerPrp);
     }
 
 

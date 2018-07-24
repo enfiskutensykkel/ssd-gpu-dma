@@ -27,11 +27,11 @@ using Percentiles = std::map<double, double>;
 
 
 
-static void percentiles(Percentiles& percentiles, vector<double>& data)
+static void percentiles(Percentiles& percentiles, vector<double>& data, const vector<double>& kth)
 {
     sort(data.begin(), data.end(), std::less<double>());
 
-    for (auto k: {.99, .97, .95, .90, .75, .50, .25, .10, .05, .01})
+    for (auto k: kth)
     {
         double i = k * data.size();
         double idx = ceil(i);
@@ -56,6 +56,7 @@ static void printSummary(const Ctrl& ctrl, uint16_t queueNo, const EventList& ev
     const size_t blockSize = ctrl.blockSize;
     const size_t blocksPerPrp = NVM_PAGE_TO_BLOCK(ctrl.pageSize, blockSize, 1);
 
+    vector<double> kth{.99, .97, .95, .90, .75, .50, .25, .10, .05, .01};
     vector<double> data;
     data.reserve(events.size());
 
@@ -65,7 +66,7 @@ static void printSummary(const Ctrl& ctrl, uint16_t queueNo, const EventList& ev
     {
         data.push_back(event.bandwidth(blockSize));
     }
-    percentiles(bandwidth, data);
+    percentiles(bandwidth, data, kth);
 
     // Estimate IOPS
     data.clear();
@@ -73,9 +74,9 @@ static void printSummary(const Ctrl& ctrl, uint16_t queueNo, const EventList& ev
     Percentiles iops;
     for (const auto& event: events)
     {
-        data.push_back(event.estimateIops());
+        data.push_back(event.adjustedIops(blocksPerPrp));
     }
-    percentiles(iops, data);
+    percentiles(iops, data, kth);
 
     // Estimate average latency per command
     data.clear();
@@ -85,7 +86,7 @@ static void printSummary(const Ctrl& ctrl, uint16_t queueNo, const EventList& ev
     {
         data.push_back(event.averageLatencyPerCommand());
     }
-    percentiles(cmdLatency, data);
+    percentiles(cmdLatency, data, kth);
 
     // Estimate average latency per PRP/page
     data.clear();
@@ -95,7 +96,7 @@ static void printSummary(const Ctrl& ctrl, uint16_t queueNo, const EventList& ev
     {
         data.push_back(event.averageLatencyPerBlock() * blocksPerPrp);
     }
-    percentiles(prpLatency, data);
+    percentiles(prpLatency, data, kth);
 
     data.clear();
 
@@ -108,11 +109,11 @@ static void printSummary(const Ctrl& ctrl, uint16_t queueNo, const EventList& ev
         fprintf(stderr, "Aggregated %s percentiles (%zu samples)\n", write ? "write" : "read", events.size());
     }
 
-    fprintf(stderr, "       %14s, %14s, %14s, %14s\n", "bandwidth", "iops", "cmd latency", "prp latency");
+    fprintf(stderr, "       %14s, %14s, %14s, %14s\n", "bandwidth", "adj iops", "cmd latency", "prp latency");
     fprintf(stderr, "  max: %14.3f, %14.3f, %14.3f, %14.3f\n",
             bandwidth[1], iops[1], cmdLatency[1], prpLatency[1]);
 
-    for (auto k: {.99, .97, .95, .90, .75, .50, .25, .10, .05, .01})
+    for (auto k: kth)
     {
         fprintf(stderr, " %4.2f: %14.3f, %14.3f, %14.3f, %14.3f\n",
                 k, bandwidth[k], iops[k], cmdLatency[k], prpLatency[k]);
@@ -293,10 +294,10 @@ static void printRecords(FILE* fp, uint16_t queueNo, const EventList& events, si
 
     for (const auto& event: events)
     {
-		fprintf(fp, "  %4s; %5s; %8zu; %12.3f; %12zu; %12zu; %12zu; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f;\n",
+		fprintf(fp, "  %4s; %5s; %8zu; %12.3f; %12zu; %12zu; %12zu; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f; %12.3f;\n",
 				q.c_str(), write ? "write" : "read", event.commands, event.time.count(), event.blocks, event.blocks / blocksPerPrp, event.transferSize(blockSize),
 				event.averageLatencyPerCommand(), event.averageLatencyPerBlock(), event.averageLatencyPerBlock() * blocksPerPrp,
-				event.bandwidth(blockSize), event.estimateIops());
+				event.bandwidth(blockSize), event.estimateIops(), event.adjustedIops(), event.adjustedIops(blocksPerPrp));
     }
 }
 
@@ -322,8 +323,8 @@ void printStatistics(const Ctrl& ctrl, const EventMap& readEvents, const EventMa
         showTransferMetadata(fp, transfers, settings, ctrl);
     }
 
-    fprintf(fp, "#%5s; %5s; %8s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s;\n",
-          "queue", "rwdir", "cmds", "usecs", "blocks", "prps", "size", "cmd-lat", "block-lat", "prp-lat", "bw", "iops");
+    fprintf(fp, "#%5s; %5s; %8s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s; %12s;\n",
+          "queue", "rd/wr", "commands", "time", "blocks", "prps", "size", "cmd-latency", "blk-latency", "prp-latency", "bandwidth", "iops", "blks-per-sec", "prps-per-sec");
     for (const auto& tp: transfers)
     {
         const auto queueNo = tp.first;
