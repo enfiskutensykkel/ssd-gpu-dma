@@ -41,7 +41,7 @@ struct QueueParam
 
 enum AccessUnit : int
 {
-    BLOCKS, PAGES, BYTES
+    BLOCKS, PAGES, BYTES, COMMANDS
 };
 
 

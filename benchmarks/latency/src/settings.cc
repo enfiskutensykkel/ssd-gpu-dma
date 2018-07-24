@@ -292,6 +292,8 @@ static string helpString(const string& progname)
     argInfo(s, "prps", "[<count>]", "specify data unit as PRPs/pages");
     argInfo(s, "pages", "[<count>]", "alias for --prps");
     argInfo(s, "bytes", "[<count>]", "specify data unit as bytes");
+//    argInfo(s, "commands", "[<count>]", "specify data unit as number of I/O commands");
+//    argInfo(s, "cmds", "[<count>]", "alias for --commands");
     argInfo(s, "random", "use random access instead of sequential access");
     argInfo(s, "parallel", "specify parallel access to separate buffers");
     argInfo(s, "shared", "same as parallel, but all queues access same buffer");
@@ -389,17 +391,17 @@ static const option options[] = {
     { .name = "off", .has_arg = required_argument, .flag = nullptr, .val = 'o' },
     { .name = "namespace", .has_arg = required_argument, .flag = nullptr, .val = 'n' },
     { .name = "ns", .has_arg = required_argument, .flag = nullptr, .val = 'n' },
-    { .name = "blocks", .has_arg = optional_argument, .flag = nullptr, .val = 'B' },
-    { .name = "blks", .has_arg = optional_argument, .flag = nullptr, .val = 'B' },
+    { .name = "blocks", .has_arg = optional_argument, .flag = nullptr, .val = 'b' },
+    { .name = "blks", .has_arg = optional_argument, .flag = nullptr, .val = 'b' },
     { .name = "pages", .has_arg = optional_argument, .flag = nullptr, .val = 3 },
     { .name = "prps", .has_arg = optional_argument, .flag = nullptr, .val = 3 },
     { .name = "bytes", .has_arg = optional_argument, .flag = nullptr, .val = 1 },
+    { .name = "commands", .has_arg = optional_argument, .flag = nullptr, .val = 'C' },
+    { .name = "cmds", .has_arg = optional_argument, .flag = nullptr, .val = 'C' },
     { .name = "statistics", .has_arg = optional_argument, .flag = nullptr, .val = 'S' },
     { .name = "stats", .has_arg = optional_argument, .flag = nullptr, .val = 'S' },
-    { .name = "throughput", .has_arg = no_argument, .flag = nullptr, .val = 'b' },
-    { .name = "tput", .has_arg = no_argument, .flag = nullptr, .val = 'b' },
-    { .name = "bandwidth", .has_arg = no_argument, .flag = nullptr, .val = 'b' },
-    { .name = "bw", .has_arg = no_argument, .flag = nullptr, .val = 'b' },
+    { .name = "bandwidth", .has_arg = no_argument, .flag = nullptr, .val = 'B' },
+    { .name = "bw", .has_arg = no_argument, .flag = nullptr, .val = 'B' },
     { .name = "random", .has_arg = no_argument, .flag = nullptr, .val = 'r' },
     { .name = "parallel", .has_arg = no_argument, .flag = nullptr, .val = 'p' },
     { .name = "shared", .has_arg = no_argument, .flag = nullptr, .val = 'P' },
@@ -485,7 +487,7 @@ void Settings::parseArguments(int argc, char** argv)
                     transferInfo = true;
                     break;
 
-                case 'b':
+                case 'B':
                     latency = false;
                     break;
 
@@ -514,7 +516,15 @@ void Settings::parseArguments(int argc, char** argv)
                     }
                     break;
 
-                case 'B':
+                case 'C':
+                    unit = AccessUnit::COMMANDS;
+                    if (optarg)
+                    {
+                        count = parseNumber(optarg);
+                    }
+                    break;
+
+                case 'b':
                     unit = AccessUnit::BLOCKS;
                     if (optarg != nullptr)
                     {

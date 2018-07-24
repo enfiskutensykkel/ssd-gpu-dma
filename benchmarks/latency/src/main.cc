@@ -303,8 +303,9 @@ static void prepareTransfers(TransferMap& transfers, const QueueMap& queues, con
 
         if (settings.transferInfo)
         {
-            fprintf(stderr, "- TRANSFER queue=%02u pattern=%s total-cmds=%zu block-start=%zu block-count=%zu prp-start=%zu prp-count=%zu\n",
-                    q->no, settings.random ? "random" : "sequential", transfer->chunks.size(),
+            fprintf(stderr, "- TRANSFER queue=%02u pattern=%s total-cmds=%zu total-blocks=%zu total-prps=%zu block-start=%zu block-count=%zu prp-start=%zu prp-count=%zu\n",
+                    q->no, settings.random ? "random" : "sequential", 
+                    transfer->chunks.size(), transfer->count * settings.innerIterations, NVM_BLOCK_TO_PAGE(ctrl.pageSize, ctrl.blockSize, transfer->count * settings.innerIterations),
                     transfer->offset, transfer->count, transfer->pageOffset, NVM_BLOCK_TO_PAGE(ctrl.pageSize, ctrl.blockSize, transfer->count));
         }
 

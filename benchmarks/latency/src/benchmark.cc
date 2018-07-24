@@ -29,13 +29,18 @@ using std::string;
 
 
 
-static size_t consumeCompletions(const QueuePair* queue)
+static inline size_t consumeCompletions(const QueuePair* queue)
 {
     nvm_queue_t* cq = &queue->cq;
     nvm_queue_t* sq = &queue->sq;
 
     nvm_cpl_t* cpl = nullptr;
     size_t numCpls = 0;
+
+    if (nvm_cq_poll(cq) == nullptr)
+    {
+        std::this_thread::yield();
+    }
 
     while ((cpl = nvm_cq_dequeue(cq)) != nullptr)
     {
@@ -126,10 +131,7 @@ static Event sendWindow(const TransferPtr& transfer, ChunkPtr& from, const Chunk
     std::this_thread::yield();
 
     // Wait for all completions
-    for (size_t i = 0; i < numCmds; i += consumeCompletions(queue))
-    {
-        std::this_thread::yield();
-    }
+    for (size_t i = 0; i < numCmds; i += consumeCompletions(queue));
 
     auto after = std::chrono::high_resolution_clock::now();
 
@@ -208,10 +210,6 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
                 while (numCmds == queue->depth || (cmd = nvm_sq_enqueue(sq)) == nullptr)
                 {
                     numCpls = consumeCompletions(queue);
-                    if (numCpls == 0)
-                    {
-                        std::this_thread::yield();
-                    }
                     numCmds -= numCpls;
                     totalCpls += numCpls;
                 }
@@ -241,10 +239,6 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
         while (totalCpls != totalCmds)
         {
             numCpls = consumeCompletions(queue);
-            if (numCpls == 0)
-            {
-                std::this_thread::yield();
-            }
             totalCpls += numCpls;
             numCmds -= numCpls;
         }
@@ -279,7 +273,7 @@ void benchmark(EventMap& times, const TransferMap& transfers, const Settings& se
 
         auto events = std::make_shared<EventList>();
 
-        totalBlocks += transfer->count;
+        totalBlocks += transfer->count * settings.innerIterations;
         totalChunks += transfer->chunks.size();
 
         if (settings.latency)
