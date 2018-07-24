@@ -35,6 +35,11 @@ QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t page
     , cqMemory(cqPtr)
     , sqMemory(sqPtr)
 {
+    if (depth > this->depth)
+    {
+        throw error("Queue depth is greater than maximum queue size");
+    }
+
     if (this->pages * ctrl->pageSize > ctrl->chunkSize)
     {
         throw error("Chunk size is greater than maximum data transfer size");
@@ -72,6 +77,11 @@ QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t page
     , cqMemory(nullptr)
     , sqMemory(queueMemory)
 {
+    if (depth > this->depth)
+    {
+        throw error("Queue depth is greater than maximum queue size");
+    }
+
     if (this->pages * ctrl->pageSize > ctrl->chunkSize)
     {
         throw error("Chunk size is greater than maximum data transfer size");

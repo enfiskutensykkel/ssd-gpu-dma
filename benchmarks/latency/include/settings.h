@@ -52,7 +52,8 @@ struct Settings
     GpuParam                gpu;
     bool                    latency;
     uint32_t                nvmNamespace;
-    size_t                  repeat;
+    size_t                  outerIterations;
+    size_t                  innerIterations;
     size_t                  count;
     size_t                  offset;
     AccessUnit              unit;

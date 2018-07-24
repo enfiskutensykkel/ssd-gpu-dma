@@ -303,7 +303,10 @@ static string helpString(const string& progname)
     argInfo(s, "bw", "alias for --bandwidth");
     argInfo(s, "stats", "[<file>]", "print benchmark statistics");
     argInfo(s, "info", "print information about transfers, buffers and queues");
-    argInfo(s, "repetitions", "<count>", "repeat benchmark <count> times (default is 1000)");
+    argInfo(s, "iterations", "<count>", "repeat benchmark <count> times (default is 1000)");
+    argInfo(s, "outer", "<count>", "alias for --iterations");
+    argInfo(s, "repeat", "<count>", "repeat commands <count> times (default is 1)");
+    argInfo(s, "inner", "<count>", "alias for --repeat");
     argInfo(s, "outfile", "<filename>", "read from disk and write to file");
     argInfo(s, "output", "<filename>", "alias for --outfile");
     argInfo(s, "infile", "<filename>", "load file into buffer before reading from disk");
@@ -344,7 +347,8 @@ Settings::Settings()
     gpu.adapter = 0;
     latency = true;
     nvmNamespace = 1;
-    repeat = 1000;
+    outerIterations = 1000;
+    innerIterations = 1;
     count = 0;
     offset = 0;
     unit = AccessUnit::BLOCKS;
@@ -399,10 +403,11 @@ static const option options[] = {
     { .name = "random", .has_arg = no_argument, .flag = nullptr, .val = 'r' },
     { .name = "parallel", .has_arg = no_argument, .flag = nullptr, .val = 'p' },
     { .name = "shared", .has_arg = no_argument, .flag = nullptr, .val = 'P' },
-    { .name = "repeat", .has_arg = required_argument, .flag = nullptr, .val = 'C' },
-    { .name = "repeats", .has_arg = required_argument, .flag = nullptr, .val = 'C' },
-    { .name = "repetitions", .has_arg = required_argument, .flag = nullptr, .val = 'C' },
-    { .name = "reps", .has_arg = required_argument, .flag = nullptr, .val = 'C' },
+    { .name = "iterations", .has_arg = required_argument, .flag = nullptr, .val = 'i' },
+    { .name = "outer", .has_arg = required_argument, .flag = nullptr, .val = 'i' },
+    { .name = "loops", .has_arg = required_argument, .flag = nullptr, .val = 'i' },
+    { .name = "repeat", .has_arg = required_argument, .flag = nullptr, .val = 'I' },
+    { .name = "inner", .has_arg = required_argument, .flag = nullptr, .val = 'I' },
     { .name = "outfile", .has_arg = required_argument, .flag = nullptr, .val = 'R' },
     { .name = "output", .has_arg = required_argument, .flag = nullptr, .val = 'R' },
     { .name = "of", .has_arg = required_argument, .flag = nullptr, .val = 'R' },
@@ -411,7 +416,7 @@ static const option options[] = {
     { .name = "if", .has_arg = required_argument, .flag = nullptr, .val = 'W' },
     { .name = "write", .has_arg = no_argument, .flag = nullptr, .val = 'w' },
     { .name = "verify", .has_arg = no_argument, .flag = nullptr, .val = 'v' },
-    { .name = "info", .has_arg = no_argument, .flag = nullptr, .val = 'i' },
+    { .name = "info", .has_arg = no_argument, .flag = nullptr, .val = 't' },
     { .name = nullptr, .has_arg = no_argument, .flag = nullptr, .val = 0 }
 };
 
@@ -476,7 +481,7 @@ void Settings::parseArguments(int argc, char** argv)
                     manager = false;
                     break;
 
-                case 'i':
+                case 't':
                     transferInfo = true;
                     break;
 
@@ -537,8 +542,20 @@ void Settings::parseArguments(int argc, char** argv)
                     offset = parseNumber(optarg);
                     break;
 
-                case 'C':
-                    repeat = parseNumber(optarg);
+                case 'i':
+                    outerIterations = parseNumber(optarg);
+                    if (outerIterations == 0)
+                    {
+                        throw error("Number of iterations must be at least one");
+                    }
+                    break;
+
+                case 'I':
+                    innerIterations = parseNumber(optarg);
+                    if (innerIterations == 0)
+                    {
+                        throw error("Number of repeats must be at least one");
+                    }
                     break;
 
                 case 'n':

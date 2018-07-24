@@ -241,6 +241,7 @@ void nvm_cq_update(nvm_queue_t* cq)
     {
         *((volatile uint32_t*) cq->db) = cq->head;
         cq->last = cq->head;
+        nvm_wcb_flush();
     }
 }
 

@@ -28,6 +28,7 @@ using std::to_string;
 using std::string;
 
 
+
 static size_t consumeCompletions(const QueuePair* queue)
 {
     nvm_queue_t* cq = &queue->cq;
@@ -139,7 +140,7 @@ static Event sendWindow(const TransferPtr& transfer, ChunkPtr& from, const Chunk
 
 static void measureLatency(const TransferPtr& transfer, const Settings& settings, const EventListPtr& events, Barrier* barrier, bool write)
 {
-    for (size_t i = 0; i < settings.repeat; ++i)
+    for (size_t i = 0; i < settings.outerIterations; ++i)
     {
         const ChunkPtr end = transfer->chunks.cend();
         ChunkPtr ptr = transfer->chunks.cbegin();
@@ -174,13 +175,13 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
     const QueuePair* queue = transfer->queue.get();
     const nvm_dma_t* sqMemory = queue->getQueueMemory().get();
     const nvm_dma_t* buffer = transfer->buffer->buffer.get();
-    auto op = write ? NVM_IO_WRITE : NVM_IO_READ;
-    auto ns = settings.nvmNamespace;
+    const auto op = write ? NVM_IO_WRITE : NVM_IO_READ;
+    const auto ns = settings.nvmNamespace;
 
     // Synch with other threads
-    barrier->wait();
+    //barrier->wait();
 
-    for (size_t i = 0; i < settings.repeat; ++i)
+    for (size_t i = 0; i < settings.outerIterations; ++i)
     {
         size_t numCmds = 0;
         size_t numCpls = 0;
@@ -189,21 +190,22 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
         size_t numBlocks = 0;
 
         // Synch with other threads
-        //barrier->wait();
+        barrier->wait();
 
         auto before = std::chrono::high_resolution_clock::now();
 
+        uint32_t prpListIdx = 0;
         for (const auto& chunk: transfer->chunks)
         {
             nvm_cmd_t* cmd = nullptr;
 
-            // Queue is full, submit what we have and wait until queue is entirely empty
-            // TODO: Fix this so we don't have to drain the entire queue, only until there are some free slots
+            // Queue is full, submit what we have and wait 
             if (numCmds == queue->depth || (cmd = nvm_sq_enqueue(sq)) == nullptr)
             {
                 nvm_sq_submit(sq);
+                std::this_thread::yield();
 
-                while (numCmds > 0 || (cmd = nvm_sq_enqueue(sq)) == nullptr)
+                while (numCmds == queue->depth || (cmd = nvm_sq_enqueue(sq)) == nullptr)
                 {
                     numCpls = consumeCompletions(queue);
                     if (numCpls == 0)
@@ -215,9 +217,8 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
                 }
             }
 
-            // TODO: Use a bitmap to keep track of free PRP lists rather than using number of commands
-            void* prpListPtr = NVM_DMA_OFFSET(sqMemory, 1 + numCmds);
-            uint64_t prpListAddr = sqMemory->ioaddrs[1 + numCmds];
+            void* prpListPtr = NVM_DMA_OFFSET(sqMemory, 1 + prpListIdx);
+            uint64_t prpListAddr = sqMemory->ioaddrs[1 + prpListIdx];
 
             // Construct command locally
             nvm_cmd_header(&local, NVM_DEFAULT_CID(sq), op, ns);
@@ -231,6 +232,7 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
             
             ++numCmds;
             ++totalCmds;
+            prpListIdx = (prpListIdx + 1) % queue->depth;
         }
 
         nvm_sq_submit(sq);
@@ -249,8 +251,7 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
 
         auto after = std::chrono::high_resolution_clock::now();
 
-        //barrier->wait();
-        std::this_thread::yield();
+        barrier->wait();
         
         events->emplace_back(totalCmds, numBlocks, after - before);
 
@@ -266,8 +267,7 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
 void benchmark(EventMap& times, const TransferMap& transfers, const Settings& settings, bool write)
 {
     thread threads[transfers.size()];
-    Barrier barrier(transfers.size() + settings.latency);
-    //Barrier barrier(transfers.size());
+    Barrier barrier(transfers.size() + 1);
 
     size_t totalBlocks = 0;
     size_t totalChunks = 0;
@@ -298,25 +298,26 @@ void benchmark(EventMap& times, const TransferMap& transfers, const Settings& se
         times.insert(EventMap::value_type(idx, events));
     }
 
-    fprintf(stderr, "Running %s benchmark (%s, %s)... ", 
-            settings.latency ? "latency" : "bandwidth", write ? "writing" : "reading", settings.random ? "random" : "sequential");
+    fprintf(stderr, "Running %s benchmark (%s, %s, %zu iterations)... ", 
+            settings.latency ? "latency" : "bandwidth", 
+            write ? "writing" : "reading", 
+            settings.random ? "random" : "sequential", 
+            settings.outerIterations);
 
     // Create aggregated statistics
-    if (settings.latency)
+    auto aggregated = std::make_shared<EventList>();
+    for (size_t i = 0; i < settings.outerIterations; ++i)
     {
-        auto aggregated = std::make_shared<EventList>();
-        for (size_t i = 0; i < settings.repeat; ++i)
-        {
-            barrier.wait();
-            auto before = std::chrono::high_resolution_clock::now();
-            barrier.wait();
-            auto after = std::chrono::high_resolution_clock::now();
+        barrier.wait();
+        auto before = std::chrono::high_resolution_clock::now();
+        barrier.wait();
+        auto after = std::chrono::high_resolution_clock::now();
+        std::this_thread::yield();
 
-            aggregated->emplace_back(Event(totalChunks, totalBlocks, after - before));
-        }
-
-        times.insert(EventMap::value_type(0, aggregated));
+        aggregated->emplace_back(Event(totalChunks, totalBlocks, after - before));
     }
+
+    times.insert(EventMap::value_type(0, aggregated));
 
     // Wait for all threads to complete
     for (size_t i = 0; i < transfers.size(); ++i)

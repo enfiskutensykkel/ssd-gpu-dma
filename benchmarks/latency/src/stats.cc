@@ -37,7 +37,7 @@ static void percentiles(Percentiles& percentiles, vector<double>& data)
         double idx = ceil(i);
         double p = data[idx];
 
-        if (i == idx)
+        if (i == idx && idx < data.size())
         {
             p = (data[idx] + data[idx+1]) / 2.0;
         }
@@ -260,7 +260,7 @@ static void showTransferMetadata(FILE* fp, const TransferMap& transfers, const S
         ctrlString = s.str();
     }
 
-    fprintf(fp, "### benchmark: ctrl=%s; block-size=%zu; prp-size=%zu; type=%s; write=%s; verified=%s; parallel=%s; shared=%s; random=%s; repetitions=%zu;\n",
+    fprintf(fp, "### benchmark: ctrl=%s; block-size=%zu; prp-size=%zu; type=%s; write=%s; verified=%s; parallel=%s; shared=%s; random=%s; repeat=%zu; iterations=%zu\n",
             ctrlString.c_str(),
             ctrl.blockSize,
             ctrl.pageSize,
@@ -270,7 +270,8 @@ static void showTransferMetadata(FILE* fp, const TransferMap& transfers, const S
             settings.parallel ? "true" : "false",
             (!settings.parallel || settings.shared) ? "true" : "false",
             settings.random ? "true" : "false",
-            settings.repeat);
+            settings.innerIterations,
+            settings.outerIterations);
 }
 
 

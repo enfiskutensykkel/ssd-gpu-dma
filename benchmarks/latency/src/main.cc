@@ -34,7 +34,7 @@ static QueuePtr createQueue(const CtrlPtr& ctrl, const QueueParam& qp, Settings&
     uint16_t depth = qp.depth;
     if (depth == 0)
     {
-        depth = ctrl->maxEntries;
+        depth = ctrl->maxEntries - 1;
     }
 
     size_t chunk = qp.pages;
@@ -185,8 +185,8 @@ static MemoryBufferPtr createBuffer(const Ctrl& ctrl, const GpuPtr& gpu, Setting
 
     if (settings.transferInfo)
     {
-        fprintf(stderr, "- BUFFER location=%s size=%zu prps=%zu",
-                gpu == nullptr ? "ram" : "gpu", buffer->size, buffer->buffer->n_ioaddrs);
+        fprintf(stderr, "- BUFFER location=%s size=%zu prps=%zu blocks=%zu",
+                gpu == nullptr ? "ram" : "gpu", buffer->size, buffer->buffer->n_ioaddrs, buffer->size / ctrl.blockSize);
         if (gpu != nullptr)
         {
             fprintf(stderr, " (device=%d fdid=%lx bdf=%s name=%s)", 
@@ -290,6 +290,10 @@ static void prepareTransfers(TransferMap& transfers, const QueueMap& queues, con
         }
 
         currentPage += prepareChunks(transfer->chunks, transfer->queue, transfer->pageOffset, transfer->offset, transfer->count);
+        for (size_t i = 0; i < settings.innerIterations - 1; ++i)
+        {
+            prepareChunks(transfer->chunks, transfer->queue, transfer->pageOffset, transfer->offset, transfer->count);
+        }
 
         // Sort transfer list randomly if specified
         if (settings.random)
