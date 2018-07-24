@@ -284,5 +284,11 @@ void GpuBuffer::clear()
     {
         throw error("Failed to clear device memory: " + string(cudaGetErrorString(err)));
     }
+
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess)
+    {
+        throw error("Failed to synchronize device: " + string(cudaGetErrorString(err)));
+    }
 }
 
