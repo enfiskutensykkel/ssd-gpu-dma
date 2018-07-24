@@ -76,7 +76,10 @@ Ctrl::Ctrl(uint64_t fdid, uint32_t adapter, nvm_ctrl_t* controller, DmaPtr memor
 Ctrl::~Ctrl()
 {
     nvm_aq_destroy(adminRef);
-    nvm_dma_unmap(adminQueues);
+    if (adminQueueMemory.get() == nullptr)
+    {
+        nvm_dma_unmap(adminQueues);
+    }
     adminQueueMemory.reset();
     nvm_ctrl_free(writeHandle);
 }
@@ -96,7 +99,6 @@ CtrlManager::CtrlManager(const string& path, uint32_t ns)
 
     DmaPtr queueMemory;
     nvm_ctrl_t* ctrl = nullptr;
-    nvm_dma_t* dma = nullptr;
     nvm_aq_ref ref = nullptr;
 
     try
@@ -112,14 +114,14 @@ CtrlManager::CtrlManager(const string& path, uint32_t ns)
         queueMemory = allocateBuffer(ctrl, ctrl->page_size * 3);
 
         // Create admin queue reference
-        status = nvm_aq_create(&ref, ctrl, dma);
+        status = nvm_aq_create(&ref, ctrl, queueMemory.get());
         if (!nvm_ok(status))
         {
             throw error("Failed to reset controller: " + string(nvm_strerror(status)));
         }
 
         // Create controller reference wrapper
-        auto* ptr = new (std::nothrow) Ctrl(0, 0, ctrl, queueMemory, dma, ref, ns);
+        auto* ptr = new (std::nothrow) Ctrl(0, 0, ctrl, queueMemory, queueMemory.get(), ref, ns);
         if (ptr == nullptr)
         {
             throw error("Failed to allocate shared controller reference");
@@ -130,7 +132,7 @@ CtrlManager::CtrlManager(const string& path, uint32_t ns)
     catch (const error& e)
     {
         nvm_aq_destroy(ref);
-        nvm_dma_unmap(dma);
+        queueMemory.reset();
         nvm_ctrl_free(ctrl);
         close(fileDescriptor);
         throw e;

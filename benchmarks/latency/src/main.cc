@@ -40,7 +40,14 @@ static QueuePtr createQueue(const CtrlPtr& ctrl, const QueueParam& qp, Settings&
     size_t chunk = qp.pages;
     if (chunk == 0)
     {
-        chunk = ctrl->chunkSize / ctrl->pageSize;
+        if (settings.random)
+        {
+            chunk = 1;
+        }
+        else
+        {
+            chunk = ctrl->chunkSize / ctrl->pageSize;
+        }
     }
 
     switch (qp.location)

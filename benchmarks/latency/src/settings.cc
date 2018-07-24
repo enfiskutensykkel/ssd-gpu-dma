@@ -152,7 +152,7 @@ QueueParam::QueueParam(const string& arg)
                 throw error("Number of commands (queue depth) must be between 0 and 64");
             }
         }
-        else if (param[0] == "p" || param[0] == "pages" || param[0] == "prps")
+        else if (param[0] == "p" || param[0] == "pages" || param[0] == "prps" || param[0] == "chunk")
         {
             if (!tryNumber(pages, param[1], 0))
             {
@@ -318,9 +318,9 @@ static string helpString(const string& progname)
     s << endl;
     s << "Possible queue specification key-value pairs:" << endl;
     qsInfo(s, "no", "<number>", "unique I/O queue number (required)");
-    qsInfo(s, "cmds", "<commands>", "number of unsubmitted I/O commands (0 means using the controller's maximum)");
+    qsInfo(s, "cmds", "<commands>", "number of unsubmitted I/O commands (defaults to controller's maximum)");
     qsInfo(s, "depth", "<commands>", "alias for cmds");
-    qsInfo(s, "prps", "<pages>", "data transfer size in number of PRPs/pages (0 means using the controller's maximum)");
+    qsInfo(s, "prps", "<pages>", "data transfer size in number of PRPs/pages (defaults to controller's maximum for sequential and 1 for random)");
     qsInfo(s, "pages", "<pages>", "alias for prps");
     qsInfo(s, "location", "host", "host submission queue in local RAM (default)");
     qsInfo(s, "location", "local", "alias for specifying host location");

@@ -197,16 +197,25 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
         {
             nvm_cmd_t* cmd = nullptr;
 
-            // Queue is full, submit what we have and wait
-            while (numCmds == queue->depth || (cmd = nvm_sq_enqueue(sq)) == nullptr)
+            // Queue is full, submit what we have and wait until queue is entirely empty
+            // TODO: Fix this so we don't have to drain the entire queue, only until there are some free slots
+            if (numCmds == queue->depth || (cmd = nvm_sq_enqueue(sq)) == nullptr)
             {
                 nvm_sq_submit(sq);
-                std::this_thread::yield();
-                numCpls = consumeCompletions(queue);
-                numCmds -= numCpls;
-                totalCpls += numCpls;
+
+                while (numCmds > 0 || (cmd = nvm_sq_enqueue(sq)) == nullptr)
+                {
+                    numCpls = consumeCompletions(queue);
+                    if (numCpls == 0)
+                    {
+                        std::this_thread::yield();
+                    }
+                    numCmds -= numCpls;
+                    totalCpls += numCpls;
+                }
             }
 
+            // TODO: Use a bitmap to keep track of free PRP lists rather than using number of commands
             void* prpListPtr = NVM_DMA_OFFSET(sqMemory, 1 + numCmds);
             uint64_t prpListAddr = sqMemory->ioaddrs[1 + numCmds];
 

@@ -18,6 +18,7 @@
 using error = std::runtime_error;
 using DevPtr = std::shared_ptr<Device>;
 using std::string;
+using std::logic_error;
 
 
 
@@ -155,6 +156,11 @@ Gpu::Gpu(uint64_t fdid, uint32_t adapter)
 
 DmaPtr Gpu::allocateBuffer(const Ctrl& ctrl, size_t size, uint32_t segmentId) const
 {
+    if (ctrl.fdid == 0)
+    {
+        return this->allocateBuffer(ctrl, size);
+    }
+
     auto memory = allocateMemory(size);
     void* pointer = getDevicePointer(memory);
 
@@ -237,6 +243,11 @@ static size_t calculateOffset(const RemoteMemory* segment)
 
 DmaPtr Gpu::allocateBufferAndMap(const Ctrl& ctrl, size_t size, uint32_t segmentId) const
 {
+    if (ctrl.fdid == 0)
+    {
+        throw logic_error("Controller is not a SmartIO device");
+    }
+
     auto buffer = allocateMemory(size);
     void* devicePointer = getDevicePointer(buffer);
     volatile void* mappedPointer = nullptr;

@@ -199,11 +199,12 @@ static void showTransferMetadata(FILE* fp, const TransferMap& transfers, const S
         const auto queueNo = tp.first;
         const auto& queue = tp.second->queue;
 
-        fprintf(fp, "### queue[%x]: no=%x; cmds=%zu; prps=%zu; remote=%s; memory=%s;\n",
+        fprintf(fp, "### queue[%x]: no=%x; cmds=%zu; prps=%zu; transfer-size=%zu; remote=%s; memory=%s;\n",
                 queueNo,
                 queue->no,
                 queue->depth,
                 queue->pages,
+                queue->pages * ctrl.pageSize,
                 queue->location() != QueueLocation::LOCAL ? "true" : "false",
                 memlocString(queue).c_str());
     }
