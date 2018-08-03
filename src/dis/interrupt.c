@@ -27,6 +27,7 @@ static sci_callback_action_t interrupt_callback(struct local_intr* interrupt,
                                                 uint32_t length,
                                                 sci_error_t status)
 {
+#ifndef NDEBUG
     if (status != SCI_ERR_OK)
     {
         dprintf("Unexpected status in interrupt handler routine: %s\n", _SCIGetErrorString(status));
@@ -38,6 +39,7 @@ static sci_callback_action_t interrupt_callback(struct local_intr* interrupt,
         dprintf("Possible memory corruption\n");
         return SCI_CALLBACK_CANCEL;
     }
+#endif
 
     interrupt->callback(interrupt->data, data, length);
 
