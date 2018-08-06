@@ -12,7 +12,7 @@ find_package (CUDA 8.0)
 set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 set (NVIDIA "" CACHE PATH "Path to Nvidia driver source")
 
-set (nvidia_archs "30;50;52;60;61" CACHE STRING "NVIDIA compute architectures")
+set (nvidia_archs "30;50;52;60;61;70" CACHE STRING "NVIDIA compute architectures")
 set (no_smartio_samples false CACHE BOOL "Do not use SISCI for examples")
 set (no_smartio_benchmarks false CACHE BOOL "Do not use SISCI for benchmarks")
 set (no_smartio false CACHE BOOL "Do not use SISCI for library or examples")
