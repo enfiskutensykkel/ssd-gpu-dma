@@ -269,9 +269,9 @@ static string helpString(const string& progname)
     using namespace std;
     ostringstream s;
 
-    s << "Usage: " << progname << " --ctrl <path> --queue <string>... --blocks <count>" << endl;
+    s << "Usage: " << progname << " --ctrl <path> --queue <string>... --blocks=<count>" << endl;
 #ifdef __DIS_CLUSTER__
-    s << "   or: " << progname << " --ctrl <fdid>[:<ntb>] [--client] --queue <string>... --blocks <count>" << endl;
+    s << "   or: " << progname << " --ctrl <fdid>[:<ntb>] [--client] --queue <string>... --blocks=<count>" << endl;
 #endif
     s << endl;
 
@@ -286,6 +286,7 @@ static string helpString(const string& progname)
 #endif
     argInfo(s, "queue", "<string>", "specify I/O queue (can be repeated), see queue specification");
     argInfo(s, "namespace", "<id>", "NVM namespace (default is 1)");
+    argInfo(s, "ns", "<id>", "alias for --namespace");
     argInfo(s, "count", "<count>", "specify number of data units");
     argInfo(s, "offset", "<count>", "specify starting offset (default is 0)");
     argInfo(s, "blocks", "[<count>]", "specify data unit as blocks (default)");
@@ -299,7 +300,7 @@ static string helpString(const string& progname)
     argInfo(s, "shared", "same as parallel, but all queues access same buffer");
     argInfo(s, "gpu", "<device>", "host memory on local CUDA device instead of RAM");
 #ifdef __DIS_CLUSTER__
-    argInfo(s, "gpu", "<fdid>:<ntb>", "host memory on remote CUDA device instead of RAM (NB! must be borrowed)");
+    argInfo(s, "gpu", "<fdid>[:<ntb>]", "host memory on remote CUDA device instead of RAM (NB! must be borrowed)");
 #endif
     argInfo(s, "bandwidth", "use a simpler algorithm for benchmarking bandwidth");
     argInfo(s, "bw", "alias for --bandwidth");
@@ -323,6 +324,7 @@ static string helpString(const string& progname)
     s << endl;
     s << "Possible queue specification key-value pairs:" << endl;
     qsInfo(s, "no", "<number>", "unique I/O queue number (required)");
+    qsInfo(s, "id", "<number>", "alias for no");
     qsInfo(s, "cmds", "<commands>", "number of unsubmitted I/O commands (defaults to controller's maximum)");
     qsInfo(s, "depth", "<commands>", "alias for cmds");
     qsInfo(s, "prps", "<pages>", "data transfer size in number of PRPs/pages (defaults to controller's maximum for sequential and 1 for random)");
