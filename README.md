@@ -98,6 +98,20 @@ As soon as peer-to-peer IOMMU support is improved in the Linux API and the
 Nvidia driver supports it, I will add it to the kernel module.
 
 
+### Using CUDA without SmartIO ####
+If you are going to use CUDA, you also need to locate the kernel module
+directory and manually run `make`. Locations will vary on different distros
+and based on installation type, but on Ubuntu the driver source can be usually found 
+in `/usr/src/nvidia-<major>-<major>.<minor>` if you install CUDA through the
+`.deb.` package.
+
+The CMake configuration is _supposed to_ autodetect the location of CUDA, 
+and the Nvidia driver by looking for a file called `Module.symvers` in known directories. 
+Make sure that this file is generated. It is also possible to point CMake to the correct
+location of the driver by specifying the `NVIDIA` define
+
+Make sure that the output from CMake contains both `Using NVIDIA driver found in ...` and `Configuring kernel module with CUDA`.
+
 
 ### Building the project ###
 From the project root directory, do the following:
@@ -107,12 +121,6 @@ $ cmake .. -DCMAKE_BUILD_TYPE=Release # use =Debug for debug build
 $ make libnvm                         # builds library
 $ make examples                       # builds example programs
 ```
-
-If you are going to use CUDA, you also need to locate the kernel module
-directory and manually run `make`. Locations will vary on different distros
-and based on installation type, but on Ubuntu the driver source can be found 
-in `/usr/src/nvidia-<major>-<major>.<minor>` if you install CUDA through the
-`.deb.` package.
 
 The CMake configuration is _supposed to_ autodetect the location of CUDA, 
 Nvidia driver and SISCI library. CUDA is located by the _FindCUDA_ package for
@@ -235,17 +243,17 @@ disk's BAR0.
 Settings can be passed to CMake using the `-Dsetting=value` flag. Here is a 
 comprehensive list of settings that can be overridden.
 
-Setting                 | Default    | Explanation
-------------------------|------------|-----------------------------------------
-`CMAKE_BUILD_TYPE`      | `Debug`    | Set to `Release` to make a release build
-`DIS`	                | `/opt/DIS` | Override the Dolphin installation path
-`NVIDIA`                |            | Override path to Nvidia driver
-`nvidia_archs`		| 30;50;60;61| Specify compute modes and SMs
-`no_smartio`            | `false`    | Don't build API with SmartIO support
-`no_module`             | `false`    | Don't build kernel module
-`no_cuda`               | `false`    | Don't build API with CUDA support
-`no_smartio_samples`    | `false`    | Don't build SmartIO samples
-`no_smartio_benchmarks` | `false`    | Don't build SmartIO benchmarks
+Setting                 | Default        | Explanation
+------------------------|----------------|-----------------------------------------
+`CMAKE_BUILD_TYPE`      | `Debug`        | Set to `Release` to make a release build
+`DIS`	                | `/opt/DIS`     | Override the Dolphin installation path
+`NVIDIA`                |                | Override path to Nvidia driver
+`nvidia_archs`		| 30;50;60;61;70 | Specify compute modes and SMs
+`no_smartio`            | `false`        | Don't build API with SmartIO support
+`no_module`             | `false`        | Don't build kernel module
+`no_cuda`               | `false`        | Don't build API with CUDA support
+`no_smartio_samples`    | `false`        | Don't build SmartIO samples
+`no_smartio_benchmarks` | `false`        | Don't build SmartIO benchmarks
 
 
 
