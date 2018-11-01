@@ -231,7 +231,7 @@ You want to unload the default nvme driver for the NVMe disk, and bind
 the helper driver to it:
 ```
 $ echo -n "0000:05:00.0" > /sys/bus/pci/devices/0000\:05\:00.0/driver/unbind
-$ echo -n "0000:05:00.0" > /sys/bus/pci/drivers/disnvm/bind
+$ echo -n "0000:05:00.0" > /sys/bus/pci/drivers/libnvm\ helper/bind
 ```
 
 After doing this, the file `/dev/libnvm0` should show up, representing the
