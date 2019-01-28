@@ -10,10 +10,10 @@ else
 .PHONY: default reload unload load clean install
 
 default:
-	$(MAKE) -C @kdir@ M=@module_output@ modules
+	$(MAKE) -C @KERNEL@ M=@module_output@ modules
 
 clean:
-	$(MAKE) -C @kdir@ M=@module_output@ clean
+	$(MAKE) -C @KERNEL@ M=@module_output@ clean
 
 reload: unload load
 
@@ -24,8 +24,8 @@ load:
 	insmod @CMAKE_PROJECT_NAME@.ko num_ctrls=64
 
 install: default
-	$(MAKE) -C @kdir@ M=@module_output@ modules_install
-	#$(MAKE) INSTALL_MOD_DIR=@CMAKE_PROJECT_NAME@ -C @kdir@ M=@module_output@ modules_install
+	$(MAKE) -C @KERNEL@ M=@module_output@ modules_install
+	#$(MAKE) INSTALL_MOD_DIR=@CMAKE_PROJECT_NAME@ -C @KERNEL@ M=@module_output@ modules_install
 
 endif
 

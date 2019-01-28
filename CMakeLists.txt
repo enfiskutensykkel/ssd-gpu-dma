@@ -11,6 +11,7 @@ find_package (CUDA 8.0)
 
 set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 set (NVIDIA "" CACHE PATH "Path to Nvidia driver source")
+set (KERNEL "/lib/modules/${CMAKE_SYSTEM_VERSION}/build" CACHE PATH "Path to kernel source, or module directory")
 
 set (nvidia_archs "30;50;52;60;61;70" CACHE STRING "NVIDIA compute architectures")
 set (no_smartio_samples false CACHE BOOL "Do not use SISCI for examples")
@@ -19,6 +20,7 @@ set (no_smartio false CACHE BOOL "Do not use SISCI for library or examples")
 set (no_module false CACHE BOOL "Do not build kernel module")
 set (no_cuda false CACHE BOOL "Do not build library with CUDA support")
 set (no_cc false CACHE BOOL "Do not assume cache-coherent architecture")
+set (BUILD_SHARED_LIBS true CACHE BOOL "Build shared library, set to false for static")
 
 if (no_smartio)
     set (no_smartio_samples true)
@@ -109,7 +111,7 @@ endif ()
 
 
 # Create NVME library target
-add_library (libnvm SHARED ${libnvm_source})
+add_library (libnvm ${libnvm_source})
 target_include_directories (libnvm PRIVATE "${libnvm_root}" "${libnvm_root}/dis")
 
 
@@ -148,7 +150,6 @@ if (NOT no_module)
         message(STATUS "Configuring kernel module without CUDA")
     endif ()
 
-    set (kdir "/lib/modules/${CMAKE_SYSTEM_VERSION}/build")
     configure_file ("${module_root}/Makefile.in" "${module_output}/Makefile" @ONLY)
 
     add_custom_target (module "${CMAKE_MAKE_PROGRAM}" WORKING_DIRECTORY "${module_output}")
