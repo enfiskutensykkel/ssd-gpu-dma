@@ -51,7 +51,7 @@ static struct consumer* consume_completions(struct consumer* c)
 
         if (cpl == NULL)
         {
-            pthread_yield();
+            sched_yield();
             continue;
         }
 
@@ -102,7 +102,7 @@ static struct producer* produce_commands(struct producer* p)
         while ((cmd = nvm_sq_enqueue(sq)) == NULL)
         {
             nvm_sq_submit(sq);
-            pthread_yield();
+            sched_yield();
         }
 
         nvm_cmd_header(cmd, NVM_DEFAULT_CID(sq), p->write ? NVM_IO_WRITE : NVM_IO_READ, ns_id);
