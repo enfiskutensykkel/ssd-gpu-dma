@@ -13,9 +13,18 @@
 #include <errno.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <time.h>
 
 #define MIN(a, b) ((a) <= (b) ? (a) : (b))
 
+uint64_t timediff_us(struct timespec* start, struct timespec* end) {
+    return (uint64_t)(end->tv_sec - start->tv_sec) * 1000000 + (end->tv_nsec-start->tv_nsec) / 1000;
+}
+
+void print_stats(struct timespec* start, struct timespec* end, size_t bytes) {
+        uint64_t diff = timediff_us(start, end);
+        fprintf(stderr, "Done in %lldus, %fMB/s\n", diff, (double)bytes/(double)diff);
+}
 
 static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
 {
@@ -225,11 +234,11 @@ static size_t rw_bytes(const struct disk_info* disk, struct queue_pair* qp, cons
     return num_cmds;
 }
 
-
 int read_and_dump(const struct disk_info* disk, struct queue_pair* qp, const nvm_dma_t* buffer, const struct options* args)
 {
     int status;
     pthread_t completer;
+    struct timespec start, end;
 
     // Start consuming
     status = pthread_create(&completer, NULL, (void *(*)(void*)) consume_completions, qp);
@@ -252,12 +261,18 @@ int read_and_dump(const struct disk_info* disk, struct queue_pair* qp, const nvm
                 buffer->n_ioaddrs * disk->page_size, 
                 args->num_blocks * disk->block_size - size_remaining);
         size_t remaining = size_remaining;
+
+        clock_gettime(CLOCK_MONOTONIC, &start);
+
         num_cmds += rw_bytes(disk, qp, buffer, &start_block, &size_remaining, NVM_IO_READ);
 
         while (qp->num_cpls < num_cmds)
         {
             usleep(1);
         }
+        clock_gettime(CLOCK_MONOTONIC, &end);
+
+        print_stats(&start, &end, remaining - size_remaining);
 
         dump_memory(buffer, args, remaining - size_remaining);
     }
@@ -275,6 +290,7 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
 {
     int status;
     pthread_t completer;
+    struct timespec start, end;
 
     // Start consuming
     status = pthread_create(&completer, NULL, (void *(*)(void*)) consume_completions, qp);
@@ -305,6 +321,9 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
         {
             fprintf(stderr, "WARNING: End of file was reached\n");
         }
+        size_t remaining = size_remaining;
+
+        clock_gettime(CLOCK_MONOTONIC, &start);
 
         num_cmds += rw_bytes(disk, qp, buffer, &start_block, &size_remaining, NVM_IO_WRITE);
 
@@ -319,6 +338,9 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
         {
             usleep(1);
         }
+        clock_gettime(CLOCK_MONOTONIC, &end);
+
+        print_stats(&start, &end, remaining - size_remaining);
     }
 
     // Wait for completions
