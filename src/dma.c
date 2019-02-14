@@ -244,7 +244,7 @@ static int map_memory(struct ioctl_mapping* md, uint64_t* ioaddrs)
     }
 
     struct nvm_ioctl_map request = {
-        .vaddr_start = (uint64_t) md->mapping.vaddr,
+        .vaddr_start = (uintptr_t) md->mapping.vaddr,
         .n_pages = md->mapping.n_pages,
         .ioaddrs = ioaddrs
     };
@@ -267,7 +267,7 @@ static int map_memory(struct ioctl_mapping* md, uint64_t* ioaddrs)
  */
 static int unmap_memory(const struct ioctl_mapping* md)
 {
-    uint64_t addr = (uint64_t) md->mapping.vaddr;
+    uint64_t addr = (uintptr_t) md->mapping.vaddr;
 
     int err = ioctl(md->ioctl_fd, NVM_UNMAP_MEMORY, &addr);
 

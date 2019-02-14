@@ -160,7 +160,7 @@ static void dump_memory(const nvm_dma_t* buffer, const struct options* args, siz
     size_t byte = 0;
     while (byte < size)
     {
-        fprintf(stdout, "%8lx: ", byte);
+        fprintf(stdout, "%8lx: ", (long)byte);
         for (size_t n = byte + (args->ascii ? 0x80 : 0x20); byte < n; ++byte)
         {
             uint8_t value = ptr[byte];
