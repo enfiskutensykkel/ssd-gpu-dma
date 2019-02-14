@@ -142,6 +142,9 @@ static long map_user_pages(struct map* map)
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(4, 5, 7)
 #warning "Building for older kernel, not properly tested"
     retval = get_user_pages(current, current->mm, map->vaddr, map->n_addrs, 1, 0, pages, NULL);
+#elif LINUX_VERSION_CODE <= KERNEL_VERSION(4, 8, 17)
+#warning "Building for older kernel, not properly tested"
+    retval = get_user_pages(map->vaddr, map->n_addrs, 1, 0, pages, NULL);
 #else
     retval = get_user_pages(map->vaddr, map->n_addrs, FOLL_WRITE, pages, NULL);
 #endif
