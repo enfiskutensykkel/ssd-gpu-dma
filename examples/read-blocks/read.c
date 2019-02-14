@@ -126,6 +126,8 @@ int create_queue_pair(nvm_aq_ref ref, struct queue_pair* qp, nvm_dma_t* cq_mem, 
 static void consume_completions(struct queue_pair* qp)
 {
     nvm_cpl_t* cpl;
+    qp->stop = false;
+    qp->num_cpls = 0;
 
     while (!qp->stop)
     {
