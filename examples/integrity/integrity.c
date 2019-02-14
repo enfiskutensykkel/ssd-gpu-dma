@@ -33,7 +33,7 @@ struct arguments
     uint32_t        segment_id;
     uint32_t        ns_id;
     uint16_t        n_queues;
-    size_t          read_bytes;
+    uint64_t        read_bytes;
     const char*     filename;
 };
 
@@ -407,7 +407,7 @@ int main(int argc, char** argv)
     if (args.read_bytes > 0)
     {
         file_size = args.read_bytes;
-        fprintf(stderr, "Reading from disk and dumping to file `%s' (%lu bytes)\n", args.filename, file_size);
+        fprintf(stderr, "Reading from disk and dumping to file `%s' (%lu bytes)\n", args.filename, (unsigned long)file_size);
     }
     else
     {
@@ -422,7 +422,7 @@ int main(int argc, char** argv)
             exit(2);
         }
 
-        fprintf(stderr, "Reading from file `%s' and writing to disk (%lu bytes)\n", args.filename, file_size);
+        fprintf(stderr, "Reading from file `%s' and writing to disk (%lu bytes)\n", args.filename, (unsigned long)file_size);
     }
 
 

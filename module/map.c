@@ -33,7 +33,7 @@ static struct map* create_descriptor(const struct ctrl* ctrl, u64 vaddr, unsigne
     unsigned long i;
     struct map* map = NULL;
 
-    map = kmalloc(sizeof(struct map) + (n_pages - 1) * sizeof(dma_addr_t), GFP_KERNEL);
+    map = kmalloc(sizeof(struct map) + (n_pages - 1) * sizeof(uint64_t), GFP_KERNEL);
     if (map == NULL)
     {
         printk(KERN_CRIT "Failed to allocate mapping descriptor\n");
