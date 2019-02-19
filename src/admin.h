@@ -62,6 +62,9 @@ void _nvm_admin_identify_ns(nvm_cmd_t* cmd, uint32_t ns_id, uint64_t ioaddr);
  */
 void _nvm_admin_current_num_queues(nvm_cmd_t* cmd, bool set, uint16_t n_cqs, uint16_t n_sqs);
 
-
+/*
+ * Get log page.
+ */
+int nvm_admin_get_log_page(nvm_aq_ref ref, uint32_t ns_id, void* ptr, uint64_t ioaddr, uint8_t log_id, uint64_t log_offset);
 
 #endif /* __NVM_INTERNAL_ADMIN_H__ */

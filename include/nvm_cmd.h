@@ -36,6 +36,7 @@ enum nvm_admin_command_set
     NVM_ADMIN_DELETE_COMPLETION_QUEUE   = (0x00 << 7) | (0x01 << 2) | 0x00,
     NVM_ADMIN_CREATE_COMPLETION_QUEUE   = (0x00 << 7) | (0x01 << 2) | 0x01,
     NVM_ADMIN_IDENTIFY                  = (0x00 << 7) | (0x01 << 2) | 0x02,
+    NVM_ADMIN_GET_LOG_PAGE              = (0x00 << 7) | (0x00 << 2) | 0x02,
     NVM_ADMIN_ABORT                     = (0x00 << 7) | (0x02 << 2) | 0x00,
     NVM_ADMIN_SET_FEATURES              = (0x00 << 7) | (0x02 << 2) | 0x01,
     NVM_ADMIN_GET_FEATURES              = (0x00 << 7) | (0x02 << 2) | 0x02
