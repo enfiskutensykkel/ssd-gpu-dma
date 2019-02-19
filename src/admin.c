@@ -89,6 +89,19 @@ void _nvm_admin_identify_ns(nvm_cmd_t* cmd, uint32_t ns_id, uint64_t ioaddr)
 
 
 
+void _nvm_admin_get_log_page(nvm_cmd_t* cmd, uint32_t ns_id, uint64_t ioaddr, uint8_t log_id, uint64_t log_offset)
+{
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_GET_LOG_PAGE, ns_id);
+    nvm_cmd_data_ptr(cmd, ioaddr, 0);
+
+    cmd->dword[10] = (1024 << 16) | log_id;
+    cmd->dword[11] = 0;
+    cmd->dword[12] = (uint32_t)log_offset;
+    cmd->dword[13] = (uint32_t)(log_offset >> 32);
+}
+
+
+
 int nvm_admin_ctrl_info(nvm_aq_ref ref, struct nvm_ctrl_info* info, void* ptr, uint64_t ioaddr)
 {
     nvm_cmd_t command;
@@ -184,6 +197,31 @@ int nvm_admin_ns_info(nvm_aq_ref ref, struct nvm_ns_info* info, uint32_t ns_id, 
     uint32_t lba_format = *((uint32_t*) (bytes + 128 + sizeof(uint32_t) * format_idx));
     info->lba_data_size = 1 << _RB(lba_format, 23, 16);
     info->metadata_size = _RB(lba_format, 15, 0);
+
+    return NVM_ERR_PACK(NULL, 0);
+}
+
+int nvm_admin_get_log_page(nvm_aq_ref ref, uint32_t ns_id, void* ptr, uint64_t ioaddr, uint8_t log_id, uint64_t log_offset)
+{
+    nvm_cmd_t command;
+    nvm_cpl_t completion;
+
+    memset(&command, 0, sizeof(command));
+    memset(&completion, 0, sizeof(completion));
+    memset(ptr, 0, 0x1000);
+
+    nvm_cache_invalidate(ptr, 0x1000);
+
+    _nvm_admin_get_log_page(&command, ns_id, ioaddr, log_id, log_offset);
+
+    int err = nvm_raw_rpc(ref, &command, &completion);
+    if (!nvm_ok(err))
+    {
+        dprintf("Get log page failed: %s\n", nvm_strerror(err));
+        return err;
+    }
+    
+    nvm_cache_invalidate(ptr, 0x1000);
 
     return NVM_ERR_PACK(NULL, 0);
 }
