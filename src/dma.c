@@ -339,7 +339,7 @@ int _nvm_dma_init(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, struct va_range* v
 /*
  * Create DMA mapping descriptor from user supplied physical/bus addresses.
  */
-int nvm_raw_dma_map(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, size_t page_size, size_t n_pages, const uint64_t* ioaddrs)
+int nvm_dma_map(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, size_t page_size, size_t n_pages, const uint64_t* ioaddrs)
 {
     int status;
     struct map* map;

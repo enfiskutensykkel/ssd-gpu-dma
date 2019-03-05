@@ -31,12 +31,12 @@ extern "C" {
  *
  * Note: vaddr can be NULL.
  */
-int nvm_raw_dma_map(nvm_dma_t** map,                // Mapping descriptor reference
-                    const nvm_ctrl_t* ctrl,         // NVM controller reference
-                    void* vaddr,                    // Pointer to userspace memory (can be NULL if not required)
-                    size_t page_size,               // Physical page size
-                    size_t n_pages,                 // Number of pages to map
-                    const uint64_t* page_addrs);    // List of physical/bus addresses to the pages
+int nvm_dma_map(nvm_dma_t** map,                // Mapping descriptor reference
+                const nvm_ctrl_t* ctrl,         // NVM controller reference
+                void* vaddr,                    // Pointer to userspace memory (can be NULL if not required)
+                size_t page_size,               // Physical page size
+                size_t n_pages,                 // Number of pages to map
+                const uint64_t* page_addrs);    // List of physical/bus addresses to the pages
 
 
 

@@ -114,7 +114,7 @@ static int identify(const nvm_ctrl_t* ctrl, uint32_t nvm_ns_id)
         goto out;
     }
 
-    status = nvm_raw_dma_map(&window, ctrl, memory, page_size, 3, ioaddrs);
+    status = nvm_dma_map(&window, ctrl, memory, page_size, 3, ioaddrs);
     if (status != 0)
     {
         fprintf(stderr, "Failed to create DMA window: %s\n", strerror(status));
@@ -128,7 +128,7 @@ static int identify(const nvm_ctrl_t* ctrl, uint32_t nvm_ns_id)
         goto out;
     }
 
-    status = identify_ctrl(admin, ((unsigned char*) memory) + 2 * ctrl->page_size, ioaddrs[2]);
+    status = identify_ctrl(admin, NVM_DMA_OFFSET(window, 2), window->ioaddrs[2]);
     if (status != 0)
     {
         goto out;
@@ -136,7 +136,7 @@ static int identify(const nvm_ctrl_t* ctrl, uint32_t nvm_ns_id)
 
     if (nvm_ns_id != 0)
     {
-        status = identify_ns(admin, nvm_ns_id, ((unsigned char*) memory) + 2 * ctrl->page_size, ioaddrs[2]);
+        status = identify_ns(admin, nvm_ns_id, NVM_DMA_OFFSET(window, 2), window->ioaddrs[2]);
     }
 
 out:
