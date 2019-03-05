@@ -114,7 +114,7 @@ static int identify(const nvm_ctrl_t* ctrl, uint32_t nvm_ns_id)
         goto out;
     }
 
-    status = nvm_dma_map(&window, ctrl, memory, page_size, 3, ioaddrs);
+    status = nvm_raw_dma_map(&window, ctrl, memory, page_size, 3, ioaddrs);
     if (status != 0)
     {
         fprintf(stderr, "Failed to create DMA window: %s\n", strerror(status));

@@ -19,8 +19,9 @@ extern "C" {
  *
  * Returns a reference handle that can be used for admin RPC calls.
  */
-int nvm_aq_create(nvm_aq_ref* ref, const nvm_ctrl_t* ctrl, const nvm_dma_t* aq_mem);
-
+int nvm_aq_create(nvm_aq_ref* ref, 
+                  const nvm_ctrl_t* ctrl, 
+                  const nvm_dma_t* dma_window);
 
 
 /*
@@ -43,6 +44,7 @@ void nvm_aq_destroy(nvm_aq_ref ref);
 
 
 #ifdef __DIS_CLUSTER__
+
 
 /*
  * Maximum number of adapters.

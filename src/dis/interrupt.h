@@ -1,11 +1,5 @@
 #ifndef __NVM_INTERNAL_DIS_INTERRUPT_H__
 #define __NVM_INTERNAL_DIS_INTERRUPT_H__
-
-/* Forward declarations */
-struct local_intr;
-struct remote_intr;
-
-
 #ifdef _SISCI
 
 /* Make sure everything is defined as needed */
@@ -18,6 +12,13 @@ struct remote_intr;
 #include <stdint.h>
 #include <stdbool.h>
 #include <sisci_types.h>
+
+
+
+/* Forward declarations */
+struct local_intr;
+struct remote_intr;
+
 
 
 /*

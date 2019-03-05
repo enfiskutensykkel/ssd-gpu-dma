@@ -10,6 +10,7 @@
 #include <nvm_types.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <errno.h>
 
 
 /*
@@ -28,8 +29,27 @@ void nvm_queue_clear(nvm_queue_t* q,            // NVM queue descriptor
                      const nvm_ctrl_t* ctrl,    // NVM controller handle
                      bool cq,                   // Is this a completion queue or submission queue?
                      uint16_t no,               // Queue number
-                     void* vaddr,               // Virtual address to queue memory
+                     uint16_t qs,               // Queue size (number of entries)
+                     bool local,                // Is this local or remote memory
+                     volatile void* vaddr,      // Virtual address to queue memory
                      uint64_t ioaddr);          // Bus address to queue memory (as seen from the controller)
+#ifdef __cplusplus
+}
+#endif
+
+
+/*
+ * Reset queue descriptor and set all members to initial state.
+ *
+ * Note: this function should not be used if the queue has been created but
+ *       not yet deleted, as it will lead to inconsistent state for the
+ *       controller.
+ */
+#ifdef __cplusplus
+extern "C" {
+#endif
+__host__
+void nvm_queue_reset(nvm_queue_t* q);
 #ifdef __cplusplus
 }
 #endif
@@ -47,23 +67,22 @@ void nvm_queue_clear(nvm_queue_t* q,            // NVM queue descriptor
 __host__ __device__ static inline
 nvm_cmd_t* nvm_sq_enqueue(nvm_queue_t* sq)
 {
-    // Check if queue is full
-    if ((uint16_t) ((sq->tail - sq->head) % sq->max_entries) == sq->max_entries - 1)
+    // Check if queue has available slots
+    if (((uint16_t) (sq->tail - sq->head)) < sq->qs)
     {
-        return NULL;
+        // Take slot and end of queue
+        nvm_cmd_t* cmd = (nvm_cmd_t*) (((unsigned char*) sq->vaddr) + sq->es * sq->tail % sq->qs);
+
+        // Increase tail pointer and invert phase tag if necessary
+        if (++sq->tail % sq->qs == 0)
+        {
+            sq->phase = !sq->phase;
+        }
+
+        return cmd;
     }
 
-    // Take slot and end of queue
-    nvm_cmd_t* cmd = (nvm_cmd_t*) (((unsigned char*) sq->vaddr) + sq->entry_size * sq->tail);
-
-    // Increase tail pointer and wrap around if necessary
-    if (++sq->tail == sq->max_entries)
-    {
-        sq->phase = !sq->phase;
-        sq->tail = 0;
-    }
-
-    return cmd;
+    return NULL;
 }
 
 
@@ -80,16 +99,18 @@ __device__ static inline
 nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16_t i)
 {
     unsigned char* start = (unsigned char*) sq->vaddr;
-    unsigned char* end = start + (sq->max_entries * sq->entry_size);
+    unsigned char* end = start + (sq->qs * sq->es);
     nvm_cmd_t* cmd = NULL;
+
+    //if (sq->tail +
 
     if (last == NULL)
     {
-        cmd = (nvm_cmd_t*) (start + sq->entry_size * i);
+        cmd = (nvm_cmd_t*) (start + sq->es * i);
     }
     else
     {
-        cmd = (nvm_cmd_t*) (((unsigned char*) last) + n * sq->entry_size);
+        cmd = (nvm_cmd_t*) (((unsigned char*) last) + n * sq->es);
 
         if (((nvm_cmd_t*) end) <= cmd)
         {
@@ -99,7 +120,7 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
 
     if (i == 0)
     {
-        sq->tail = (((uint32_t) sq->tail) + ((uint32_t) n)) % sq->max_entries;
+        sq->tail = (((uint32_t) sq->tail) + ((uint32_t) n)) % sq->qs;
     }
 
 //#ifdef __CUDA_ARCH__
@@ -124,9 +145,12 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
 __host__ __device__ static inline
 nvm_cpl_t* nvm_cq_poll(const nvm_queue_t* cq)
 {
-    nvm_cpl_t* cpl = (nvm_cpl_t*) (((unsigned char*) cq->vaddr) + cq->entry_size * cq->head);
+    nvm_cpl_t* cpl = (nvm_cpl_t*) (((unsigned char*) cq->vaddr) + cq->es * (cq->head % cq->qs));
 
-    nvm_cache_invalidate((void*) cpl, sizeof(nvm_cpl_t));
+    if (cq->local) 
+    {
+        nvm_cache_invalidate((void*) cpl, sizeof(nvm_cpl_t));
+    }
 
     // Check if new completion is ready by checking the phase tag
     if (!!_RB(*NVM_CPL_STATUS(cpl), 0, 0) != cq->phase)
@@ -156,10 +180,9 @@ nvm_cpl_t* nvm_cq_dequeue(nvm_queue_t* cq)
 
     if (cpl != NULL)
     {
-        // Increase head pointer and wrap around if necessary
-        if (++cq->head == cq->max_entries)
+        // Increase head pointer and invert phase tag
+        if (++cq->head % cq->qs == 0)
         {
-            cq->head = 0;
             cq->phase = !cq->phase;
         }
     }
@@ -200,13 +223,29 @@ nvm_cpl_t* nvm_cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout);
 __host__ __device__ static inline
 void nvm_sq_submit(nvm_queue_t* sq)
 {
-    if (sq->last != sq->tail && sq->db != NULL)
-    {
-        nvm_cache_flush((void*) sq->vaddr, sizeof(nvm_cmd_t) * sq->max_entries);
-        nvm_wcb_flush(); 
+    const uint16_t t = sq->tail % sq->qs;
 
-        *((volatile uint32_t*) sq->db) = sq->tail;
-        sq->last = sq->tail;
+    if (sq->last != t && sq->db != NULL)
+    {
+        if (sq->local)
+        {
+            if (t < sq->last)
+            {
+                nvm_cache_flush((void*) (sq->vaddr + sq->es * sq->last), sq->es * (sq->qs - sq->last));
+                nvm_cache_flush((void*) sq->vaddr, sq->es * sq->last);
+            }
+            else
+            {
+                nvm_cache_flush((void*) (sq->vaddr + sq->es * sq->last), sq->es * (sq->tail - sq->last));
+            }
+        }
+        else 
+        {
+            nvm_wcb_flush(); 
+        }
+
+        *((volatile uint32_t*) sq->db) = t;
+        sq->last = t;
     }
 }
 
@@ -219,9 +258,9 @@ __host__ __device__ static inline
 void nvm_sq_update(nvm_queue_t* sq)
 {
     // Update head pointer of submission queue
-    if (sq->db != NULL && ++sq->head == sq->max_entries)
+    if (sq->db != NULL)
     {
-        sq->head = 0;
+        ++sq->head;
     }
 }
 
@@ -237,11 +276,11 @@ void nvm_sq_update(nvm_queue_t* sq)
 __host__ __device__ static inline
 void nvm_cq_update(nvm_queue_t* cq)
 {
-    if (cq->last != cq->head && cq->db != NULL)
+    if (cq->last != cq->head % cq->qs && cq->db != NULL)
     {
-        *((volatile uint32_t*) cq->db) = cq->head;
-        cq->last = cq->head;
-        nvm_wcb_flush();
+        cq->last = cq->head % cq->qs;
+        *((volatile uint32_t*) cq->db) = cq->last;
+        cq->tail = cq->head;
     }
 }
 

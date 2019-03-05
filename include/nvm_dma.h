@@ -31,12 +31,20 @@ extern "C" {
  *
  * Note: vaddr can be NULL.
  */
-int nvm_dma_map(nvm_dma_t** map,                // Mapping descriptor reference
-                const nvm_ctrl_t* ctrl,         // NVM controller reference
-                void* vaddr,                    // Pointer to userspace memory (can be NULL if not required)
-                size_t page_size,               // Physical page size
-                size_t n_pages,                 // Number of pages to map
-                const uint64_t* page_addrs);    // List of physical/bus addresses to the pages
+int nvm_raw_dma_map(nvm_dma_t** map,                // Mapping descriptor reference
+                    const nvm_ctrl_t* ctrl,         // NVM controller reference
+                    void* vaddr,                    // Pointer to userspace memory (can be NULL if not required)
+                    size_t page_size,               // Physical page size
+                    size_t n_pages,                 // Number of pages to map
+                    const uint64_t* page_addrs);    // List of physical/bus addresses to the pages
+
+
+
+/*
+ * Create DMA mapping descriptor using offsets from a previously 
+ * created DMA descriptor.
+ */
+int nvm_dma_remap(nvm_dma_t** new_map, const nvm_dma_t* other_map);
 
 
 
@@ -93,13 +101,11 @@ int nvm_dma_map_device(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* devptr, si
  * 
  * The controller handle must have been created using SmartIO, and
  * the segment must already be prepared on the local adapter.
- *
- * Note: vaddr can be NULL.
  */
 int nvm_dis_dma_map_local(nvm_dma_t** map,              // Mapping descriptor reference
                           const nvm_ctrl_t* ctrl,       // NVM controller handle
-                          uint32_t dis_adapter,         // Local DIS adapter
                           sci_local_segment_t segment,  // Local segment descriptor
+                          uint32_t dis_adapter,         // Local DIS adapter segment is prepared on
                           bool map_vaddr);              // Should function also map segment into local space
 
 #endif /* __DIS_CLUSTER__ */
@@ -117,7 +123,8 @@ int nvm_dis_dma_map_local(nvm_dma_t** map,              // Mapping descriptor re
  *
  * The remote segment must already be connected.
  *
- * Note: vaddr can be NULL.
+ * Note: You should generally prefer write combining, except
+ *       for mapped device registers that require fine-grained writes.
  */
 int nvm_dis_dma_map_remote(nvm_dma_t** map,             // Mapping descriptor reference
                            const nvm_ctrl_t* ctrl,      // NVM controller handle
@@ -144,32 +151,31 @@ int nvm_dma_create(nvm_dma_t** map,
 
 
 #if defined( __DIS_CLUSTER__ )
-
 /*
- * Create segment and map it for the controller.
- * Short-hand function for creating a local segment.
+ * Create device memory segment and map it for the controller.
+ * Short-hand function for creating a device memory segment.
+ * If mem_hints is 0, the API will assume that the local CPU
+ * will read from the segment (and thus create it locally).
  */
 int nvm_dis_dma_create(nvm_dma_t** map,
                        const nvm_ctrl_t* ctrl,
-                       uint32_t dis_adapter,
                        uint32_t id,
-                       size_t size);
+                       size_t size,
+                       bool shared,
+                       unsigned int mem_hints);
 
 #endif /* __DIS_CLUSTER__ */
 
 
 
 #if defined( __DIS_CLUSTER__ )
-
 /* 
  * Connect to device memory.
  * Short-hand function for connecting to device memory.
  */
 int nvm_dis_dma_connect(nvm_dma_t** map,
                         const nvm_ctrl_t* ctrl,
-                        uint32_t dis_adapter,
-                        uint32_t segment_no,
-                        size_t size,
+                        uint32_t id,
                         bool shared);
 
 #endif /* __DIS_CLUSTER__ */
@@ -180,11 +186,11 @@ int nvm_dis_dma_connect(nvm_dma_t** map,
 
 /*
  * Note: This function requires the IOMMU to be enabled.
+ * Currently not implemented.
  */
 int nvm_dis_dma_map_host(nvm_dma_t** map,
                          const nvm_ctrl_t* ctrl,
                          uint32_t dis_adapter,
-                         uint32_t id,
                          void* vaddr,
                          size_t size);
 
@@ -196,7 +202,6 @@ int nvm_dis_dma_map_host(nvm_dma_t** map,
 int nvm_dis_dma_map_device(nvm_dma_t** map, 
                            const nvm_ctrl_t* ctrl, 
                            uint32_t dis_adapter,
-                           uint32_t id,
                            void* devptr,
                            size_t size);
 

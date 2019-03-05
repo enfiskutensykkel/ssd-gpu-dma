@@ -4,54 +4,47 @@
 #include <nvm_types.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
+
 
 /* Forward declaration */
-struct dma_map;
-
-
-/* Callback type for unmapping and deleting custom mapping */
-typedef void (*dma_map_free_t)(struct dma_map* map);
+struct va_range;
 
 
 
 /*
- * DMA mapping descriptor.
- * 
- * This structure describes a custom address range mapping.
- * Custom types should include this structure in head.
+ * Callback type for freeing an address range descriptor.
+ * Called after the range is unmapped for the device and virtual address mapping can
+ * be released.
  */
-struct __attribute__((aligned (64))) dma_map
+typedef void (*va_range_free_t)(struct va_range* va);
+
+
+
+/*
+ * Virtual address range descriptor.
+ * This structure describes a custom address range mapped in userspace.
+ */
+struct va_range
 {
-    void*           vaddr;      // Virtual address of mapped address range
-    size_t          page_size;  // Page size of address range
+    volatile void*  vaddr;      // Virtual address of mapped address range
+    size_t          page_size;  // Alignment of mapping (page size)
     size_t          n_pages;    // Number of pages for address range
 };
 
 
-
-/*
- * Create a DMA handle container.
- */
-int _nvm_dma_create(nvm_dma_t** handle,
-                    const nvm_ctrl_t* ctrl,
-                    struct dma_map* map,
-                    dma_map_free_t release);
+#define VA_RANGE_INIT(vaddr, page_size, n_pages)    \
+    (struct va_range) {(vaddr), (page_size), (n_pages)}
 
 
 /*
- * Initialize DMA handle.
+ * Map address range for a controller and create and initialize a DMA handle.
  */
-void _nvm_dma_handle_populate(nvm_dma_t* handle, 
-                              const nvm_ctrl_t* ctrl, 
-                              const uint64_t* ioaddrs);
-
-
-
-/*
- * Invoke release callback and remove a DMA handle container.
- */
-void _nvm_dma_remove(nvm_dma_t* handle);
-
+int _nvm_dma_init(nvm_dma_t** handle,
+                  const nvm_ctrl_t* ctrl,
+                  struct va_range* va,
+                  bool remote,
+                  va_range_free_t release);
 
 
 #endif /* __NVM_INTERNAL_DMA_H__ */

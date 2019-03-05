@@ -10,7 +10,6 @@
 #include <stdbool.h>
 #include <string.h>
 #include <errno.h>
-#include "admin.h"
 #include "rpc.h"
 #include "regs.h"
 #include "util.h"
@@ -18,45 +17,45 @@
 
 
 
-void _nvm_admin_cq_create(nvm_cmd_t* cmd, const nvm_queue_t* cq)
+static void admin_cq_create(nvm_cmd_t* cmd, const nvm_queue_t* cq, uint64_t ioaddr)
 {
-    nvm_cmd_header(cmd, 0, NVM_ADMIN_CREATE_COMPLETION_QUEUE, 0);
-    nvm_cmd_data_ptr(cmd, cq->ioaddr, 0);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_CREATE_CQ, 0);
+    nvm_cmd_data_ptr(cmd, ioaddr, 0);
 
-    cmd->dword[10] = (((uint32_t) cq->max_entries - 1) << 16) | cq->no;
+    cmd->dword[10] = (((uint32_t) cq->qs - 1) << 16) | cq->no;
     cmd->dword[11] = (0x0000 << 16) | (0x00 << 1) | 0x01;
 }
 
 
 
-void _nvm_admin_cq_delete(nvm_cmd_t* cmd, const nvm_queue_t* cq)
+static void admin_cq_delete(nvm_cmd_t* cmd, const nvm_queue_t* cq)
 {
-    nvm_cmd_header(cmd, 0, NVM_ADMIN_DELETE_COMPLETION_QUEUE, 0);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_DELETE_CQ, 0);
     cmd->dword[10] = cq->no & 0xffff;
 }
 
 
 
-void _nvm_admin_sq_create(nvm_cmd_t* cmd, const nvm_queue_t* sq, const nvm_queue_t* cq)
+static void admin_sq_create(nvm_cmd_t* cmd, const nvm_queue_t* sq, const nvm_queue_t* cq, uint64_t ioaddr)
 {
-    nvm_cmd_header(cmd, 0, NVM_ADMIN_CREATE_SUBMISSION_QUEUE, 0);
-    nvm_cmd_data_ptr(cmd, sq->ioaddr, 0);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_CREATE_SQ, 0);
+    nvm_cmd_data_ptr(cmd, ioaddr, 0);
 
-    cmd->dword[10] = (((uint32_t) sq->max_entries - 1) << 16) | sq->no;
+    cmd->dword[10] = (((uint32_t) sq->qs - 1) << 16) | sq->no;
     cmd->dword[11] = (((uint32_t) cq->no) << 16) | (0x00 << 1) | 0x01;
 }
 
 
 
-void _nvm_admin_sq_delete(nvm_cmd_t* cmd, const nvm_queue_t* sq)
+static void admin_sq_delete(nvm_cmd_t* cmd, const nvm_queue_t* sq)
 {
-    nvm_cmd_header(cmd, 0, NVM_ADMIN_DELETE_SUBMISSION_QUEUE, 0);
+    nvm_cmd_header(cmd, 0, NVM_ADMIN_DELETE_SQ, 0);
     cmd->dword[10] = sq->no & 0xffff;
 }
 
 
 
-void _nvm_admin_current_num_queues(nvm_cmd_t* cmd, bool set, uint16_t n_cqs, uint16_t n_sqs)
+static void admin_current_num_queues(nvm_cmd_t* cmd, bool set, uint16_t n_cqs, uint16_t n_sqs)
 {
     nvm_cmd_header(cmd, 0, set ? NVM_ADMIN_SET_FEATURES : NVM_ADMIN_GET_FEATURES, 0);
     nvm_cmd_data_ptr(cmd, 0, 0);
@@ -67,7 +66,7 @@ void _nvm_admin_current_num_queues(nvm_cmd_t* cmd, bool set, uint16_t n_cqs, uin
 
 
 
-void _nvm_admin_identify_ctrl(nvm_cmd_t* cmd, uint64_t ioaddr)
+static void admin_identify_ctrl(nvm_cmd_t* cmd, uint64_t ioaddr)
 {
     nvm_cmd_header(cmd, 0, NVM_ADMIN_IDENTIFY, 0);
     nvm_cmd_data_ptr(cmd, ioaddr, 0);
@@ -78,7 +77,7 @@ void _nvm_admin_identify_ctrl(nvm_cmd_t* cmd, uint64_t ioaddr)
 
 
 
-void _nvm_admin_identify_ns(nvm_cmd_t* cmd, uint32_t ns_id, uint64_t ioaddr)
+static void admin_identify_ns(nvm_cmd_t* cmd, uint32_t ns_id, uint64_t ioaddr)
 {
     nvm_cmd_header(cmd, 0, NVM_ADMIN_IDENTIFY, ns_id);
     nvm_cmd_data_ptr(cmd, ioaddr, 0);
@@ -89,7 +88,7 @@ void _nvm_admin_identify_ns(nvm_cmd_t* cmd, uint32_t ns_id, uint64_t ioaddr)
 
 
 
-void _nvm_admin_get_log_page(nvm_cmd_t* cmd, uint32_t ns_id, uint64_t ioaddr, uint8_t log_id, uint64_t log_offset)
+static void admin_get_log_page(nvm_cmd_t* cmd, uint32_t ns_id, uint64_t ioaddr, uint8_t log_id, uint64_t log_offset)
 {
     nvm_cmd_header(cmd, 0, NVM_ADMIN_GET_LOG_PAGE, ns_id);
     nvm_cmd_data_ptr(cmd, ioaddr, 0);
@@ -128,7 +127,7 @@ int nvm_admin_ctrl_info(nvm_aq_ref ref, struct nvm_ctrl_info* info, void* ptr, u
     info->contiguous = !!CAP$CQR(ctrl->mm_ptr);
     info->max_entries = ctrl->max_entries;
 
-    _nvm_admin_identify_ctrl(&command, ioaddr);
+    admin_identify_ctrl(&command, ioaddr);
 
     int err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
@@ -176,7 +175,7 @@ int nvm_admin_ns_info(nvm_aq_ref ref, struct nvm_ns_info* info, uint32_t ns_id, 
 
     info->ns_id = ns_id;
 
-    _nvm_admin_identify_ns(&command, ns_id, ioaddr);
+    admin_identify_ns(&command, ns_id, ioaddr);
 
     int err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
@@ -201,6 +200,8 @@ int nvm_admin_ns_info(nvm_aq_ref ref, struct nvm_ns_info* info, uint32_t ns_id, 
     return NVM_ERR_PACK(NULL, 0);
 }
 
+
+
 int nvm_admin_get_log_page(nvm_aq_ref ref, uint32_t ns_id, void* ptr, uint64_t ioaddr, uint8_t log_id, uint64_t log_offset)
 {
     nvm_cmd_t command;
@@ -212,7 +213,7 @@ int nvm_admin_get_log_page(nvm_aq_ref ref, uint32_t ns_id, void* ptr, uint64_t i
 
     nvm_cache_invalidate(ptr, 0x1000);
 
-    _nvm_admin_get_log_page(&command, ns_id, ioaddr, log_id, log_offset);
+    admin_get_log_page(&command, ns_id, ioaddr, log_id, log_offset);
 
     int err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
@@ -228,24 +229,53 @@ int nvm_admin_get_log_page(nvm_aq_ref ref, uint32_t ns_id, void* ptr, uint64_t i
 
 
 
-int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, void* vaddr, uint64_t ioaddr)
+int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, const nvm_dma_t* dma, size_t offset, size_t n_pages)
 {
     nvm_cmd_t command;
     nvm_cpl_t completion;
     nvm_queue_t queue;
+    const size_t cpls_per_page = dma->page_size / sizeof(nvm_cpl_t);
 
-    const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
-
+    // Queue number 0 is reserved for admin queues
     if (id == 0)
     {
         return NVM_ERR_PACK(NULL, EINVAL);
     }
 
-    nvm_queue_clear(&queue, ctrl, true, id, vaddr, ioaddr);
+    // Do some sanity checking
+    if (dma->vaddr == NULL)
+    {
+        return NVM_ERR_PACK(NULL, EINVAL);
+    }
+    else if (n_pages == 0 
+            || n_pages > dma->n_ioaddrs 
+            || offset > dma->n_ioaddrs 
+            || offset + n_pages > dma->n_ioaddrs)
+    {
+        return NVM_ERR_PACK(NULL, ERANGE);
+    }
+
+    // We currently only support contiguous memory
+    if (n_pages > 1 && !dma->contiguous)
+    {
+        dprintf("Non-contiguous queues are not supported\n");
+        return NVM_ERR_PACK(NULL, ENOTSUP);
+    }
+
+    // Get controller reference
+    const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
+    if (ctrl == NULL)
+    {
+        return NVM_ERR_PACK(NULL, ENOTTY);
+    }
+    
+    nvm_queue_clear(&queue, ctrl, true, id, cpls_per_page * n_pages, 
+            dma->local, NVM_DMA_OFFSET(dma, offset), dma->ioaddrs[offset]);
 
     memset(&command, 0, sizeof(command));
     memset(&completion, 0, sizeof(completion));
-    _nvm_admin_cq_create(&command, &queue);
+
+    admin_cq_create(&command, &queue, dma->ioaddrs[offset]);
 
     int err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
@@ -272,7 +302,7 @@ int nvm_admin_cq_delete(nvm_aq_ref ref, nvm_queue_t* cq)
 
     memset(&command, 0, sizeof(command));
     memset(&completion, 0, sizeof(completion));
-    _nvm_admin_cq_delete(&command, cq);
+    admin_cq_delete(&command, cq);
 
     int err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
@@ -288,24 +318,52 @@ int nvm_admin_cq_delete(nvm_aq_ref ref, nvm_queue_t* cq)
 
 
 
-int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, uint16_t id, void* vaddr, uint64_t ioaddr)
+int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, uint16_t id, const nvm_dma_t* dma, size_t offset, size_t n_pages)
 {
     nvm_cmd_t command;
     nvm_cpl_t completion;
     nvm_queue_t queue;
+    const size_t cmds_per_page = dma->page_size / sizeof(nvm_cmd_t);
 
-    const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
-
+    // Queue number 0 is reserved for admin queues
     if (id == 0)
     {
         return NVM_ERR_PACK(NULL, EINVAL);
     }
 
-    nvm_queue_clear(&queue, ctrl, false, id, vaddr, ioaddr);
+    // Do some sanity checking
+    if (dma->vaddr == NULL)
+    {
+        return NVM_ERR_PACK(NULL, EINVAL);
+    }
+    else if (n_pages == 0 
+            || n_pages > dma->n_ioaddrs 
+            || offset > dma->n_ioaddrs 
+            || offset + n_pages > dma->n_ioaddrs)
+    {
+        return NVM_ERR_PACK(NULL, ERANGE);
+    }
+
+    // We currently only support contiguous memory
+    if (n_pages > 1 && !dma->contiguous)
+    {
+        dprintf("Non-contiguous queues are not supported\n");
+        return NVM_ERR_PACK(NULL, ENOTSUP);
+    }
+
+    // Get controller reference
+    const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
+    if (ctrl == NULL)
+    {
+        return NVM_ERR_PACK(NULL, ENOTTY);
+    }
+
+    nvm_queue_clear(&queue, ctrl, false, id, cmds_per_page * n_pages, 
+            dma->local, NVM_DMA_OFFSET(dma, offset), dma->ioaddrs[offset]);
 
     memset(&command, 0, sizeof(command));
     memset(&completion, 0, sizeof(completion));
-    _nvm_admin_sq_create(&command, &queue, cq);
+    admin_sq_create(&command, &queue, cq, dma->ioaddrs[offset]);
 
     int err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
@@ -337,7 +395,7 @@ int nvm_admin_sq_delete(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq)
 
     memset(&command, 0, sizeof(command));
     memset(&completion, 0, sizeof(completion));
-    _nvm_admin_sq_delete(&command, sq);
+    admin_sq_delete(&command, sq);
 
     int err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
@@ -361,7 +419,7 @@ int nvm_admin_get_num_queues(nvm_aq_ref ref, uint16_t* n_cqs, uint16_t* n_sqs)
     memset(&command, 0, sizeof(command));
     memset(&completion, 0, sizeof(completion));
 
-    _nvm_admin_current_num_queues(&command, false, 0, 0);
+    admin_current_num_queues(&command, false, 0, 0);
 
     int err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
@@ -398,7 +456,7 @@ int nvm_admin_request_num_queues(nvm_aq_ref ref, uint16_t* n_cqs, uint16_t* n_sq
     memset(&command, 0, sizeof(command));
     memset(&completion, 0, sizeof(completion));
 
-    _nvm_admin_current_num_queues(&command, true, *n_cqs, *n_sqs);
+    admin_current_num_queues(&command, true, *n_cqs, *n_sqs);
 
     int err = nvm_raw_rpc(ref, &command, &completion);
     if (err != 0)

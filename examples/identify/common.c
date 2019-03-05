@@ -71,7 +71,7 @@ nvm_aq_ref reset_ctrl(const nvm_ctrl_t* ctrl, const nvm_dma_t* dma_window)
     {
         return NULL;
     }
-    memset(dma_window->vaddr, 0, dma_window->page_size * 2);
+    memset((void*) dma_window->vaddr, 0, dma_window->page_size * 2);
 
     fprintf(stderr, "Resetting controller and setting up admin queues...\n");
     status = nvm_aq_create(&admin, ctrl, dma_window);

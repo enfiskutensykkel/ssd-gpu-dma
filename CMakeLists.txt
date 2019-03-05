@@ -33,7 +33,12 @@ foreach (arch ${nvidia_archs})
     string (CONCAT GPU_ARCHS ${GPU_ARCHS} " -gencode arch=compute_${arch},code=sm_${arch}")
 endforeach ()
 
-set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra" CACHE INTERNAL "" FORCE)
+set (convert_warnings implicit-function-declaration incompatible-pointer-types int-conversion return-type unused-function unused-variable)
+set (flags "")
+foreach (flag ${convert_warnings})
+    string (APPEND flags " -Werror=${flag}")
+endforeach()
+set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra ${flags}" CACHE INTERNAL "" FORCE)
 set (CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_DEBUG} -g -DDEBUG" CACHE INTERNAL "" FORCE)
 set (CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2" CACHE INTERNAL "" FORCE)
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra" CACHE INTERNAL "" FORCE)
@@ -75,13 +80,14 @@ endif ()
 find_path (sisci_include NAMES sisci_types.h sisci_api.h sisci_error.h PATHS "${DIS}/include" "${DIS}")
 find_library (sisci_lib NAMES sisci PATHS "${DIS}/lib64" "${DIS}/lib" NO_DEFAULT_PATH)
 if (sisci_lib)
-    message(STATUS "Using DIS library ${sisci_lib}")
+    message (STATUS "Using SISCI library ${sisci_lib}")
 endif ()
 
 # Library source files
 set (libnvm_root "${PROJECT_SOURCE_DIR}/src")
 file (GLOB libnvm_source "${libnvm_root}/*.c")
 file (GLOB libnvm_dis_source "${libnvm_root}/dis/*.c")
+file (GLOB libnvm_linux_source "${libnvm_root}/linux/*.c")
 file (GLOB libnvm_include "${PROJECT_BINARY_DIR}/include/*.h" "${PROJECT_SOURCE_DIR}/include/*.h")
 
 # Module source files
@@ -111,17 +117,19 @@ endif ()
 
 
 # Create NVME library target
-add_library (libnvm ${libnvm_source})
-target_include_directories (libnvm PRIVATE "${libnvm_root}" "${libnvm_root}/dis")
+add_library (libnvm ${libnvm_source} ${libnvm_linux_source}) # TODO: add check for OS
+target_include_directories (libnvm PRIVATE "${libnvm_root}")
 
 
 if (sisci_include AND sisci_lib AND NOT no_smartio)
     target_sources (libnvm PRIVATE ${libnvm_dis_source})
     target_compile_definitions (libnvm PRIVATE _REENTRANT _SISCI __DIS_CLUSTER__)
     target_link_libraries (libnvm ${sisci_lib} Threads::Threads)
+    message (STATUS "Configuring libnvm with SmartIO")
 
 else ()
     target_link_libraries (libnvm Threads::Threads)
+    message (STATUS "Configuring libnvm without SmartIO")
 
 endif ()
 
@@ -142,11 +150,11 @@ install (TARGETS libnvm DESTINATION "lib")
 # Create kernel module makefile
 if (NOT no_module)
     if (CUDA_FOUND AND NOT no_cuda AND EXISTS "${driver_dir}/Module.symvers")
-        set (module_ccflags "-D_CUDA -I${driver_include} -I${libnvm_root}")
+        set (module_ccflags "-D_CUDA -I${driver_include} -I${libnvm_root} -I${libnvm_root}/linux")
         set (module_symbols "${driver_dir}/Module.symvers")
         message(STATUS "Configuring kernel module with CUDA")
     else ()
-        set (module_ccflags "-I${libnvm_root}")
+        set (module_ccflags "-I${libnvm_root} -I${libnvm_root}/linux")
         message(STATUS "Configuring kernel module without CUDA")
     endif ()
 

@@ -9,19 +9,30 @@
 
 
 
-void nvm_queue_clear(nvm_queue_t* queue, const nvm_ctrl_t* ctrl, bool cq, uint16_t no, void* vaddr, uint64_t ioaddr)
+void nvm_queue_clear(nvm_queue_t* queue, const nvm_ctrl_t* ctrl, bool cq, uint16_t no, uint16_t qs, 
+        bool local, volatile void* vaddr, uint64_t ioaddr)
 {
     queue->no = no;
-    queue->max_entries = 0;
-    queue->entry_size = cq ? sizeof(nvm_cpl_t) : sizeof(nvm_cmd_t);
+    queue->qs = _MIN(qs, ctrl->max_entries);
+    queue->es = cq ? sizeof(nvm_cpl_t) : sizeof(nvm_cmd_t);
     queue->head = 0;
     queue->tail = 0;
-    queue->phase = 1;
     queue->last = 0;
+    queue->phase = 1;
+    queue->local = !!local;
+    queue->db = cq ? CQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd) : SQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd);
     queue->vaddr = vaddr;
     queue->ioaddr = ioaddr;
-    queue->db = cq ? CQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd) : SQ_DBL(ctrl->mm_ptr, queue->no, ctrl->dstrd);
-    queue->max_entries = _MIN(ctrl->max_entries, ctrl->page_size / queue->entry_size);
+}
+
+
+
+void nvm_queue_reset(nvm_queue_t* queue)
+{
+    queue->head = 0;
+    queue->tail = 0;
+    queue->last = 0;
+    queue->phase = 1;
 }
 
 

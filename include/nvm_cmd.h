@@ -10,20 +10,22 @@
 #include <nvm_types.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 
 
 /* All namespaces identifier */
 #define NVM_CMD_NS_ALL                  0xffffffff
+#define NVM_CMD_OPCODE(gen, fun, data)  (_WB((gen), 7, 7) | _WB((fun), 6, 2) | _WB((data), 1, 0))
 
 
 /* List of NVM IO command opcodes */
 enum nvm_io_command_set
 {
-    NVM_IO_FLUSH                    = (0x00 << 7) | (0x00 << 2) | 0x00, // 00h
-    NVM_IO_WRITE                    = (0x00 << 7) | (0x00 << 2) | 0x01, // 01h
-    NVM_IO_READ                     = (0x00 << 7) | (0x00 << 2) | 0x02, // 02h
-    NVM_IO_WRITE_ZEROES             = (0x00 << 7) | (0x02 << 2) | 0x00  // 08h
+    NVM_IO_FLUSH            = NVM_CMD_OPCODE(0, 0, 0),  // 00h
+    NVM_IO_WRITE            = NVM_CMD_OPCODE(0, 0, 1),  // 01h
+    NVM_IO_READ             = NVM_CMD_OPCODE(0, 0, 2),  // 02h
+    NVM_IO_WRITE_ZEROES     = NVM_CMD_OPCODE(0, 2, 0)   // 08h
 };
 
 
@@ -31,18 +33,16 @@ enum nvm_io_command_set
 /* List of NVM admin command opcodes */
 enum nvm_admin_command_set
 {
-    NVM_ADMIN_DELETE_SUBMISSION_QUEUE   = (0x00 << 7) | (0x00 << 2) | 0x00,
-    NVM_ADMIN_CREATE_SUBMISSION_QUEUE   = (0x00 << 7) | (0x00 << 2) | 0x01,
-    NVM_ADMIN_DELETE_COMPLETION_QUEUE   = (0x00 << 7) | (0x01 << 2) | 0x00,
-    NVM_ADMIN_CREATE_COMPLETION_QUEUE   = (0x00 << 7) | (0x01 << 2) | 0x01,
-    NVM_ADMIN_IDENTIFY                  = (0x00 << 7) | (0x01 << 2) | 0x02,
-    NVM_ADMIN_GET_LOG_PAGE              = (0x00 << 7) | (0x00 << 2) | 0x02,
-    NVM_ADMIN_ABORT                     = (0x00 << 7) | (0x02 << 2) | 0x00,
-    NVM_ADMIN_SET_FEATURES              = (0x00 << 7) | (0x02 << 2) | 0x01,
-    NVM_ADMIN_GET_FEATURES              = (0x00 << 7) | (0x02 << 2) | 0x02
+    NVM_ADMIN_DELETE_SQ     = NVM_CMD_OPCODE(0, 0, 0),  // 00h
+    NVM_ADMIN_CREATE_SQ     = NVM_CMD_OPCODE(0, 0, 1),  // 01h
+    NVM_ADMIN_GET_LOG_PAGE  = NVM_CMD_OPCODE(0, 0, 2),  // 02h
+    NVM_ADMIN_DELETE_CQ     = NVM_CMD_OPCODE(0, 1, 0),  // 04h
+    NVM_ADMIN_CREATE_CQ     = NVM_CMD_OPCODE(0, 1, 1),  // 05h
+    NVM_ADMIN_IDENTIFY      = NVM_CMD_OPCODE(0, 1, 2),  // 06h
+    NVM_ADMIN_ABORT         = NVM_CMD_OPCODE(0, 2, 0),  // 08h
+    NVM_ADMIN_SET_FEATURES  = NVM_CMD_OPCODE(0, 2, 1),  // 09h
+    NVM_ADMIN_GET_FEATURES  = NVM_CMD_OPCODE(0, 2, 2)   // 0Ah
 };
-
-
 
 
 
@@ -100,34 +100,47 @@ void nvm_cmd_rw_blks(nvm_cmd_t* cmd, uint64_t start_lba, uint16_t n_blks)
 
 
 /*
- * Build a PRP list consisting of PRP entries.
+ * Build PRP list consisting of PRP entries.
  *
  * Populate a memory page with PRP entries required for a transfer.
- * Returns the number of PRP entries used. Number of pages should 
- * always be max_data_size (MDTS) for IO commands.
+ * If the number of pages exceed the available number of entries, the last
+ * entry will not be used (so that it can be used to point to the next list).
+ * (See Chapter 4.4, Figure 14 in the NVMe specification).
  *
- * Note: currently, PRP lists can only be a single page
+ * Returns the number of PRP entries used. 
  */
 __host__ __device__ static inline
-size_t nvm_prp_list(size_t page_size, size_t n_pages, void* list_ptr, const uint64_t* data_ioaddrs)
+size_t nvm_prp_list(const nvm_prp_list_t* list, size_t n_pages, const uint64_t* ioaddrs)
 {
-    // TODO #ifdef __NO_COHERENCE__, make a nvm_prp_list_far variant that does not call nvm_cache_flush()
-    size_t prps_per_page = page_size / sizeof(uint64_t);
+    size_t n_prps = list->page_size / sizeof(uint64_t);
     size_t i_prp;
-    uint64_t* list;
-    
-    if (prps_per_page < n_pages)
+    volatile uint64_t* entries = (volatile uint64_t*) list->vaddr;
+
+    // Do we need to reserve the last entry for the next list?
+    if (n_pages > n_prps)
     {
-        n_pages = prps_per_page;
+        --n_prps;
     }
-    
-    list = (uint64_t*) list_ptr;
-    for (i_prp = 0; i_prp < n_pages; ++i_prp)
+    else
     {
-        list[i_prp] = data_ioaddrs[i_prp];
+        n_prps = n_pages;
     }
 
-    nvm_cache_flush(list_ptr, sizeof(uint64_t) * i_prp);
+    // Populate list
+    for (i_prp = 0; i_prp < n_prps; ++i_prp)
+    {
+        entries[i_prp] = ioaddrs[i_prp];
+    }
+
+    // Flush list cache
+    if (list->local)
+    {
+        nvm_cache_flush((void*) list->vaddr, sizeof(uint64_t) * i_prps);
+    }
+    else
+    {
+        nvm_wcb_flush();
+    }
 
     return i_prp;
 }
@@ -135,15 +148,42 @@ size_t nvm_prp_list(size_t page_size, size_t n_pages, void* list_ptr, const uint
 
 
 /*
- * Helper function to build a PRP list and set a command's data pointer fields.
+ * Build chain of PRP lists.
+ * Returns the total number of PRP entries.
  */
 __host__ __device__ static inline
-size_t nvm_cmd_data(nvm_cmd_t* cmd, 
-                    size_t page_size, 
-                    size_t n_pages, 
-                    void* list_ptr, 
-                    uint64_t list_ioaddr, 
-                    const uint64_t* data_ioaddrs)
+size_t nvm_prp_list_chain(size_t n_lists, const nvm_prp_list_t* lists, size_t n_pages, const uint64_t* ioaddrs)
+{
+    size_t i_list;
+    size_t list_prps;
+    size_t n_prps;
+
+    if (n_lists == 0 || lists == NULL)
+    {
+        return 0;
+    }
+
+    list_prps = nvm_prp_list(&lists[0], n_pages, ioaddrs);
+
+    for (i_list = 1, n_prps = list_prps; i_list < n_lists && n_prps < n_pages; ++i_list, n_prps += list_prps)
+    {
+        volatile uint64_t* next_list_ptr = ((volatile uint64_t*) lists[i_list - 1].vaddr) + list_prps;
+        *next_list_ptr = lists[i_list].ioaddr;
+
+        list_prps = nvm_prp_list(&lists[i_list], n_pages - n_prps, &ioaddrs[n_prps]);
+    }
+
+    return n_prps;
+}
+
+
+
+/*
+ * Helper function to build a PRP list and set a command's data pointer fields.
+ * Number of pages should always be max_data_size (MDTS) for IO commands.
+ */
+__host__ __device__ static inline
+size_t nvm_cmd_data(nvm_cmd_t* cmd, size_t n_lists, const nvm_prp_list_t* lists, size_t n_pages, const uint64_t* ioaddrs)
 {
     size_t prp = 0;
     uint64_t dptr0 = 0;
@@ -155,17 +195,21 @@ size_t nvm_cmd_data(nvm_cmd_t* cmd,
         return 0;
     }
 #endif
-
-    dptr0 = data_ioaddrs[prp++];
-
-    if (n_pages > 2 && list_ptr != NULL)
+    if (lists == NULL)
     {
-        dptr1 = list_ioaddr;
-        prp += nvm_prp_list(page_size, n_pages - 1, list_ptr, &data_ioaddrs[prp]);
+        n_lists = 0;
+    }
+
+    dptr0 = ioaddrs[prp++];
+
+    if (n_pages > 2 && n_lists != 0)
+    {
+        prp += nvm_prp_list_chain(n_lists, lists, n_pages - 1, &ioaddrs[prp]);
+        dptr1 = lists[0].ioaddr;
     }
     else if (n_pages >= 2)
     {
-        dptr1 = data_ioaddrs[prp++];
+        dptr1 = ioaddrs[prp++];
     }
     
     nvm_cmd_data_ptr(cmd, dptr0, dptr1);

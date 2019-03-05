@@ -15,6 +15,9 @@ extern "C" {
 
 /* 
  * NVM controller handle.
+ *
+ * Note: This structure will be allocated by the API and needs to be
+ *       released by the API.
  */
 typedef struct
 {
@@ -36,6 +39,9 @@ typedef struct
  * setting administration queues, this structure represents a remote handle to
  * that process. It is used as a descriptor for executing RPC calls to the 
  * remote process owning the admin queues.
+ *
+ * Note: This structure will be allocated by the API and needs to be released
+ *       by the API.
  */
 struct nvm_admin_reference;
 typedef struct nvm_admin_reference* nvm_aq_ref;
@@ -55,10 +61,15 @@ typedef struct nvm_admin_reference* nvm_aq_ref;
  * instantiate members.
  *
  * Note: Only page-aligned addresses are supported in NVM Express
+ *
+ * Note: This structure will be allocated by the API and needs to be released
+ *       by the API.
  */
 typedef struct __align__(32) 
 {
-    void*                   vaddr;          // Virtual address to start of region (NB! can be NULL)
+    volatile void*          vaddr;          // Virtual address to start of region (NB! can be NULL)
+    int8_t                  local;          // Is this local memory
+    int8_t                  contiguous;     // Is memory contiguous
     size_t                  page_size;      // Controller's page size (MPS)
     size_t                  n_ioaddrs;      // Number of MPS-sized pages
     uint64_t                ioaddrs[];      // Physical/IO addresses of the memory pages
@@ -79,19 +90,30 @@ typedef struct __align__(32)
 typedef struct __align__(64) 
 {
     uint16_t                no;             // Queue number (must be unique per SQ/CQ pair)
-    uint16_t                max_entries;    // Maximum number of queue entries supported
-    uint16_t                entry_size;     // Queue entry size
-    uint32_t                head;           // Queue's head pointer
-    uint32_t                tail;           // Queue's tail pointer
-    // TODO: Create bitfield for phase, add a remote field indicating
-    //       if queue is far memory nor not, in which case we whould NOT do
-    //       cache operations
-    int16_t                 phase;          // Current phase bit
+    uint16_t                es;             // Queue entry size
+    uint16_t                qs;             // Queue size (number of entries)
+    uint16_t                head;           // Queue's head pointer
+    uint16_t                tail;           // Queue's tail pointer
+    int8_t                  phase;          // Current phase tag
+    int8_t                  local;          // Is the queue allocated in local memory
     uint32_t                last;           // Used internally to check db writes
     volatile uint32_t*      db;             // Pointer to doorbell register (NB! write only)
     volatile void*          vaddr;          // Virtual address to start of queue memory
-    uint64_t                ioaddr;         // Physical/IO address of the memory page
+    uint64_t                ioaddr;         // Physical/IO address to start of queue memory
 } __attribute__((aligned (64))) nvm_queue_t;
+
+
+
+/*
+ * Convenience type for representing a single-page PRP list.
+ */
+typedef struct __align__(32)
+{
+    volatile void*          vaddr;          // Virtual address to memory page
+    int16_t                 local;          // Indicates if the page is local memory
+    size_t                  page_size;      // Page size
+    uint64_t                ioaddr;         // Physical/IO address of memory page
+} __attribute__((aligned (32))) nvm_prp_list_t;
 
 
 

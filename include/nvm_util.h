@@ -12,22 +12,12 @@
 
 
 
-/* Convenience function for creating a bit mask */
-#ifdef __CUDACC__
-__host__ __device__
-#endif
-static inline 
-uint64_t _nvm_bitmask(int hi, int lo)
-{
-    uint64_t mask = 0;
+/* Convenience macro for creating a bit mask */
+#define _NVM_MASK(num_bits) \
+    ((1ULL << (num_bits)) - 1)
 
-    for (int i = lo; i <= hi; ++i)
-    {
-        mask |= 1UL << i;
-    }
-
-    return mask;
-}
+#define _NVM_MASK_PART(hi, lo) \
+    (_NVM_MASK((hi) + 1) - _NVM_MASK(lo))
 
 
 #if defined( __NO_COHERENCE__ ) && defined( __DIS_CLUSTER__ )
@@ -91,17 +81,18 @@ void _nvm_wcb_flush()
 
 /* Extract specific bits */
 #define _RB(v, hi, lo)      \
-    ( ( (v) & _nvm_bitmask((hi), (lo)) ) >> (lo) )
+    ( ( (v) & _NVM_MASK_PART((hi), (lo)) ) >> (lo) )
 
 
 /* Set specifics bits */
 #define _WB(v, hi, lo)      \
-    ( ( (v) << (lo) ) & _nvm_bitmask((hi), (lo)) )
+    ( ( (v) << (lo) ) & _NVM_MASK_PART((hi), (lo)) )
 
 
 /* Offset to a register */
 #define _REG(p, offs, bits) \
     ((volatile uint##bits##_t *) (((volatile unsigned char*) ((volatile void*) (p))) + (offs)))
+
 
 
 /*
@@ -183,6 +174,15 @@ void _nvm_wcb_flush()
     NVM_PTR_OFFSET((dma_ptr)->vaddr, (dma_ptr)->page_size, (pageno))
 
 
+/* Make PRP list descriptor from values */
+#define NVM_PRP_LIST(vaddr, page_size, local, ioaddr) \
+    {(vaddr), !!(local), (page_size), (ioaddr)}
+
+
+/* Make PRP list descriptor from DMA descriptor */
+#define NVM_PRP_LIST_FROM_DMA(dma_ptr, offset)           \
+    NVM_PRP_LIST(NVM_DMA_OFFSET(dma_ptr, offset), (dma-ptr)->local, (dma_ptr)->page_size, (dma_ptr)->ioaddrs[(offset)])
+
 
 
 /* Standard fields in a command */
@@ -198,7 +198,7 @@ void _nvm_wcb_flush()
 
 
 /* Convenience macro for creating a default CID based on submission queue */
-#define NVM_DEFAULT_CID(sq)         ((sq)->tail + (!(sq)->phase) * (sq)->max_entries)
+#define NVM_DEFAULT_CID(sq)         ((sq)->tail + (!(sq)->phase) * (sq)->qs)
 
 
 #ifdef __cplusplus
@@ -212,5 +212,17 @@ const nvm_ctrl_t* nvm_ctrl_from_aq_ref(nvm_aq_ref ref);
 }
 #endif
 
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+/*
+ * Get controller associated with DMA window
+ */
+const nvm_ctrl_t* nvm_ctrl_from_dma(const nvm_dma_t* dma);
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __NVM_UTIL_H__ */

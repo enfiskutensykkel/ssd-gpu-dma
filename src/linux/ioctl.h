@@ -1,5 +1,6 @@
-#ifndef __NVM_INTERNAL_IOCTL_H__
-#define __NVM_INTERNAL_IOCTL_H__
+#ifndef __NVM_INTERNAL_LINUX_IOCTL_H__
+#define __NVM_INTERNAL_LINUX_IOCTL_H__
+#ifdef __linux__
 
 #include <linux/types.h>
 #include <asm/ioctl.h>
@@ -29,5 +30,5 @@ enum nvm_ioctl_type
 };
 
 
-
-#endif /* __NVM_INTERNAL_IOCTL_H__ */
+#endif /* __linux__ */
+#endif /* __NVM_INTERNAL_LINUX_IOCTL_H__ */

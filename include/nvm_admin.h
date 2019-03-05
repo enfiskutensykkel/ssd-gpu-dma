@@ -53,13 +53,14 @@ int nvm_admin_request_num_queues(nvm_aq_ref ref, uint16_t* n_cqs, uint16_t* n_sq
 /*
  * Create IO completion queue (CQ)
  * Caller must set queue memory to zero manually.
+ * If n_pages > 1, DMA memory must be contiguous.
  */
-int nvm_admin_cq_create(nvm_aq_ref ref,               // AQ pair reference
-                        nvm_queue_t* cq,              // CQ descriptor
-                        uint16_t id,                  // Queue identifier
-                        void* qmem,                   // Queue memory (virtual memory)
-                        uint64_t ioaddr);             // Bus address to queue memory as seen by controller
-
+int nvm_admin_cq_create(nvm_aq_ref ref,                 // AQ pair reference
+                        nvm_queue_t* cq,                // CQ descriptor
+                        uint16_t id,                    // Queue identifier
+                        const nvm_dma_t* dma,           // Queue memory handle
+                        size_t page_offset,             // Number of pages to offset into the handle
+                        size_t n_pages);                // Number of pages to use 
 
 /*
  * Delete IO completion queue (CQ)
@@ -73,13 +74,15 @@ int nvm_admin_cq_delete(nvm_aq_ref ref, nvm_queue_t* cq);
 /*
  * Create IO submission queue (SQ)
  * Caller must set queue memory to zero manually.
+ * If n_pages > 1, DMA memory must be contiguous.
  */
-int nvm_admin_sq_create(nvm_aq_ref ref,               // AQ pair reference
-                        nvm_queue_t* sq,              // SQ descriptor
-                        const nvm_queue_t* cq,        // Descriptor to paired CQ
-                        uint16_t id,                  // Queue identifier
-                        void* qmem,                   // Queue memory (virtual)
-                        uint64_t ioaddr);             // Bus address to queue as seen by controller
+int nvm_admin_sq_create(nvm_aq_ref ref,                 // AQ pair reference
+                        nvm_queue_t* sq,                // SQ descriptor
+                        const nvm_queue_t* cq,          // Descriptor to paired CQ
+                        uint16_t id,                    // Queue identifier
+                        const nvm_dma_t* dma,           // Queue memory handle
+                        size_t page_offset,             // Number of pages to offset into the handle
+                        size_t n_pages);                // Number of pages to use
 
 
 
@@ -91,6 +94,16 @@ int nvm_admin_sq_delete(nvm_aq_ref ref,
                         nvm_queue_t* sq, 
                         const nvm_queue_t* cq);
 
+
+/*
+ * Get log page.
+ */
+int nvm_admin_get_log_page(nvm_aq_ref ref, 
+                           uint32_t ns_id, 
+                           void* ptr, 
+                           uint64_t ioaddr, 
+                           uint8_t log_id, 
+                           uint64_t log_offset);
 
 #ifdef __cplusplus
 }

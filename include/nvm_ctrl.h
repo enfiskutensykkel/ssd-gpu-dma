@@ -7,6 +7,7 @@ extern "C" {
 #include <nvm_types.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __DIS_CLUSTER__
 #include <sisci_types.h>
@@ -82,19 +83,19 @@ int nvm_raw_ctrl_reset(const nvm_ctrl_t* ctrl, uint64_t acq_ioaddr, uint64_t asq
  * Read from device registers and initialize controller handle. 
  * This function should be used when SmartIO is being used.
  */
-int nvm_dis_ctrl_init(nvm_ctrl_t** ctrl, uint64_t smartio_dev_id, uint32_t dis_adapter);
+int nvm_dis_ctrl_init(nvm_ctrl_t** ctrl, uint32_t smartio_fdid);
 #endif
 
 
 
 #ifdef __DIS_CLUSTER__
-int nvm_dis_ctrl_map_p2p_device(const nvm_ctrl_t* ctrl, sci_device_t dev, uint64_t* ioaddr);
+int nvm_dis_ctrl_map_p2p_device(const nvm_ctrl_t* ctrl, sci_smartio_device_t dev, uint64_t* ioaddr);
 #endif
 
 
 
 #ifdef __DIS_CLUSTER__
-void nvm_dis_ctrl_unmap_p2p_device(const nvm_ctrl_t* ctrl, sci_device_t dev);
+void nvm_dis_ctrl_unmap_p2p_device(const nvm_ctrl_t* ctrl, sci_smartio_device_t dev);
 #endif
 
 

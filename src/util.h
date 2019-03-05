@@ -4,14 +4,27 @@
 #include <nvm_util.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#if defined( __unix__ )
 #include <time.h>
 #include <unistd.h>
-//#include <pthread.h>
+#endif
 
 #ifndef NDEBUG
 #include <string.h>
 #include <errno.h>
 #include "dprintf.h"
+#endif
+
+
+/* Get the containing struct */
+#if defined( __clang__ ) || defined( __GNUC__ )
+#define _nvm_container_of(ptr, type, member) ({                 \
+        const typeof( ((type *) 0)->member )* __mptr = (ptr);   \
+        (type *) (((unsigned char*) __mptr) - offsetof(type, member)); })
+#else
+#define _nvm_container_of(ptr, type, member) \
+    ((type *) (((unsigned char*) (ptr)) - ((unsigned char*) (&((type *) 0)->member))))
 #endif
 
 
@@ -39,6 +52,7 @@ static inline uint32_t _nvm_b2log(uint32_t n)
 }
 
 
+#if defined( __unix__ )
 /* Delay the minimum of one millisecond and a time remainder */
 static inline uint64_t _nvm_delay_remain(uint64_t remaining_nanoseconds)
 {
@@ -52,14 +66,15 @@ static inline uint64_t _nvm_delay_remain(uint64_t remaining_nanoseconds)
     ts.tv_sec = 0;
     ts.tv_nsec = _MIN(1000000UL, remaining_nanoseconds);
 
-    //pthread_yield();
     clock_nanosleep(CLOCK_REALTIME, 0, &ts, NULL);
 
     remaining_nanoseconds -= _MIN(1000000UL, remaining_nanoseconds);
     return remaining_nanoseconds;
 }
+#endif
 
 
+#if defined( __unix__ )
 /* Get the system page size */
 static inline size_t _nvm_host_page_size()
 {
@@ -75,6 +90,9 @@ static inline size_t _nvm_host_page_size()
 
     return page_size;
 }
+#else
+#define _nvm_host_page_size()   0x1000
+#endif
 
 
 #endif /* __NVM_INTERNAL_UTIL_H__ */
