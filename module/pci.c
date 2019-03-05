@@ -21,7 +21,7 @@
 #define PCI_CLASS_NVME_MASK 0xffffff
 
 
-MODULE_AUTHOR("Jonas Markussen <jonassm@dolphinics.com>");
+MODULE_AUTHOR("Jonas Markussen <jonassm@ifi.uio.no>");
 MODULE_DESCRIPTION("Set up DMA mappings for userspace buffers");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.3");
