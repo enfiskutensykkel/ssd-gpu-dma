@@ -1,3 +1,4 @@
+#include <nvm_util.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>

@@ -27,6 +27,12 @@ static struct controller* create_handle(struct device* dev, const struct device_
     int err;
     struct controller* handle;
 
+    if (dev != NULL && (ops == NULL || ops->release_device == NULL))
+    {
+        dprintf("Inconsistent state, device operations is not set\n");
+        return NULL;
+    }
+
     handle = (struct controller*) malloc(sizeof(struct controller));
     if (handle == NULL)
     {
@@ -113,10 +119,13 @@ void _nvm_ctrl_put(struct controller* controller)
 {
     if (controller != NULL)
     {
+        uint32_t count = 0;
+
         _nvm_mutex_lock(&controller->lock);
-        if (--controller->count == 0)
+        count = --controller->count;
+        if (count == 0)
         {
-            if (controller->ops.release_device != NULL)
+            if (controller->device != NULL)
             {
                 controller->ops.release_device(controller->device, controller->handle.mm_ptr, controller->handle.mm_size);
             }
@@ -125,7 +134,7 @@ void _nvm_ctrl_put(struct controller* controller)
         }
         _nvm_mutex_unlock(&controller->lock);
 
-        if (controller->device == NULL)
+        if (count == 0)
         {
             remove_handle(controller);
         }
