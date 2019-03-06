@@ -34,12 +34,12 @@ static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info, uint16_t
     fprintf(fp, "PCI Subsystem Vendor ID : %x %x\n", vendor[2], vendor[3]);
     fprintf(fp, "NVM Express version     : %u.%u.%u\n",
             info->nvme_version >> 16, (info->nvme_version >> 8) & 0xff, info->nvme_version & 0xff);
-    fprintf(fp, "Controller page size    : %zu\n", info->page_size);
+    fprintf(fp, "Controller page size    : %zu B (0x%zx)\n", info->page_size, info->page_size);
     fprintf(fp, "Max queue entries       : %u\n", info->max_entries);
     fprintf(fp, "Serial Number           : %s\n", serial);
     fprintf(fp, "Model Number            : %s\n", model);
     fprintf(fp, "Firmware revision       : %s\n", revision);
-    fprintf(fp, "Max data transfer size  : %zu\n", info->max_data_size);
+    fprintf(fp, "Max data transfer size  : %zu B (%zu KiB)\n", info->max_data_size, info->max_data_size >> 10);
     fprintf(fp, "Max outstanding commands: %zu\n", info->max_out_cmds);
     fprintf(fp, "Max number of namespaces: %zu\n", info->max_n_ns);
     fprintf(fp, "Current number of CQs   : %u\n", n_cqs);
