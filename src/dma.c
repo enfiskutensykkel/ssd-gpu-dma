@@ -124,7 +124,7 @@ static void populate_handle(nvm_dma_t* handle, const struct va_range* va, const 
     size_t page_size = va->page_size;
 
     // Set handle members
-    handle->vaddr = va->vaddr;
+    handle->vaddr = (void*) va->vaddr;
     handle->page_size = ctrl->page_size;
     handle->n_ioaddrs = n_ctrl_pages(ctrl, page_size, va->n_pages);
 

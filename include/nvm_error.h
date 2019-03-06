@@ -22,14 +22,18 @@ extern "C" {
 
 
 /* Is do not retry flag set? */
-#define NVM_ERR_DNR(cpl)            ((uint8_t) _RB(*NVM_CPL_STATUS(cpl), 15, 15))
+#define NVM_ERR_DNR(cpl)            (!!_RB(*NVM_CPL_STATUS(cpl), 15, 15))
+
+
+
+/* Is there more? (Get log page) */
+#define NVM_ERR_MORE(cpl)           (!!_RB(*NVM_CPL_STATUS(cpl), 14, 14))
 
 
 
 /* Extract value from status field from NVM completion */
 #define NVM_ERR_STATUS(cpl)         \
     ((int) ( (cpl) != NULL ? -((NVM_ERR_SCT(cpl) << 8) | NVM_ERR_SC(cpl)) : 0 ))
-
 
 
 /* Convenience macro for checking if an NVM completion indicates success. */

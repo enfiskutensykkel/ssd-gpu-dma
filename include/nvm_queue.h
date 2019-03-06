@@ -71,7 +71,7 @@ nvm_cmd_t* nvm_sq_enqueue(nvm_queue_t* sq)
     if (((uint16_t) (sq->tail - sq->head)) < sq->qs)
     {
         // Take slot and end of queue
-        nvm_cmd_t* cmd = (nvm_cmd_t*) (((unsigned char*) sq->vaddr) + sq->es * sq->tail % sq->qs);
+        nvm_cmd_t* cmd = (nvm_cmd_t*) (((unsigned char*) sq->vaddr) + sq->es * (sq->tail % sq->qs));
 
         // Increase tail pointer and invert phase tag if necessary
         if (++sq->tail % sq->qs == 0)
@@ -90,9 +90,19 @@ nvm_cmd_t* nvm_sq_enqueue(nvm_queue_t* sq)
 /*
  * Enqueue command the i'th of n threads.
  *
- * This function does not check actual queue state, so it is important
- * that all completions are consumed before making successive calls to this function. 
- * It is also assumed that n < max_entries.
+ * This function does not check actual queue state, the caller should store
+ * the pointer it last received and pass to the next call in order to simplify
+ * position calculation.
+ *
+ * It is therefore important that all completions are consumed before clling
+ * this function. 
+ *
+ * The reason for this is to avoid unecessary thread-synchronisation/barriers.
+ *
+ * Note: n must be less than the queue size
+ * 
+ * Note: The pointer should be stored and used as the last parameter for the
+ *       succeeding call.
  */
 #ifdef __CUDACC__
 __device__ static inline
@@ -101,8 +111,6 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
     unsigned char* start = (unsigned char*) sq->vaddr;
     unsigned char* end = start + (sq->qs * sq->es);
     nvm_cmd_t* cmd = NULL;
-
-    //if (sq->tail +
 
     if (last == NULL)
     {
@@ -118,14 +126,14 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
         }
     }
 
+    // The 0'th thread should update the state
     if (i == 0)
     {
-        sq->tail = (((uint32_t) sq->tail) + ((uint32_t) n)) % sq->qs;
+        sq->tail += n;
     }
 
-//#ifdef __CUDA_ARCH__
+    // Wait state updating here
     __syncthreads();
-//#endif
 
     return cmd;
 }
@@ -147,13 +155,15 @@ nvm_cpl_t* nvm_cq_poll(const nvm_queue_t* cq)
 {
     nvm_cpl_t* cpl = (nvm_cpl_t*) (((unsigned char*) cq->vaddr) + cq->es * (cq->head % cq->qs));
 
+#ifndef __CUDA_ARCH__
     if (cq->local) 
     {
         nvm_cache_invalidate((void*) cpl, sizeof(nvm_cpl_t));
     }
+#endif
 
     // Check if new completion is ready by checking the phase tag
-    if (!!_RB(*NVM_CPL_STATUS(cpl), 0, 0) != cq->phase)
+    if (!_RB(*NVM_CPL_STATUS(cpl), 0, 0) != !cq->phase)
     {
         return NULL;
     }
@@ -227,22 +237,16 @@ void nvm_sq_submit(nvm_queue_t* sq)
 
     if (sq->last != t && sq->db != NULL)
     {
+#ifndef __CUDA_ARCH__
         if (sq->local)
         {
-            if (t < sq->last)
-            {
-                nvm_cache_flush((void*) (sq->vaddr + sq->es * sq->last), sq->es * (sq->qs - sq->last));
-                nvm_cache_flush((void*) sq->vaddr, sq->es * sq->last);
-            }
-            else
-            {
-                nvm_cache_flush((void*) (sq->vaddr + sq->es * sq->last), sq->es * (sq->tail - sq->last));
-            }
+            nvm_cache_flush((void*) sq->vaddr, sq->es * sq->qs);
         }
         else 
         {
             nvm_wcb_flush(); 
         }
+#endif
 
         *((volatile uint32_t*) sq->db) = t;
         sq->last = t;

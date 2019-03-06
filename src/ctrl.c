@@ -232,7 +232,7 @@ int nvm_raw_ctrl_reset(const nvm_ctrl_t* ctrl, uint64_t acq_addr, uint64_t asq_a
 
     uint32_t cq_max_entries = ctrl->page_size / sizeof(nvm_cpl_t) - 1;
     uint32_t sq_max_entries = ctrl->page_size / sizeof(nvm_cmd_t) - 1;
-    *aqa = AQA$AQS(sq_max_entries) | AQA$AQC(cq_max_entries);
+    *aqa = AQA$ACQS(cq_max_entries) | AQA$ASQS(sq_max_entries);
     
     // Set admin completion queue
     volatile uint64_t* acq = ACQ(ctrl->mm_ptr);

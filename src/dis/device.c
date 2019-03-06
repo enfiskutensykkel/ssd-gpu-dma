@@ -173,6 +173,12 @@ static int borrow_device(struct device** handle, uint32_t fdid)
     }
 
     dev->fdid = fdid;
+    dev->sd = NULL;
+    dev->device = NULL;
+    dev->segment = NULL;
+    dev->size = 0;
+    dev->ptr = NULL;
+    dev->md = NULL;
 
     SCIOpen(&dev->sd, 0, &err);
     if (err != SCI_ERR_OK)
@@ -219,7 +225,7 @@ static int borrow_device(struct device** handle, uint32_t fdid)
 
     dev->size = SCIGetRemoteSegmentSize(dev->segment);
 
-    dev->ptr = SCIMapRemoteSegment(dev->segment, &dev->md, 0, dev->size, NULL, 0, &err);
+    dev->ptr = SCIMapRemoteSegment(dev->segment, &dev->md, 0, dev->size, NULL, SCI_FLAG_IO_MAP_IOSPACE, &err);
     if (err != SCI_ERR_OK)
     {
         dprintf("Failed to map device memory into local address space: %s\n", _SCIGetErrorString(err));

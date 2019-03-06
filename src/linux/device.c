@@ -38,7 +38,6 @@ struct device
  */
 static void release_device(struct device* dev, volatile void* mm_ptr, size_t mm_size)
 {
-    dprintf("releasing device\n");
     munmap((void*) mm_ptr, mm_size);
     close(dev->fd);
     free(dev);

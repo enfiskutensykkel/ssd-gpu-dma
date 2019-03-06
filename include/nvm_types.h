@@ -67,7 +67,7 @@ typedef struct nvm_admin_reference* nvm_aq_ref;
  */
 typedef struct __align__(32) 
 {
-    volatile void*          vaddr;          // Virtual address to start of region (NB! can be NULL)
+    void*                   vaddr;          // Virtual address to start of region (NB! can be NULL)
     int8_t                  local;          // Is this local memory
     int8_t                  contiguous;     // Is memory contiguous
     size_t                  page_size;      // Controller's page size (MPS)

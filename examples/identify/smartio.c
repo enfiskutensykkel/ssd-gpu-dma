@@ -24,7 +24,6 @@
 struct cl_args
 {
     uint64_t    dev_id;
-    uint32_t    dis_adapter;
     uint32_t    segment_id;
     uint32_t    namespace_id;
 };
@@ -43,7 +42,7 @@ int main(int argc, char** argv)
     SCIInitialize(0, &err);
 
     nvm_ctrl_t* ctrl;
-    int status = nvm_dis_ctrl_init(&ctrl, args.dev_id, args.dis_adapter);
+    int status = nvm_dis_ctrl_init(&ctrl, args.dev_id);
     if (status != 0)
     {
         fprintf(stderr, "Failed to initialize controller reference: %s\n", strerror(status));
@@ -51,7 +50,7 @@ int main(int argc, char** argv)
     }
 
     nvm_dma_t* window;
-    status = nvm_dis_dma_create(&window, ctrl, args.dis_adapter, args.segment_id, 3 * 0x1000);
+    status = nvm_dis_dma_create(&window, ctrl, args.segment_id, 3 * 0x1000, false, 0);
     if (status != 0)
     {
         nvm_ctrl_free(ctrl);
@@ -134,7 +133,6 @@ static void show_help(const char* name)
     fprintf(stderr, "\nCreate a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
             "    --ctrl     <fdid>          SmartIO device identifier (fabric device id).\n"
             "    --ns       <namespace id>  Show information about NVM namespace.\n"
-            "    --adapter  <adapter>       DIS adapter number (defaults to 0).\n"
             "    --segment  <segment id>    SISCI segment identifier (defaults to 0).\n"
             "    --help                     Show this information.\n\n");
 }
@@ -147,7 +145,6 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
     static struct option opts[] = {
         { "help", no_argument, NULL, 'h' },
         { "ctrl", required_argument, NULL, 'c' },
-        { "adapter", required_argument, NULL, 'a' },
         { "ns", required_argument, NULL, 'n' },
         { "segment", required_argument, NULL, 's' },
         { NULL, 0, NULL, 0 }
@@ -158,11 +155,10 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
 
     bool dev_set = false;
     args->dev_id = 0;
-    args->dis_adapter = 0;
     args->segment_id = 0;
     args->namespace_id = 0;
 
-    while ((opt = getopt_long(argc, argv, ":hc:a:s:n:", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, ":hc:s:n:", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -182,14 +178,6 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
                 {
                     give_usage(argv[0]);
                     exit('c');
-                }
-                break;
-
-            case 'a':
-                if (parse_u32(optarg, &args->dis_adapter, 10) != 0)
-                {
-                    give_usage(argv[0]);
-                    exit('a');
                 }
                 break;
 

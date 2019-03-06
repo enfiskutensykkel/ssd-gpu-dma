@@ -46,22 +46,26 @@ static int va_map(struct map* m, bool write, bool wc)
 {
     sci_error_t err;
     unsigned int flags = 0;
+    volatile void* ptr = NULL;
+    size_t size = 0;
 
     flags |= !write ? SCI_FLAG_READONLY_MAP : 0;
     flags |= !wc ? SCI_FLAG_IO_MAP_IOSPACE : 0;
 
-    m->range.n_pages = 1;
     switch (m->type)
     {
+        case SEGMENT_TYPE_PHYSICAL:
+            return ENOTSUP;
+
         case SEGMENT_TYPE_LOCAL:
-            m->range.page_size = SCIGetLocalSegmentSize(m->lseg);
-            m->range.vaddr = SCIMapLocalSegment(m->lseg, &m->md, 0, m->range.page_size, NULL, 0, &err);
+            size = SCIGetLocalSegmentSize(m->lseg);
+            ptr = SCIMapLocalSegment(m->lseg, &m->md, 0, size, NULL, 0, &err);
             break;
 
         case SEGMENT_TYPE_REMOTE:
         case SEGMENT_TYPE_DEVICE:
-            m->range.page_size = SCIGetRemoteSegmentSize(m->rseg);
-            m->range.vaddr = SCIMapRemoteSegment(m->rseg, &m->md, 0, m->range.page_size, NULL, 0, &err);
+            size = SCIGetRemoteSegmentSize(m->rseg);
+            ptr = SCIMapRemoteSegment(m->rseg, &m->md, 0, size, NULL, 0, &err);
             break;
 
         default:
@@ -72,6 +76,10 @@ static int va_map(struct map* m, bool write, bool wc)
     switch (err)
     {
         case SCI_ERR_OK:
+            m->mapped = true;
+            m->range.n_pages = 1;
+            m->range.page_size = size;
+            m->range.vaddr = ptr;
             return 0;
 
         case SCI_ERR_FLAG_NOT_IMPLEMENTED:
@@ -127,6 +135,7 @@ static void remove_map(struct map* m)
     if (m->type == SEGMENT_TYPE_DEVICE)
     {
         struct segment* seg = _nvm_container_of(m, struct segment, map);
+        _nvm_disconnect_device_memory(&seg->map.rseg);
         _nvm_ctrl_put(seg->ctrl);
         free(seg);
     }
@@ -469,6 +478,8 @@ int nvm_dis_dma_connect(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, uint32_t id,
         return status;
     }
 
+    // FIXME: TODO: Figure out if segment is local
+
     status = va_map(m, true, true);
     if (status != 0)
     {
@@ -503,8 +514,9 @@ int nvm_dis_dma_create(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, uint32_t id, 
 
     if (hints == 0)
     {
+        // FIXME: This fails in the driver for some reason
         hints = SCI_MEMACCESS_HOST_READ | SCI_MEMACCESS_HOST_WRITE | SCI_MEMACCESS_DEVICE_READ | SCI_MEMACCESS_DEVICE_WRITE;
-        flags = SCI_FLAG_LOCAL_ONLY;
+        //flags = SCI_FLAG_LOCAL_ONLY; 
     }
 
     ref = _nvm_ctrl_get(ctrl);

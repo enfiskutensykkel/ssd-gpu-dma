@@ -194,11 +194,12 @@ void _nvm_wcb_flush()
 #define NVM_CPL_CID(p)              _REG(p, 12, 16)
 #define NVM_CPL_SQHD(p)             _REG(p,  8, 16)
 #define NVM_CPL_SQID(p)             _REG(p, 10, 16)
-#define NVM_CPL_STATUS(p)           _REG(p, 14, 16)
+#define NVM_CPL_SF(p)               _REG(p, 14, 16)
+#define NVM_CPL_STATUS(p)           NVM_CPL_SF(p)
 
 
 /* Convenience macro for creating a default CID based on submission queue */
-#define NVM_DEFAULT_CID(sq)         ((sq)->tail + (!(sq)->phase) * (sq)->qs)
+#define NVM_DEFAULT_CID(sq)         ((uint16_t) (sq)->tail)
 
 
 #ifdef __cplusplus

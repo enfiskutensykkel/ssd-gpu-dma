@@ -1,6 +1,7 @@
 #include <nvm_types.h>
 #include <nvm_aq.h>
 #include <nvm_admin.h>
+#include <nvm_error.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
@@ -81,6 +82,7 @@ nvm_aq_ref reset_ctrl(const nvm_ctrl_t* ctrl, const nvm_dma_t* dma_window)
         return NULL;
     }
 
+    fprintf(stderr, "Admin queues OK\n");
     return admin;
 }
 
@@ -93,6 +95,7 @@ int identify_ctrl(nvm_aq_ref admin, void* ptr, uint64_t ioaddr)
     uint16_t n_sqs = 0;
     struct nvm_ctrl_info info;
 
+    fprintf(stderr, "Getting number of queues...\n");
     status = nvm_admin_get_num_queues(admin, &n_cqs, &n_sqs);
     if (status != 0)
     {
@@ -100,10 +103,11 @@ int identify_ctrl(nvm_aq_ref admin, void* ptr, uint64_t ioaddr)
         return status;
     }
 
+    fprintf(stderr, "Identifying controller...\n");
     status = nvm_admin_ctrl_info(admin, &info, ptr, ioaddr);
-    if (status != 0)
+    if (!nvm_ok(status))
     {
-        fprintf(stderr, "Failed to identify controller: %s\n", strerror(status));
+        fprintf(stderr, "Failed to identify controller: %s\n", nvm_strerror(status));
         return status;
     }
 

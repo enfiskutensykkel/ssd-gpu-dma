@@ -286,7 +286,9 @@ static int execute_command(struct local_admin* admin, const nvm_cmd_t* cmd, nvm_
 
     // Copy command into queue slot (but keep original id)
     uint16_t in_queue_id = NVM_DEFAULT_CID(&admin->asq);
+
     memcpy(&local_copy, cmd, sizeof(nvm_cmd_t));
+
     *NVM_CMD_CID(&local_copy) = in_queue_id;
     *in_queue_cmd = local_copy;
 
@@ -303,7 +305,9 @@ static int execute_command(struct local_admin* admin, const nvm_cmd_t* cmd, nvm_
     nvm_sq_update(&admin->asq);
 
     // Copy completion and return
-    memcpy(cpl, (void*) in_queue_cpl, sizeof(nvm_cpl_t));
+    *cpl = *in_queue_cpl;
+    nvm_cq_update(&admin->acq);
+
     *NVM_CPL_CID(cpl) = *NVM_CMD_CID(cmd);
 
     return 0;
@@ -353,11 +357,12 @@ static int create_admin(struct local_admin** handle, const struct controller* ct
     }
 
     admin->qmem = copy;
-    memset((void*) admin->qmem->vaddr, 0, 2 * window->page_size);
+    memset((void*) admin->qmem->vaddr, 0, 2 * admin->qmem->page_size);
 
-    nvm_queue_clear(&admin->acq, &ctrl->handle, true, 0, admin->qmem->page_size / sizeof(nvm_cmd_t), 
+    nvm_queue_clear(&admin->acq, &ctrl->handle, true, 0, ctrl->handle.page_size / sizeof(nvm_cpl_t), 
             admin->qmem->local, admin->qmem->vaddr, admin->qmem->ioaddrs[0]);
-    nvm_queue_clear(&admin->asq, &ctrl->handle, false, 0, admin->qmem->page_size / sizeof(nvm_cpl_t), 
+
+    nvm_queue_clear(&admin->asq, &ctrl->handle, false, 0, ctrl->handle.page_size / sizeof(nvm_cmd_t), 
             admin->qmem->local,  NVM_DMA_OFFSET(admin->qmem, 1), admin->qmem->ioaddrs[1]);
 
     admin->timeout = ctrl->handle.timeout;

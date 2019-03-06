@@ -33,8 +33,8 @@
 #define CC$CSS(v)       _WB(0,  3,  1)          // IO Command Set Selected (0=NVM Command Set)
 #define CC$EN(v)        _WB(v,  0,  0)          // Enable
 
-#define AQA$AQS(v)      _WB(v, 27, 16)          // Admin Completion Queue Size
-#define AQA$AQC(v)      _WB(v, 11,  0)          // Admin Submission Queue Size
+#define AQA$ACQS(v)     _WB(v, 27, 16)          // Admin Completion Queue Size
+#define AQA$ASQS(v)     _WB(v, 11,  0)          // Admin Submission Queue Size
 
 
 /* SQ doorbell register offset */

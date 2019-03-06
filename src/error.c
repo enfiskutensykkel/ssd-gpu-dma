@@ -164,7 +164,7 @@ const char* nvm_strerror(int status)
     int err;
     uint8_t sct;
     uint8_t sc;
-    
+
     err = NVM_ERR_UNPACK_ERRNO(status);
     sct = NVM_ERR_UNPACK_SCT(status);
     sc = NVM_ERR_UNPACK_SC(status);
