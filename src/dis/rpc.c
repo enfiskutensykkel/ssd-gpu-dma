@@ -27,11 +27,12 @@
 #include <sisci_types.h>
 #include <sisci_error.h>
 #include <sisci_api.h>
+#include <dis/dis_types.h>
 
 
 #define RPC_COMMAND_TIMEOUT     2500
 #define RPC_MAGIC_SIGNATURE     0xDEADBEEF
-
+#define N_ADAPTERS              DIS_MAX_NSCIS
 
 
 /*
@@ -183,7 +184,7 @@ static int write_handle_info(const struct binding_handle* handle, uint32_t adapt
 {
     sci_error_t err;
     sci_map_t map;
-    const size_t size = sizeof(struct handle_info) * NVM_DIS_RPC_MAX_ADAPTER;
+    const size_t size = sizeof(struct handle_info) * N_ADAPTERS;
     volatile struct handle_info* infos;
 
     infos = (volatile struct handle_info*) SCIMapRemoteSegment(handle->segment, &map, 0, size, NULL, 0, &err);
@@ -214,11 +215,78 @@ static int write_handle_info(const struct binding_handle* handle, uint32_t adapt
 
 
 /*
+ * Create shared segment for writing connection information and connect to it.
+ */
+static int try_create(sci_remote_segment_t* segment, const struct device* dev)
+{
+    int status;
+    sci_remote_segment_t rseg;
+    unsigned adapter = 0;
+    
+    *segment = NULL;
+
+    // Try to connect to segment (and create it if that fails)
+    status = _nvm_device_memory_get(&rseg, dev, 0, SCI_MEMTYPE_SHARED);
+    if (status != 0)
+    {
+        sci_error_t err;
+
+        SCICreateDeviceSegment(dev->device, 0, sizeof(struct handle_info) * N_ADAPTERS, 
+                SCI_MEMTYPE_SHARED, SCI_MEMACCESS_HOST_WRITE | SCI_MEMACCESS_MULTIHOST_READ, 0, &err);
+
+        switch (err)
+        {
+            case SCI_ERR_SEGMENTID_USED:
+            case SCI_ERR_OK:
+                break;
+
+            default:
+                dprintf("Unexpected error when creating shared device segment: %s\n", _SCIGetErrorString(err));
+                return EIO;
+        }
+
+        status = _nvm_device_memory_get(&rseg, dev, 0, SCI_MEMTYPE_SHARED);
+        if (status != 0)
+        {
+            return status;
+        }
+    }
+
+    // Check if we are the owner of the segment
+    for (adapter = 0; adapter < N_ADAPTERS; ++adapter)
+    {
+        sci_error_t err;
+        uint32_t node_id = 0;
+
+        SCIGetLocalNodeId((unsigned int) adapter, &node_id, 0, &err);
+        if (err == SCI_ERR_OK)
+        {
+            if (SCIGetRemoteSegmentNodeId(rseg) == node_id)
+            {
+                break;
+            }
+        }
+    }
+
+    if (adapter == N_ADAPTERS)
+    {
+        return EEXIST;
+    }
+
+    *segment = rseg;
+    return 0;
+}   
+
+
+
+/*
  * Helper function to create a a server binding handle.
  */
 static int create_binding_handle(struct binding_handle** handle, nvm_aq_ref ref, uint32_t adapter, nvm_dis_rpc_cb_t cb)
 {
+    int status;
     *handle = NULL;
+    sci_remote_segment_t rseg;
 
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
     if (ctrl == NULL)
@@ -232,29 +300,31 @@ static int create_binding_handle(struct binding_handle** handle, nvm_aq_ref ref,
         return ENOTTY;
     }
 
+    status = try_create(&rseg, cref->device);
+    if (status != 0)
+    {
+        _nvm_ctrl_put(cref);
+        return status;
+    }
+
     struct binding_handle* bh = (struct binding_handle*) malloc(sizeof(struct binding_handle));
     if (bh == NULL)
     {
+        _nvm_device_memory_put(&rseg);
+        _nvm_ctrl_put(cref);
         dprintf("Failed to allocate RPC binding handle: %s\n", strerror(errno));
         return ENOMEM;
     }
 
     bh->ctrl = cref;
-    int status = _nvm_connect_device_memory(&bh->segment, bh->ctrl->device, 0, SCI_MEMTYPE_SHARED);
-    if (status != 0)
-    {
-        _nvm_ctrl_put(bh->ctrl);
-        free(bh);
-        return status;
-    }
-
+    bh->segment = rseg;
     bh->rpc_ref = ref;
     bh->rpc_cb = cb;
 
     status = _nvm_local_intr_get(&bh->intr, adapter, bh, (intr_callback_t) handle_remote_command);
     if (status != 0)
     {
-        _nvm_disconnect_device_memory(&bh->segment);
+        _nvm_device_memory_put(&bh->segment);
         _nvm_ctrl_put(bh->ctrl);
         free(bh);
         return status;
@@ -263,7 +333,7 @@ static int create_binding_handle(struct binding_handle** handle, nvm_aq_ref ref,
     status = write_handle_info(bh, adapter, false);
     if (status != 0)
     {
-        _nvm_disconnect_device_memory(&bh->segment);
+        _nvm_device_memory_put(&bh->segment);
         _nvm_ctrl_put(bh->ctrl);
         free(bh);
         return status;
@@ -278,12 +348,12 @@ static int create_binding_handle(struct binding_handle** handle, nvm_aq_ref ref,
 /*
  * Helper function to remove a server binding handle.
  */
-static void remove_binding_handle(struct binding_handle* handle, uint32_t adapter)
+static void remove_binding_handle(uint32_t adapter, struct binding_handle* handle)
 {
     write_handle_info(handle, adapter, true);
 
     _nvm_local_intr_put(&handle->intr);
-    _nvm_disconnect_device_memory(&handle->segment);
+    _nvm_device_memory_put(&handle->segment);
     _nvm_ctrl_put(handle->ctrl);
 
     free(handle);
@@ -294,7 +364,7 @@ static void remove_binding_handle(struct binding_handle* handle, uint32_t adapte
 /*
  * Helper function to try to connect to remote interrupt.
  */
-static int try_bind(struct binding* binding, uint32_t adapter, size_t max)
+static int try_bind(struct binding* binding, uint32_t adapter, unsigned max)
 {
     sci_error_t err;
     sci_map_t map;
@@ -309,7 +379,7 @@ static int try_bind(struct binding* binding, uint32_t adapter, size_t max)
     }
 
     // Iterate over exported interrupts
-    for (size_t i = 0; i < max; ++i)
+    for (unsigned i = 0; i < max; ++i)
     {
         // Read information
         uint32_t magic = info[i].magic;
@@ -351,7 +421,7 @@ static int create_binding(struct binding** handle, const struct device* dev, uin
         return ENOMEM;
     }
 
-    status = _nvm_connect_device_memory(&binding->segment, dev, 0, SCI_MEMTYPE_SHARED);
+    status = _nvm_device_memory_get(&binding->segment, dev, 0, SCI_MEMTYPE_SHARED);
     if (status != 0)
     {
         free(binding);
@@ -362,16 +432,16 @@ static int create_binding(struct binding** handle, const struct device* dev, uin
     status = _nvm_local_intr_get(&binding->lintr, adapter, NULL, NULL);
     if (status != 0)
     {
-        _nvm_disconnect_device_memory(&binding->segment);
+        _nvm_device_memory_put(&binding->segment);
         free(binding);
         return status;
     }
 
-    status = try_bind(binding, adapter, NVM_DIS_RPC_MAX_ADAPTER);
+    status = try_bind(binding, adapter, N_ADAPTERS);
     if (status != 0)
     {
         _nvm_local_intr_put(&binding->lintr);
-        _nvm_disconnect_device_memory(&binding->segment);
+        _nvm_device_memory_put(&binding->segment);
         free(binding);
         return status;
     }
@@ -390,7 +460,7 @@ static void remove_binding(struct binding* binding)
 {
     _nvm_remote_intr_put(&binding->rintr);
     _nvm_local_intr_put(&binding->lintr);
-    _nvm_disconnect_device_memory(&binding->segment);
+    _nvm_device_memory_put(&binding->segment);
 
     free(binding);
 }
@@ -399,23 +469,24 @@ static void remove_binding(struct binding* binding)
 
 int nvm_dis_rpc_enable(nvm_aq_ref ref, uint32_t adapter, nvm_dis_rpc_cb_t filter)
 {
+    int err;
     struct binding_handle* handle;
 
-    if (adapter >= NVM_DIS_RPC_MAX_ADAPTER)
+    if (adapter >= N_ADAPTERS)
     {
         return EINVAL;
     }
 
-    int err = create_binding_handle(&handle, ref, adapter, filter);
+    err = create_binding_handle(&handle, ref, adapter, filter);
     if (err != 0)
     {
         return err;
     }
 
-    err = _nvm_rpc_handle_insert(ref, adapter, handle, (rpc_deleter_t) remove_binding_handle);
+    err = _nvm_rpc_handle_insert(ref, adapter, handle, (rpc_free_handle_t) remove_binding_handle);
     if (err != 0)
     {
-        remove_binding_handle(handle, adapter);
+        remove_binding_handle(adapter, handle);
         return err;
     }
     
@@ -450,7 +521,7 @@ int nvm_dis_rpc_bind(nvm_aq_ref* handle, const nvm_ctrl_t* ctrl, uint32_t adapte
         return err;
     }
 
-    err = _nvm_rpc_bind(ref, binding, (rpc_deleter_t) remove_binding, (rpc_stub_t) remote_command);
+    err = _nvm_rpc_bind(ref, binding, (rpc_free_binding_t) remove_binding, (rpc_stub_t) remote_command);
     if (err != 0)
     {
         remove_binding(binding);

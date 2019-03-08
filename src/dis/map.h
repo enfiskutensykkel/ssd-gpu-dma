@@ -14,30 +14,44 @@
 
 
 /*
- * What kind of memory are we mapping.
+ * Virtual address space mapping.
  */
-enum segment_type
+struct va_map
 {
-    SEGMENT_TYPE_LOCAL      =   0x1,    // Local segment
-    SEGMENT_TYPE_REMOTE     =   0x2,    // Remote segment
-    SEGMENT_TYPE_DEVICE     =   0x3,    // Device segment (requires connect/disconnect)
-    SEGMENT_TYPE_PHYSICAL   =   0x4     // Physical memory segment
+    bool                    mapped;     // Is segment mapped into virtual address space?
+    sci_map_t               md;         // SISCI mapping descriptor
 };
 
 
 
 /*
- * Describe mapping for device.
+ * Local segment descriptor.
+ * map.range.remote = false
  */
-struct map
+struct local_segment
 {
-    enum segment_type       type;       // Kind of segment
-    sci_local_segment_t     lseg;       // Local segment descriptor
-    sci_remote_segment_t    rseg;       // Remote segment descriptor
+    // XXX: ctrl reference can be replaced with a new sci_desc_t
+    struct controller*      ctrl;       // Controller reference
     uint32_t                adapter;    // DIS adapter number
-    size_t                  size;       // Segment size
-    bool                    mapped;     // Is segment mapped into virtual address space
-    sci_map_t               md;         // SISCI mapping descriptor
+    sci_local_segment_t     segment;    // Local segment reference
+    bool                    remove;     // Requires remove
+    struct va_map           map;        // Mapping descriptor
+    struct va_range         range;      // Memory range descriptor
+};
+
+
+
+/*
+ * Remote segment descriptor.
+ * map.range.remote = true
+ */
+struct remote_segment
+{
+    // XXX: ctrl reference is only necessary for device segments
+    struct controller*      ctrl;       // Controller reference
+    sci_remote_segment_t    segment;    // Remote segment reference
+    bool                    disconnect; // Requires a disconnect
+    struct va_map           map;        // Mapping descriptor
     struct va_range         range;      // Memory range descriptor
 };
 

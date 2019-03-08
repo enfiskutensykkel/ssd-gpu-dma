@@ -77,6 +77,7 @@ static int create_mapping_descriptor(struct ioctl_mapping** handle, enum mapping
 
     md->type = type;
     md->buffer = buffer;
+    md->range.remote = false;
     md->range.vaddr = (volatile void*) buffer;
     md->range.page_size = page_size;
     md->range.n_pages = n_pages;
@@ -113,7 +114,7 @@ int nvm_dma_create(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, size_t size)
         return err;
     }
 
-    err = _nvm_dma_init(handle, ctrl, &md->range, false, &release_mapping_descriptor);
+    err = _nvm_dma_init(handle, ctrl, &md->range, &release_mapping_descriptor);
     if (err != 0)
     {
         remove_mapping_descriptor(md);
@@ -141,7 +142,7 @@ int nvm_dma_map_host(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, si
         return err;
     }
 
-    err = _nvm_dma_init(handle, ctrl, &md->range, false, &release_mapping_descriptor);
+    err = _nvm_dma_init(handle, ctrl, &md->range, &release_mapping_descriptor);
     if (err != 0)
     {
         remove_mapping_descriptor(md);
@@ -170,7 +171,7 @@ int nvm_dma_map_device(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* devptr,
         return err;
     }
 
-    err = _nvm_dma_init(handle, ctrl, &md->range, false, &release_mapping_descriptor);
+    err = _nvm_dma_init(handle, ctrl, &md->range, &release_mapping_descriptor);
     if (err != 0)
     {
         remove_mapping_descriptor(md);

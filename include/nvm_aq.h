@@ -47,12 +47,6 @@ void nvm_aq_destroy(nvm_aq_ref ref);
 
 
 /*
- * Maximum number of adapters.
- */
-#define NVM_DIS_RPC_MAX_ADAPTER     4
-
-
-/*
  * Callback function invoked whenever a remote NVM admin command is received.
  * Should indicate whether or not a remote admin command is accepted and can
  * be enqueued by using the return value.

@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <errno.h>
+#include "mutex.h"
 #include "dis/device.h"
 #include "dis/map.h"
 #include "ctrl.h"
@@ -25,20 +26,44 @@
 
 
 
+static int query_device(const struct device* dev, sci_smartio_device_info_t* info)
+{
+    sci_error_t err;
+    sci_smartio_query_device_t query;
+    
+    query.fdid = dev->fdid;
+    query.subcommand = SCI_Q_DEVICE_INFO;
+    query.data = (void*) info;
+
+    SCIQuery(SCI_Q_DEVICE, (void*) &query, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        dprintf("Failed to query device: %s\n", _SCIGetErrorString(err));
+        return EIO;
+    }
+
+    return 0;
+}
+
+
+
 /*
  * Helper function to connect to a device memory segment.
  */
-int _nvm_connect_device_memory(sci_remote_segment_t* segment, const struct device* dev, uint32_t id, unsigned int memtype)
+int _nvm_device_memory_get(sci_remote_segment_t* segment, const struct device* dev, uint32_t id, unsigned int memtype)
 {
     sci_error_t err;
+    sci_remote_segment_t seg = NULL;
     
-    SCIConnectDeviceSegment(dev->device, segment, id, memtype, NULL, NULL, 0, &err);
+    *segment = NULL;
+    
+    SCIConnectDeviceSegment(dev->device, &seg, id, memtype, NULL, NULL, 0, &err);
     if (err == SCI_ERR_OK)
     {
+        *segment = seg;
         return 0;
     }
 
-    *segment = NULL;
     switch (err)
     {
         case SCI_ERR_API_NOSPC:
@@ -65,7 +90,7 @@ int _nvm_connect_device_memory(sci_remote_segment_t* segment, const struct devic
 
 
 
-void _nvm_disconnect_device_memory(sci_remote_segment_t* segment)
+void _nvm_device_memory_put(sci_remote_segment_t* segment)
 {
     if (segment != NULL && *segment != NULL)
     {
@@ -90,18 +115,120 @@ void _nvm_disconnect_device_memory(sci_remote_segment_t* segment)
 
 
 
+int _nvm_local_memory_get(sci_local_segment_t* segment, uint32_t* adapter, const struct device* dev, size_t size, void* ptr)
+{
+    int status;
+    sci_error_t err;
+    sci_smartio_device_info_t info;
+    uint32_t flags = SCI_FLAG_AUTO_ID;
+    sci_local_segment_t seg = NULL;
+    uint32_t adapt;
+
+    *segment = NULL;
+    *adapter = 0;
+
+    if (ptr != NULL)
+    {
+#ifdef _CUDA
+        flags |= SCI_FLAG_EMPTY;
+#else
+        dprintf("Must compile with CUDA support\n");
+        return EINVAL;
+#endif
+    }
+
+    // Query device to get a possible adapter
+    status = query_device(dev, &info);
+    if (status != 0)
+    {
+        return status;
+    }
+    
+    // Query result contains one possible adapter to reach device, we'll use that
+    adapt = info.adapter;
+
+    // Create local segment
+    SCICreateSegment(dev->sd, &seg, 512, size, NULL, NULL, flags, &err);
+    if (err != SCI_ERR_OK)
+    {
+        dprintf("Failed to create local segment: %s\n", _SCIGetErrorString(err));
+        return ENOSPC;
+    }
+
+#ifdef _CUDA
+    // Attach GPU memory
+    if (ptr != NULL)
+    {
+        SCIAttachPhysicalMemory(0, ptr, 0, size, seg, SCI_FLAG_CUDA_BUFFER, &err);
+        if (err != SCI_ERR_OK)
+        {
+            dprintf("Failed to attach GPU memory to local segment: %s\n", _SCIGetErrorString(err));
+            SCIRemoveSegment(seg, 0, &err);
+            return EIO;
+        }
+    }
+#endif
+
+    // Export segment on chosen adapter
+    SCIPrepareSegment(seg, adapt, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        dprintf("Failed to prepare local segment on adapter %u: %s\n", 
+                adapt, _SCIGetErrorString(err));
+        SCIRemoveSegment(seg, 0, &err);
+        return EIO;
+    }
+
+    *segment = seg;
+    *adapter = adapt;
+    return 0;
+}
+
+
+
+void _nvm_local_memory_put(sci_local_segment_t* segment)
+{
+    if (segment != NULL && *segment != NULL)
+    {
+        sci_error_t err = SCI_ERR_OK;
+
+        do
+        {
+            SCIRemoveSegment(*segment, 0, &err);
+        }
+        while (err == SCI_ERR_BUSY);
+
+#ifndef NDEBUG
+        if (err != SCI_ERR_OK)
+        {
+            dprintf("Failed to remove local segment: %s\n", _SCIGetErrorString(err));
+        }
+#endif
+
+        *segment = NULL;
+    }
+}
+
+
+
 /*
  * Map local segment for device.
  */
-static int io_map_local(const struct device* dev, const struct map* map, uint64_t* ioaddr)
+static int io_map_local(const struct device* dev, const struct local_segment* ls, uint64_t* ioaddr)
 {
     sci_error_t err;
-    size_t size = SCIGetLocalSegmentSize(map->lseg);
     sci_ioaddr_t addr;
+    size_t size;
 
     *ioaddr = 0;
 
-    SCISetSegmentAvailable(map->lseg, map->adapter, 0, &err);
+    size = SCIGetLocalSegmentSize(ls->segment);
+    if (size == 0)
+    {
+        return EINVAL;
+    }
+
+    SCISetSegmentAvailable(ls->segment, ls->adapter, 0, &err);
     switch (err)
     {
         case SCI_ERR_OK:
@@ -116,10 +243,10 @@ static int io_map_local(const struct device* dev, const struct map* map, uint64_
             return EIO;
     }
 
-    SCIMapLocalSegmentForDevice(map->lseg, map->adapter, dev->device, &addr, 0, size, 0, &err);
+    SCIMapLocalSegmentForDevice(ls->segment, ls->adapter, dev->device, &addr, 0, size, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to map segment for device: %s\n", _SCIGetErrorString(err));
+        dprintf("Failed to map local segment for device: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 
@@ -132,20 +259,24 @@ static int io_map_local(const struct device* dev, const struct map* map, uint64_
 /*
  * Map remote segment for device
  */
-static int io_map_remote(const struct device* dev, const struct map* map, uint64_t* ioaddr)
+static int io_map_remote(const struct device* dev, const struct remote_segment* rs, uint64_t* ioaddr)
 {
     sci_error_t err;
-    size_t size;
     sci_ioaddr_t addr;
+    size_t size;
 
     *ioaddr = 0;
 
-    size = SCIGetRemoteSegmentSize(map->rseg);
+    size = SCIGetRemoteSegmentSize(rs->segment);
+    if (size == 0)
+    {
+        return EINVAL;
+    }
 
-    SCIMapRemoteSegmentForDevice(map->rseg, dev->device, &addr, 0, size, 0, &err);
+    SCIMapRemoteSegmentForDevice(rs->segment, dev->device, &addr, 0, size, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to map segment for device: %s\n", _SCIGetErrorString(err));
+        dprintf("Failed to map remote segment for device: %s\n", _SCIGetErrorString(err));
         return EIO;
     }
 
@@ -172,8 +303,16 @@ static int borrow_device(struct device** handle, uint32_t fdid)
         return ENOMEM;
     }
 
+    status = _nvm_mutex_init(&dev->lock);
+    if (status != 0)
+    {
+        free(dev);
+        return status;
+    }
+
     dev->fdid = fdid;
     dev->sd = NULL;
+    dev->counter = 0;
     dev->device = NULL;
     dev->segment = NULL;
     dev->size = 0;
@@ -183,8 +322,9 @@ static int borrow_device(struct device** handle, uint32_t fdid)
     SCIOpen(&dev->sd, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to create SISCI virtual device: %s\n", _SCIGetErrorString(err));
+        _nvm_mutex_free(&dev->lock);
         free(dev);
+        dprintf("Failed to create SISCI virtual device: %s\n", _SCIGetErrorString(err));
         return ENOSYS;
     }
 
@@ -210,15 +350,17 @@ static int borrow_device(struct device** handle, uint32_t fdid)
         }
 
         SCIClose(dev->sd, 0, &err);
+        _nvm_mutex_free(&dev->lock);
         free(dev);
         return status;
     }
 
-    status = _nvm_connect_device_memory(&dev->segment, dev, 0, SCI_MEMTYPE_BAR);
+    status = _nvm_device_memory_get(&dev->segment, dev, 0, SCI_MEMTYPE_BAR);
     if (status != 0)
     {
         SCIReturnDevice(dev->device, 0, &err);
         SCIClose(dev->sd, 0, &err);
+        _nvm_mutex_free(&dev->lock);
         free(dev);
         return status;
     }
@@ -229,9 +371,10 @@ static int borrow_device(struct device** handle, uint32_t fdid)
     if (err != SCI_ERR_OK)
     {
         dprintf("Failed to map device memory into local address space: %s\n", _SCIGetErrorString(err));
-        _nvm_disconnect_device_memory(&dev->segment);
+        _nvm_device_memory_put(&dev->segment);
         SCIReturnDevice(dev->device, 0, &err);
         SCIClose(dev->sd, 0, &err);
+        _nvm_mutex_free(&dev->lock);
         free(dev);
         return ENOSPC;
     }
@@ -261,10 +404,11 @@ static void return_device(struct device* dev, volatile void* mm_ptr, size_t mm_s
     }
     while (err == SCI_ERR_BUSY);
 
-    _nvm_disconnect_device_memory(&dev->segment);
+    _nvm_device_memory_put(&dev->segment);
 
     SCIReturnDevice(dev->device, 0, &err);
     SCIClose(dev->sd, 0, &err);
+    _nvm_mutex_free(&dev->lock);
     free(dev);
 }
 
@@ -275,8 +419,6 @@ static void return_device(struct device* dev, volatile void* mm_ptr, size_t mm_s
  */
 static int io_map(const struct device* dev, const struct va_range* va, uint64_t* ioaddr)
 {
-    const struct map* map = _nvm_container_of(va, struct map, range);
-
 #ifndef NDEBUG
     // SISCI segments, being contiguous memory, should
     // be considered one large page rather than many pages
@@ -287,19 +429,13 @@ static int io_map(const struct device* dev, const struct va_range* va, uint64_t*
     }
 #endif
 
-    switch (map->type)
+    if (va->remote)
     {
-        case SEGMENT_TYPE_LOCAL:
-        case SEGMENT_TYPE_PHYSICAL:
-            return io_map_local(dev, map, ioaddr);
-
-        case SEGMENT_TYPE_REMOTE:
-        case SEGMENT_TYPE_DEVICE:
-            return io_map_remote(dev, map, ioaddr);
-
-        default:
-            dprintf("Unknown segment type\n");
-            return EINVAL;
+        return io_map_remote(dev, _nvm_container_of(va, struct remote_segment, range), ioaddr);
+    }
+    else
+    {
+        return io_map_local(dev, _nvm_container_of(va, struct local_segment, range), ioaddr);
     }
 }
 
@@ -308,45 +444,46 @@ static int io_map(const struct device* dev, const struct va_range* va, uint64_t*
 static void io_unmap(const struct device* dev, const struct va_range* va)
 {
     sci_error_t err = SCI_ERR_OK;
-    const struct map* map = _nvm_container_of(va, struct map, range);
-
-    switch (map->type)
+    
+    if (va->remote)
     {
-        case SEGMENT_TYPE_LOCAL:
-        case SEGMENT_TYPE_PHYSICAL:
-            do
-            {
-                SCIUnmapLocalSegmentForDevice(map->lseg, map->adapter, dev->device, 0, &err);
-            }
-            while (err == SCI_ERR_BUSY);
-            break;
+        const struct remote_segment* rs;
+        rs = _nvm_container_of(va, struct remote_segment, range);
 
-        case SEGMENT_TYPE_REMOTE:
-        case SEGMENT_TYPE_DEVICE:
-            do
-            {
-                SCIUnmapRemoteSegmentForDevice(map->rseg, dev->device, 0, &err);
-            }
-            while (err == SCI_ERR_BUSY);
-            break;
-
-        default:
-            dprintf("Unknown segment type\n");
-            return;
-    }
-
-#ifndef NDEBUG
-    if (err != SCI_ERR_OK)
-    {
-        dprintf("Unmapping segment for device failed: %s\n", _SCIGetErrorString(err));
-    }
-#endif
-
-    if (map->type == SEGMENT_TYPE_PHYSICAL)
-    {
         do
         {
-            SCISetSegmentUnavailable(map->lseg, map->adapter, 0, &err);
+            SCIUnmapRemoteSegmentForDevice(rs->segment, dev->device, 0, &err);
+        }
+        while (err == SCI_ERR_BUSY);
+
+#ifndef NDEBUG
+        if (err != SCI_ERR_OK)
+        {
+            dprintf("Unmapping remote segment for device failed: %s\n", _SCIGetErrorString(err));
+        }
+#endif
+    }
+    else
+    {
+        const struct local_segment* ls;
+        ls = _nvm_container_of(va, struct local_segment, range);
+
+        do
+        {
+            SCIUnmapLocalSegmentForDevice(ls->segment, ls->adapter, dev->device, 0, &err);
+        }
+        while (err == SCI_ERR_BUSY);
+
+#ifndef NDEBUG
+        if (err != SCI_ERR_OK)
+        {
+            dprintf("Unmapping local segment for device failed: %s\n", _SCIGetErrorString(err));
+        }
+#endif
+
+        do
+        {
+            SCISetSegmentUnavailable(ls->segment, ls->adapter, 0, &err);
         }
         while (err == SCI_ERR_BUSY);
     }

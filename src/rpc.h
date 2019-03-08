@@ -14,9 +14,16 @@ struct nvm_admin_reference;
 
 
 /*
- * Callback to delete custom instance data.
+ * Callback to release a local binding handle.
  */
-typedef void (*rpc_deleter_t)(void* data, uint32_t key, int remaining_handles);
+typedef void (*rpc_free_handle_t)(uint32_t key, void* data);
+
+
+
+/*
+ * Callback to release a remote binding reference.
+ */
+typedef void (*rpc_free_binding_t)(void* data);
 
 
 
@@ -51,7 +58,7 @@ void _nvm_ref_put(nvm_aq_ref ref);
  * Insert binding handle to server's list of handles.
  * If key is already found, this function will fail.
  */
-int _nvm_rpc_handle_insert(nvm_aq_ref ref, uint32_t key, void* data, rpc_deleter_t release);
+int _nvm_rpc_handle_insert(nvm_aq_ref ref, uint32_t key, void* data, rpc_free_handle_t release);
 
 
 
@@ -66,7 +73,7 @@ void _nvm_rpc_handle_remove(nvm_aq_ref ref, uint32_t key);
 /*
  * Bind reference to remote handle.
  */
-int _nvm_rpc_bind(nvm_aq_ref ref, void* data, rpc_deleter_t deleter, rpc_stub_t stub);
+int _nvm_rpc_bind(nvm_aq_ref ref, void* data, rpc_free_binding_t release, rpc_stub_t stub);
 
 
 

@@ -27,14 +27,15 @@ typedef void (*va_range_free_t)(struct va_range* va);
  */
 struct va_range
 {
+    bool            remote;     // Indicates if this is remote memory
     volatile void*  vaddr;      // Virtual address of mapped address range
     size_t          page_size;  // Alignment of mapping (page size)
     size_t          n_pages;    // Number of pages for address range
 };
 
 
-#define VA_RANGE_INIT(vaddr, page_size, n_pages)    \
-    (struct va_range) {(vaddr), (page_size), (n_pages)}
+#define VA_RANGE_INIT(remote, vaddr, page_size, n_pages)    \
+    (struct va_range) {(remote), (vaddr), (page_size), (n_pages)}
 
 
 /*
@@ -43,7 +44,6 @@ struct va_range
 int _nvm_dma_init(nvm_dma_t** handle,
                   const nvm_ctrl_t* ctrl,
                   struct va_range* va,
-                  bool remote,
                   va_range_free_t release);
 
 

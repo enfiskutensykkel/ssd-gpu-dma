@@ -52,7 +52,7 @@ struct rpc_handle
     struct rpc_handle*  next;       // Pointer to next handle in list
     uint32_t            key;        // Handle key
     void*               data;       // Custom instance data
-    rpc_deleter_t       release;    // Callback to release the instance data
+    rpc_free_handle_t   release;    // Callback to release the instance data
 };
 
 
@@ -68,16 +68,15 @@ struct nvm_admin_reference
 {
     struct controller*      ctrl;       // Controller reference
     struct mutex            lock;       // Ensure exclusive access to the reference
-    int                     n_handles;  // Number of handles
     struct rpc_handle*      handles;    // Linked list of binding handles (if server)
     void*                   data;       // Custom instance data
-    rpc_deleter_t           release;    // Callback to release instance data
+    rpc_free_binding_t      release;    // Callback to release instance data
     rpc_stub_t              stub;       // Client-side stub
 };
 
 
 
-int _nvm_rpc_handle_insert(nvm_aq_ref ref, uint32_t key, void* data, rpc_deleter_t release)
+int _nvm_rpc_handle_insert(nvm_aq_ref ref, uint32_t key, void* data, rpc_free_handle_t release)
 {
     if (data == NULL || release == NULL)
     {
@@ -130,8 +129,6 @@ int _nvm_rpc_handle_insert(nvm_aq_ref ref, uint32_t key, void* data, rpc_deleter
         ref->handles = handle;
     }
 
-    ++ref->n_handles;
-
     _nvm_mutex_unlock(&ref->lock);
     return 0;
 }
@@ -162,7 +159,7 @@ void _nvm_rpc_handle_remove(nvm_aq_ref ref, uint32_t key)
 
     if (curr != NULL)
     {
-        curr->release(curr->data, curr->key, --ref->n_handles);
+        curr->release(curr->key, curr->data);
         free(curr);
     }
 
@@ -188,7 +185,7 @@ static void release_handles(nvm_aq_ref ref)
         {
             curr = next;
             next = curr->next;
-            curr->release(curr->data, curr->key, --ref->n_handles);
+            curr->release(curr->key, curr->data);
             free(curr);
         }
 
@@ -254,7 +251,7 @@ void _nvm_ref_put(nvm_aq_ref ref)
 
         if (ref->release != NULL)
         {
-            ref->release(ref->data, 0, 0);
+            ref->release(ref->data);
         }
         
         _nvm_ctrl_put(ref->ctrl);
@@ -374,9 +371,8 @@ static int create_admin(struct local_admin** handle, const struct controller* ct
 
 /*
  * Helper function to remove an admin descriptor.
- * TODO: This logic needs cleaning up
  */
-static void remove_admin(struct local_admin* admin, uint32_t key, int remaining_handles)
+static void remove_admin(struct local_admin* admin)
 {
     if (admin != NULL)
     {
@@ -420,7 +416,7 @@ int nvm_raw_rpc(nvm_aq_ref ref, nvm_cmd_t* cmd, nvm_cpl_t* cpl)
 /*
  * Bind reference to remote handle.
  */
-int _nvm_rpc_bind(nvm_aq_ref ref, void* data, rpc_deleter_t release, rpc_stub_t stub)
+int _nvm_rpc_bind(nvm_aq_ref ref, void* data, rpc_free_binding_t release, rpc_stub_t stub)
 {
     int err;
 
@@ -474,7 +470,7 @@ int nvm_aq_create(nvm_aq_ref* handle, const nvm_ctrl_t* ctrl, const nvm_dma_t* w
     }
 
     ref->stub = (rpc_stub_t) execute_command;
-    ref->release = (rpc_deleter_t) remove_admin; // TODO: This logic needs cleaning up
+    ref->release = (rpc_free_binding_t) &remove_admin;
 
     // Reset controller
     const struct local_admin* admin = (const struct local_admin*) ref->data;

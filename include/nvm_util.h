@@ -175,12 +175,12 @@ void _nvm_wcb_flush()
 
 
 /* Make PRP list descriptor from values */
-#define NVM_PRP_LIST(vaddr, page_size, local, ioaddr) \
+#define NVM_PRP_LIST_INIT(vaddr, page_size, local, ioaddr) \
     {(vaddr), !!(local), (page_size), (ioaddr)}
 
 
 /* Make PRP list descriptor from DMA descriptor */
-#define NVM_PRP_LIST_FROM_DMA(dma_ptr, offset)           \
+#define NVM_PRP_LIST(dma_ptr, offset)               \
     NVM_PRP_LIST(NVM_DMA_OFFSET(dma_ptr, offset), (dma-ptr)->local, (dma_ptr)->page_size, (dma_ptr)->ioaddrs[(offset)])
 
 

@@ -143,9 +143,7 @@ int nvm_dis_dma_map_remote(nvm_dma_t** map,             // Mapping descriptor re
  *
  * Note: this function will not work if you are using the CUDA API
  */
-int nvm_dma_create(nvm_dma_t** map,
-                   const nvm_ctrl_t* ctrl,
-                   size_t size);
+int nvm_dma_create(nvm_dma_t** map, const nvm_ctrl_t* ctrl, size_t size);
 #endif
 
 
@@ -154,29 +152,9 @@ int nvm_dma_create(nvm_dma_t** map,
 /*
  * Create device memory segment and map it for the controller.
  * Short-hand function for creating a device memory segment.
- * If mem_hints is 0, the API will assume that the local CPU
- * will read from the segment (and thus create it locally).
+ * If mem_hints is 0, the API will create a local segment instead.
  */
-int nvm_dis_dma_create(nvm_dma_t** map,
-                       const nvm_ctrl_t* ctrl,
-                       uint32_t id,
-                       size_t size,
-                       bool shared,
-                       unsigned int mem_hints);
-
-#endif /* __DIS_CLUSTER__ */
-
-
-
-#if defined( __DIS_CLUSTER__ )
-/* 
- * Connect to device memory.
- * Short-hand function for connecting to device memory.
- */
-int nvm_dis_dma_connect(nvm_dma_t** map,
-                        const nvm_ctrl_t* ctrl,
-                        uint32_t id,
-                        bool shared);
+int nvm_dis_dma_create(nvm_dma_t** map, const nvm_ctrl_t* ctrl, size_t size, unsigned int mem_hints);
 
 #endif /* __DIS_CLUSTER__ */
 
@@ -188,22 +166,14 @@ int nvm_dis_dma_connect(nvm_dma_t** map,
  * Note: This function requires the IOMMU to be enabled.
  * Currently not implemented.
  */
-int nvm_dis_dma_map_host(nvm_dma_t** map,
-                         const nvm_ctrl_t* ctrl,
-                         uint32_t dis_adapter,
-                         void* vaddr,
-                         size_t size);
+int nvm_dis_dma_map_host(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* vaddr, size_t size);
 
 #endif
 
 
 #if ( ( defined( __CUDA__ ) || defined( __CUDACC__ ) ) && defined( __DIS_CLUSTER__ ) )
 
-int nvm_dis_dma_map_device(nvm_dma_t** map, 
-                           const nvm_ctrl_t* ctrl, 
-                           uint32_t dis_adapter,
-                           void* devptr,
-                           size_t size);
+int nvm_dis_dma_map_device(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* devptr, size_t size);
 
 #endif /* __DIS_CLUSTER__ && __CUDA__ */
 

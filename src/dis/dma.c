@@ -26,60 +26,29 @@
 
 
 
-/*
- * Device memory segments are a special case of mappings,
- * where a controller reference must be taken in order to
- * get the segment and map it.
- */
-struct segment
-{
-    struct controller*  ctrl;
-    struct map          map;
-};
-
-
-
 /* 
- * Map segment into virtual address space.
+ * Map local segment into virtual address space.
  */
-static int va_map(struct map* m, bool write, bool wc)
+static int va_map_local(struct va_map* m, struct va_range* va, sci_local_segment_t segment, bool write)
 {
     sci_error_t err;
     unsigned int flags = 0;
-    volatile void* ptr = NULL;
+    void* ptr = NULL;
     size_t size = 0;
 
-    flags |= !write ? SCI_FLAG_READONLY_MAP : 0;
-    flags |= !wc ? SCI_FLAG_IO_MAP_IOSPACE : 0;
+    flags = !write ? SCI_FLAG_READONLY_MAP : 0;
 
-    switch (m->type)
-    {
-        case SEGMENT_TYPE_PHYSICAL:
-            return ENOTSUP;
-
-        case SEGMENT_TYPE_LOCAL:
-            size = SCIGetLocalSegmentSize(m->lseg);
-            ptr = SCIMapLocalSegment(m->lseg, &m->md, 0, size, NULL, 0, &err);
-            break;
-
-        case SEGMENT_TYPE_REMOTE:
-        case SEGMENT_TYPE_DEVICE:
-            size = SCIGetRemoteSegmentSize(m->rseg);
-            ptr = SCIMapRemoteSegment(m->rseg, &m->md, 0, size, NULL, 0, &err);
-            break;
-
-        default:
-            dprintf("Unknown segment type\n");
-            return EINVAL;
-    }
+    size = SCIGetLocalSegmentSize(segment);
+    ptr = SCIMapLocalSegment(segment, &m->md, 0, size, NULL, flags, &err);
 
     switch (err)
     {
         case SCI_ERR_OK:
             m->mapped = true;
-            m->range.n_pages = 1;
-            m->range.page_size = size;
-            m->range.vaddr = ptr;
+            va->remote = false;
+            va->n_pages = 1;
+            va->page_size = size;
+            va->vaddr = (volatile void*) ptr;
             return 0;
 
         case SCI_ERR_FLAG_NOT_IMPLEMENTED:
@@ -90,7 +59,48 @@ static int va_map(struct map* m, bool write, bool wc)
             return EINVAL;
 
         default:
-            dprintf("Mapping segment into virtual address space failed: %s\n", _SCIGetErrorString(err));
+            dprintf("Mapping local segment into virtual address space failed: %s\n", _SCIGetErrorString(err));
+            return EIO;
+    }
+}
+
+
+
+/* 
+ * Map remote segment into virtual address space.
+ */
+static int va_map_remote(struct va_map* m, struct va_range* va, sci_remote_segment_t segment, bool write, bool wc)
+{
+    sci_error_t err;
+    unsigned int flags = 0;
+    volatile void* ptr = NULL;
+    size_t size = 0;
+
+    flags |= !write ? SCI_FLAG_READONLY_MAP : 0;
+    flags |= !wc ? SCI_FLAG_IO_MAP_IOSPACE : 0;
+
+    size = SCIGetRemoteSegmentSize(segment);
+    ptr = SCIMapRemoteSegment(segment, &m->md, 0, size, NULL, flags, &err);
+
+    switch (err)
+    {
+        case SCI_ERR_OK:
+            m->mapped = true;
+            va->remote = true;
+            va->n_pages = 1;
+            va->page_size = size;
+            va->vaddr = ptr;
+            return 0;
+
+        case SCI_ERR_FLAG_NOT_IMPLEMENTED:
+        case SCI_ERR_ILLEGAL_FLAG:
+        case SCI_ERR_OUT_OF_RANGE:
+        case SCI_ERR_SIZE_ALIGNMENT:
+        case SCI_ERR_OFFSET_ALIGNMENT:
+            return EINVAL;
+
+        default:
+            dprintf("Mapping local segment into virtual address space failed: %s\n", _SCIGetErrorString(err));
             return EIO;
     }
 }
@@ -100,7 +110,7 @@ static int va_map(struct map* m, bool write, bool wc)
 /*
  * Unmap segment.
  */
-static void va_unmap(struct map* m)
+static void va_unmap(struct va_map* m)
 {
     if (m->mapped)
     {
@@ -126,64 +136,387 @@ static void va_unmap(struct map* m)
 
 
 /*
- * Release SISCI resources and remove mapping descriptor.
+ * Helper function to create local segment descriptor.
  */
-static void remove_map(struct map* m)
+static int create_local_desc(struct local_segment** ls, struct controller* ctrl, uint32_t adapter, sci_local_segment_t segment)
 {
-    va_unmap(m);
+    struct local_segment* s;
 
-    if (m->type == SEGMENT_TYPE_DEVICE)
+    s = (struct local_segment*) malloc(sizeof(struct local_segment));
+    if (s == NULL)
     {
-        struct segment* seg = _nvm_container_of(m, struct segment, map);
-        _nvm_disconnect_device_memory(&seg->map.rseg);
-        _nvm_ctrl_put(seg->ctrl);
-        free(seg);
+        dprintf("Failed to allocate local segment descriptor: %s\n", strerror(errno));
+        return errno;
     }
-    else if (m->type == SEGMENT_TYPE_PHYSICAL)
+
+    s->ctrl = ctrl;
+    s->adapter = adapter;
+    s->segment = segment;
+    s->remove = false;
+    s->map.mapped = false;
+    s->map.md = NULL;
+    s->range = VA_RANGE_INIT(false, NULL, SCIGetLocalSegmentSize(s->segment), 1);
+
+    *ls = s;
+    return 0;
+}
+
+
+
+/*
+ * Helper function to remove local segment descriptor
+ */
+static void remove_local_desc(struct local_segment* ls)
+{
+    if (ls == NULL)
+    {
+        return;
+    }
+
+    va_unmap(&ls->map);
+
+    // Check if the local segment was created by the API
+    if (ls->remove)
     {
         sci_error_t err;
-        struct segment* seg = _nvm_container_of(m, struct segment, map);
 
         do
         {
-            SCIRemoveSegment(seg->map.lseg, 0, &err);
+            SCISetSegmentUnavailable(ls->segment, ls->adapter, 0, &err);
         }
         while (err == SCI_ERR_BUSY);
 
 #ifndef NDEBUG
         if (err != SCI_ERR_OK)
         {
-            dprintf("Failed to remove physical segment: %s\n", _SCIGetErrorString(err));
+            dprintf("Failed to set local segment unavailable on adapter %u: %s\n",
+                    ls->adapter, _SCIGetErrorString(err));
         }
 #endif
 
-        _nvm_ctrl_put(seg->ctrl);
-        free(seg);
+        _nvm_local_memory_put(&ls->segment);
     }
-    else
-    {
-        free(m);
-    }
-}
 
-
-
-static void release_map(struct va_range* va)
-{
-    struct map* m = _nvm_container_of(va, struct map, range);
-    remove_map(m);
+    _nvm_ctrl_put(ls->ctrl);
+    free(ls);
 }
 
 
 
 /*
- * Create mapping descriptor
+ * Helper function to create remote segment descriptor
  */
-static int create_map(struct map** md, const nvm_ctrl_t* ctrl, enum segment_type type, size_t size)
+static int create_remote_desc(struct remote_segment** rs, struct controller* ctrl, sci_remote_segment_t segment)
 {
-    struct map* map;
+    struct remote_segment* s;
 
-    *md = NULL;
+    s = (struct remote_segment*) malloc(sizeof(struct remote_segment));
+    if (s == NULL)
+    {
+        dprintf("Failed to allocate remote segment descriptor: %s\n", strerror(errno));
+        return errno;
+    }
+
+    s->ctrl = ctrl;
+    s->segment = segment;
+    s->disconnect = false;
+    s->map.mapped = false;
+    s->map.md = NULL;
+    s->range = VA_RANGE_INIT(true, NULL, SCIGetRemoteSegmentSize(s->segment), 1);
+
+    *rs = s;
+
+    return 0;
+}
+
+
+
+/*
+ * Helper function to remove remote segment descriptor.
+ */
+static void remove_remote_desc(struct remote_segment* rs)
+{
+    if (rs == NULL)
+    {
+        return;
+    }
+
+    va_unmap(&rs->map);
+
+    // Check if segment is connected by the API
+    if (rs->disconnect)
+    {
+        _nvm_device_memory_put(&rs->segment);
+    }
+
+    _nvm_ctrl_put(rs->ctrl);
+    free(rs);
+}
+
+
+
+/*
+ * Release segment mapping descriptor.
+ * Dispatch the correct release function based on type (remote vs. local).
+ */
+static void release_range(struct va_range* va)
+{
+    if (va == NULL)
+    {
+        return;
+    }
+
+    if (va->remote)
+    {
+        remove_remote_desc(_nvm_container_of(va, struct remote_segment, range));
+    }
+    else
+    {
+        remove_local_desc(_nvm_container_of(va, struct local_segment, range));
+    }
+}
+
+
+
+/*
+ * Create DMA mapping for a local segment.
+ */
+int nvm_dis_dma_map_local(nvm_dma_t** map, const nvm_ctrl_t* ctrl, sci_local_segment_t lseg, uint32_t adapter, bool map_va)
+{
+    int status;
+    struct local_segment* ls;
+    struct controller* ref;
+
+    *map = NULL;
+
+    ref = _nvm_ctrl_get(ctrl);
+    if (ref == NULL)
+    {
+        return ENOSYS;
+    }
+
+    status = create_local_desc(&ls, ref, adapter, lseg);
+    if (status != 0)
+    {
+        _nvm_ctrl_put(ref);
+        return status;
+    }
+
+    if (map_va)
+    {
+        status = va_map_local(&ls->map, &ls->range, ls->segment, true);
+        if (status != 0)
+        {
+            remove_local_desc(ls);
+            return status;
+        }
+    }
+
+    status = _nvm_dma_init(map, ctrl, &ls->range, &release_range);
+    if (status != 0)
+    {
+        remove_local_desc(ls);
+        return status;
+    }
+
+    return 0;
+}
+
+
+
+/*
+ * Create DMA mapping for a remote segment.
+ */
+int nvm_dis_dma_map_remote(nvm_dma_t** map, const nvm_ctrl_t* ctrl, sci_remote_segment_t rseg, bool map_va, bool map_wc)
+{
+    int status;
+    struct remote_segment* rs;
+    struct controller* ref;
+
+    *map = NULL;
+
+    if (!map_va && map_wc)
+    {
+        return EINVAL;
+    }
+
+    ref = _nvm_ctrl_get(ctrl);
+    if (ref == NULL)
+    {
+        return ENOSYS;
+    }
+
+    status = create_remote_desc(&rs, ref, rseg);
+    if (status != 0)
+    {
+        _nvm_ctrl_put(ref);
+        return status;
+    }
+
+    if (map_va)
+    {
+        status = va_map_remote(&rs->map, &rs->range, rs->segment, true, map_wc);
+        if (status != 0)
+        {
+            remove_remote_desc(rs);
+            return status;
+        }
+    }
+
+    status = _nvm_dma_init(map, ctrl, &rs->range, &release_range);
+    if (status != 0)
+    {
+        remove_remote_desc(rs);
+        return status;
+    }
+
+    return 0;
+}
+
+
+
+/*
+ * Helper function to create a local segment and map it.
+ */
+static int create_local_segment(struct va_range** va, const nvm_ctrl_t* ctrl, size_t size, void* phys_ptr)
+{
+    int status;
+    struct controller* ref;
+    struct local_segment* ls;
+    sci_local_segment_t lseg;
+    uint32_t adapter;
+
+    // Take controller reference
+    ref = _nvm_ctrl_get(ctrl);
+    if (ref == NULL)
+    {
+        return ENOSYS;
+    }
+
+    // Create SISCI segment
+    status = _nvm_local_memory_get(&lseg, &adapter, ref->device, size, phys_ptr);
+    if (status != 0)
+    {
+        _nvm_ctrl_put(ref);
+        return status;
+    }
+
+    // Create local segment descriptor
+    status = create_local_desc(&ls, ref, adapter, lseg);
+    if (status != 0)
+    {
+        _nvm_local_memory_put(&lseg);
+        _nvm_ctrl_put(ref);
+        return status;
+    }
+
+    // Indicate that we need cleaning up
+    ls->remove = true;
+    
+    // Map local segment into virtual address space unless it's physical memory
+    if (phys_ptr == NULL)
+    {
+        status = va_map_local(&ls->map, &ls->range, ls->segment, true);
+        if (status != 0)
+        {
+            remove_local_desc(ls); // this also removes segment and puts reference
+            return status;
+        }
+    }
+    else
+    {
+        // XXX Quick and dirty hack
+        ls->range.vaddr = (volatile void*) phys_ptr;
+    }
+
+    *va = &ls->range;
+    return 0;
+}
+
+
+
+/*
+ * Helper function to create a device memory segment, connect to it and map it.
+ */
+static int create_remote_segment(struct va_range** va, const nvm_ctrl_t* ctrl, size_t size, unsigned int hints)
+{
+    int status;
+    uint32_t id;
+    struct controller* ref;
+    struct remote_segment* rs;
+    sci_remote_segment_t rseg;
+    sci_error_t err;
+
+    // Take controller reference
+    ref = _nvm_ctrl_get(ctrl);
+    if (ref == NULL)
+    {
+        return ENOSYS;
+    }
+
+    // Generate "unique" segment identifier
+    status = _nvm_mutex_lock(&ref->device->lock);
+    if (status != 0)
+    {
+        _nvm_ctrl_put(ref);
+        return status;
+    }
+
+    id = ++ref->device->counter;
+    _nvm_mutex_unlock(&ref->device->lock);
+
+    // Attempt to create device memory segment
+    SCICreateDeviceSegment(ref->device->device, id, size, SCI_MEMTYPE_PRIVATE, hints, 0, &err);
+    if (err != SCI_ERR_OK)
+    {
+        _nvm_ctrl_put(ref);
+        dprintf("Failed to create device segment: %s\n", _SCIGetErrorString(err));
+        return ENOSPC;
+    }
+
+    // Connect to the device segment
+    status = _nvm_device_memory_get(&rseg, ref->device, id, SCI_MEMTYPE_PRIVATE);
+    if (status != 0)
+    {
+        _nvm_ctrl_put(ref);
+        return status;
+    }
+
+    // Create remote segment descriptor
+    status = create_remote_desc(&rs, ref, rseg);
+    if (status != 0)
+    {
+        _nvm_device_memory_put(&rseg);
+        _nvm_ctrl_put(ref);
+        return status;
+    }
+
+    // Indicate that we need some cleaning up
+    rs->disconnect = true;
+
+    // Map remote segment into local address space
+    status = va_map_remote(&rs->map, &rs->range, rs->segment, true, true);
+    if (status != 0)
+    {
+        remove_remote_desc(rs);
+        return status;
+    }
+
+    *va = &rs->range;
+    return 0;
+}
+
+
+
+/*
+ * Create segment and map it.
+ */
+int nvm_dis_dma_create(nvm_dma_t** map, const nvm_ctrl_t* ctrl, size_t size, unsigned int mem_hints)
+{
+    int status;
+    struct va_range* va = NULL;
+
+    *map = NULL;
 
     size = NVM_CTRL_ALIGN(ctrl, size);
     if (size == 0)
@@ -191,182 +524,24 @@ static int create_map(struct map** md, const nvm_ctrl_t* ctrl, enum segment_type
         return EINVAL;
     }
 
-    map = (struct map*) malloc(sizeof(struct map));
-    if (map == NULL)
+    if (mem_hints == 0)
     {
-        dprintf("Failed to allocate mapping descriptor: %s\n", strerror(errno));
-        return errno;
+        status = create_local_segment(&va, ctrl, size, NULL);
+    }
+    else
+    {
+        status = create_remote_segment(&va, ctrl, size, mem_hints);
     }
 
-    map->type = type;
-    map->lseg = NULL;
-    map->rseg = NULL;
-    map->adapter = -1;
-    map->size = size;
-    map->mapped = false;
-    map->md = NULL;
-    map->range = VA_RANGE_INIT(NULL, map->size, 1);
-
-    *md = map;
-    return 0;
-}
-
-
-
-/*
- * Create mapping descriptor from device memory segment.
- */
-static int connect_device_segment(struct map** md, const nvm_ctrl_t* ctrl, uint32_t id, unsigned int memtype)
-{
-    int err;
-    struct segment* s;
-    struct map* map;
-    sci_remote_segment_t segment;
-    struct controller* ref;
-
-    *md = NULL;
-
-    ref = _nvm_ctrl_get(ctrl);
-    if (ref == NULL)
-    {
-        return ENOSPC;
-    }
-
-    err = _nvm_connect_device_memory(&segment, ref->device, id, memtype);
-    if (err != 0)
-    {
-        _nvm_ctrl_put(ref);
-        return err;
-    }
-
-    s = (struct segment*) malloc(sizeof(struct segment));
-    if (s == NULL)
-    {
-        _nvm_disconnect_device_memory(&segment);
-        _nvm_ctrl_put(ref);
-        dprintf("Failed to allocate segment handle: %s\n", strerror(errno));
-        return errno;
-    }
-
-    s->ctrl = ref;
-    map = &s->map;
-    map->type = SEGMENT_TYPE_DEVICE;
-    map->lseg = NULL;
-    map->rseg = segment;
-    map->adapter = -1;
-    map->size = NVM_CTRL_ALIGN(ctrl, SCIGetRemoteSegmentSize(segment));
-    map->md = NULL;
-    map->range = VA_RANGE_INIT(NULL, map->size, 1);
-
-    *md = map;
-    return 0;
-}
-
-
-
-#ifdef _CUDA
-static int create_physical_segment(struct map** md, const nvm_ctrl_t* ctrl, uint32_t adapter, void* ptr, size_t size)
-{
-    sci_error_t err;
-    struct segment* s;
-    struct map* map;
-    sci_local_segment_t segment;
-    struct controller* ref;
-
-    *md = NULL;
-
-    ref = _nvm_ctrl_get(ctrl);
-    if (ref == NULL)
-    {
-        return ENOSPC;
-    }
-
-    SCICreateSegment(ref->device->sd, &segment, 0, size, NULL, NULL, SCI_FLAG_EMPTY | SCI_FLAG_AUTO_ID, &err);
-    if (err != SCI_ERR_OK)
-    {
-        _nvm_ctrl_put(ref);
-        dprintf("Failed to create physical segment: %s\n", _SCIGetErrorString(err));
-        return EIO;
-    }
-
-    SCIAttachPhysicalMemory(0, ptr, 0, size, segment, SCI_FLAG_CUDA_BUFFER, &err);
-    if (err != SCI_ERR_OK)
-    {
-        dprintf("Failed to attach physical memory: %s\n", _SCIGetErrorString(err));
-        SCIRemoveSegment(segment, 0, &err);
-        _nvm_ctrl_put(ref);
-        return EIO;
-    }
-
-    SCIPrepareSegment(segment, adapter, 0, &err);
-    if (err != SCI_ERR_OK)
-    {
-        dprintf("Failed to prepare physical segment: %s\n", _SCIGetErrorString(err));
-        SCIRemoveSegment(segment, 0, &err);
-        _nvm_ctrl_put(ref);
-        return EIO;
-    }
-
-    s = (struct segment*) malloc(sizeof(struct segment));
-    if (s == NULL)
-    {
-        dprintf("Failed to allocate segment handle: %s\n", strerror(errno));
-        SCIRemoveSegment(segment, 0, &err);
-        _nvm_ctrl_put(ref);
-        return errno;
-    }
-
-    s->ctrl = ref;
-    map = &s->map;
-    map->type = SEGMENT_TYPE_PHYSICAL;
-    map->lseg = segment;
-    map->rseg = NULL;
-    map->adapter = adapter;
-    map->size = size;
-    map->mapped = false;
-    map->md = NULL;
-    map->range = VA_RANGE_INIT(NULL, map->size, 1);
-
-    *md = map;
-    return 0;
-}
-#endif
-
-
-
-/*
- * Map local for device segment.
- */
-int nvm_dis_dma_map_local(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, sci_local_segment_t lseg, uint32_t adapter, bool map_va)
-{
-    int status;
-    struct map* m;
-
-    *handle = NULL;
-
-    status = create_map(&m, ctrl, SEGMENT_TYPE_LOCAL, SCIGetLocalSegmentSize(lseg));
     if (status != 0)
     {
         return status;
     }
 
-    m->adapter = adapter;
-    m->lseg = lseg;
-
-    if (map_va)
-    {
-        status = va_map(m, true, true);
-        if (status != 0)
-        {
-            remove_map(m);
-            return status;
-        }
-    }
-
-    status = _nvm_dma_init(handle, ctrl, &m->range, false, &release_map);
+    status = _nvm_dma_init(map, ctrl, va, &release_range);
     if (status != 0)
     {
-        remove_map(m);
+        release_range(va);
         return status;
     }
 
@@ -375,54 +550,9 @@ int nvm_dis_dma_map_local(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, sci_local_
 
 
 
-/*
- * Map remote segment for device.
- */
-int nvm_dis_dma_map_remote(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, sci_remote_segment_t rseg, bool map_va, bool map_wc)
+int nvm_dis_dma_map_host(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* vaddr, size_t size)
 {
-    int status;
-    struct map* m;
-
-    *handle = NULL;
-
-    if (map_wc && !map_va)
-    {
-        return EINVAL;
-    }
-
-    status = create_map(&m, ctrl, SEGMENT_TYPE_REMOTE, SCIGetRemoteSegmentSize(rseg));
-    if (status != 0)
-    {
-        return status;
-    }
-
-    m->rseg = rseg;
-
-    if (map_va)
-    {
-        status = va_map(m, true, map_wc);
-        if (status != 0)
-        {
-            remove_map(m);
-            return status;
-        }
-    }
-
-    status = _nvm_dma_init(handle, ctrl, &m->range, true, &release_map);
-    if (status != 0)
-    {
-        remove_map(m);
-        return status;
-    }
-
-    return 0;
-}
-
-
-
-int nvm_dis_dma_map_host(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, uint32_t adapter, void* vaddr, size_t size)
-{
-    dprintf("Function not implemented\n");
+    dprintf("Mapping host memory is currently not supported\n");
     return ENOTSUP;
 }
 
@@ -430,111 +560,40 @@ int nvm_dis_dma_map_host(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, uint32_t ad
 
 #ifdef _CUDA
 /*
- * Map CUDA device memory for device.
+ * Map CUDA device memory for disk controller.
  */
-int nvm_dis_dma_map_device(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, uint32_t adapter, void* dptr, size_t size)
+int nvm_dis_dma_map_device(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* devptr, size_t size)
 {
     int status;
-    struct map* m;
-    
-    size = NVM_PAGE_ALIGN(size, (1ULL << 16));
-    *handle = NULL;
+    struct va_range* va = NULL;
 
-    status = create_physical_segment(&m, ctrl, adapter, dptr, size);
+    *map = NULL;
+
+    if (devptr == NULL)
+    {
+        return EINVAL;
+    }
+
+    size = NVM_PAGE_ALIGN(size, (1ULL << 16));
+    if (size == 0)
+    {
+        return EINVAL;
+    }
+
+    status = create_local_segment(&va, ctrl, size, devptr);
     if (status != 0)
     {
         return status;
     }
 
-    // TODO: va_map() when supported by SISCI
-    
-    status = _nvm_dma_init(handle, ctrl, &m->range, false, &release_map);
+    status = _nvm_dma_init(map, ctrl, va, &release_range);
     if (status != 0)
     {
-        remove_map(m);
+        release_range(va);
         return status;
     }
 
     return 0;
 }
 #endif
-
-
-
-/*
- * Connect to device memory.
- */
-int nvm_dis_dma_connect(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, uint32_t id, bool shared)
-{
-    int status;
-    struct map* m;
-    unsigned int memtype = shared ? SCI_MEMTYPE_SHARED : SCI_MEMTYPE_PRIVATE;
-
-    *handle = NULL;
-
-    status = connect_device_segment(&m, ctrl, id, memtype);
-    if (status != 0)
-    {
-        return status;
-    }
-
-    // FIXME: TODO: Figure out if segment is local
-
-    status = va_map(m, true, true);
-    if (status != 0)
-    {
-        remove_map(m);
-        return status;
-    }
-
-    status = _nvm_dma_init(handle, ctrl, &m->range, true, &release_map);
-    if (status != 0)
-    {
-        remove_map(m);
-        return status;
-    }
-
-    return 0;
-}
-
-
-
-/*
- * Create device memory.
- */
-int nvm_dis_dma_create(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, uint32_t id, size_t size, bool shared, unsigned int hints)
-{
-    sci_error_t err;
-    unsigned int flags = 0;
-    struct controller* ref;
-    unsigned int memtype = shared ? SCI_MEMTYPE_SHARED : SCI_MEMTYPE_PRIVATE;
-
-    *handle = NULL;
-    size = NVM_CTRL_ALIGN(ctrl, size);
-
-    if (hints == 0)
-    {
-        // FIXME: This fails in the driver for some reason
-        hints = SCI_MEMACCESS_HOST_READ | SCI_MEMACCESS_HOST_WRITE | SCI_MEMACCESS_DEVICE_READ | SCI_MEMACCESS_DEVICE_WRITE;
-        //flags = SCI_FLAG_LOCAL_ONLY; 
-    }
-
-    ref = _nvm_ctrl_get(ctrl);
-    if (ref == NULL)
-    {
-        return ENOTTY;
-    }
-
-    SCICreateDeviceSegment(ref->device->device, id, size, memtype, hints, flags, &err);
-
-    _nvm_ctrl_put(ref);
-
-    if (err != SCI_ERR_OK)
-    {
-        dprintf("Failed to create device segment: %s\n", _SCIGetErrorString(err));
-        return EIO;
-    }
-
-    return nvm_dis_dma_connect(handle, ctrl, id, shared);
-}
 

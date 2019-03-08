@@ -242,7 +242,7 @@ static int get_map(struct map* md)
  * Create a DMA handle container.
  * This function assumes that the device reference has already been increased.
  */
-static int create_container(struct container** container, struct map* md, bool remote)
+static int create_container(struct container** container, struct map* md)
 {
     *container = NULL;
     const struct controller* ctrl = md->ctrl;
@@ -270,7 +270,7 @@ static int create_container(struct container** container, struct map* md, bool r
 
     (*container)->map = md;
     (*container)->handle.contiguous = true;
-    (*container)->handle.local = !remote;
+    (*container)->handle.local = !md->va->remote;
 
     return 0;
 }
@@ -295,7 +295,7 @@ static void remove_container(struct container* container)
  * Create and initialize a DMA handle, and map a virtual address range 
  * for the controller.
  */
-int _nvm_dma_init(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, struct va_range* va, bool remote, va_range_free_t release)
+int _nvm_dma_init(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, struct va_range* va, va_range_free_t release)
 {
     *handle = NULL;
     struct map* map;
@@ -314,7 +314,7 @@ int _nvm_dma_init(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, struct va_range* v
     }
 
     // Create DMA handle container
-    err = create_container(&container, map, remote);
+    err = create_container(&container, map);
     if (err != 0)
     {
         remove_map(map);
@@ -361,6 +361,7 @@ int nvm_dma_map(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, size_t 
         return ENOMEM;
     }
 
+    va->remote = false;
     va->vaddr = (volatile void*) vaddr;
     va->page_size = page_size;
     va->n_pages = n_pages;
@@ -374,7 +375,7 @@ int nvm_dma_map(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, size_t 
     }
     
     // Create DMA handle container
-    status = create_container(&container, map, false);
+    status = create_container(&container, map);
     if (status != 0)
     {
         remove_map(map);
@@ -409,7 +410,7 @@ int nvm_dma_remap(nvm_dma_t** handle, const nvm_dma_t* other)
     }
 
     // Create DMA handle container
-    status = create_container(&container, map, !other->local);
+    status = create_container(&container, map);
     if (status != 0)
     {
         put_map(map); // Will implicitly release device reference
@@ -418,6 +419,7 @@ int nvm_dma_remap(nvm_dma_t** handle, const nvm_dma_t* other)
 
     // Hack to get list of bus addresses, since we don't want to
     // actually call map again, simply increase reference count.
+    va.remote = !other->local;
     va.vaddr = map->va->vaddr;
     va.page_size = other->page_size;
     va.n_pages = other->n_ioaddrs;
