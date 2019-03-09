@@ -98,7 +98,6 @@ void nvm_cmd_rw_blks(nvm_cmd_t* cmd, uint64_t start_lba, uint16_t n_blks)
 
 
 
-
 /*
  * Build PRP list consisting of PRP entries.
  *
@@ -115,6 +114,13 @@ size_t nvm_prp_list(const nvm_prp_list_t* list, size_t n_pages, const uint64_t* 
     size_t n_prps = list->page_size / sizeof(uint64_t);
     size_t i_prp;
     volatile uint64_t* entries = (volatile uint64_t*) list->vaddr;
+
+#if !defined( __CUDA_ARCH__ )
+    if (n_pages == 0)
+    {
+        return 0;
+    }
+#endif
 
     // Do we need to reserve the last entry for the next list?
     if (n_pages > n_prps)
@@ -189,7 +195,7 @@ size_t nvm_cmd_data(nvm_cmd_t* cmd, size_t n_lists, const nvm_prp_list_t* lists,
     uint64_t dptr0 = 0;
     uint64_t dptr1 = 0;
 
-#if !defined( NDEBUG ) && !defined( __CUDA_ARCH__ )
+#if !defined( __CUDA_ARCH__ )
     if (n_pages == 0)
     {
         return 0;
@@ -215,6 +221,18 @@ size_t nvm_cmd_data(nvm_cmd_t* cmd, size_t n_lists, const nvm_prp_list_t* lists,
     nvm_cmd_data_ptr(cmd, dptr0, dptr1);
     return prp;
 }
+
+
+
+/* Make PRP list descriptor from values */
+#define NVM_PRP_LIST_INIT(vaddr, local, page_size, ioaddr) \
+    {(vaddr), !!(local), (page_size), (ioaddr)}
+
+
+/* Make PRP list descriptor from DMA descriptor */
+#define NVM_PRP_LIST(dma_ptr, offset)               \
+    NVM_PRP_LIST_INIT(NVM_DMA_OFFSET(dma_ptr, offset), (dma_ptr)->local, (dma_ptr)->page_size, (dma_ptr)->ioaddrs[(offset)])
+
 
 
 

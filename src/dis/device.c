@@ -67,23 +67,18 @@ int _nvm_device_memory_get(sci_remote_segment_t* segment, const struct device* d
     switch (err)
     {
         case SCI_ERR_API_NOSPC:
-            dprintf("Could not connect to device memory segment, out of memory\n");
             return ENOMEM;
 
         case SCI_ERR_NOSPC:
-            dprintf("Could not connect to device memory segment, out of resources\n");
             return ENOSPC;
 
         case SCI_ERR_NO_SUCH_SEGMENT:
-            dprintf("Failed to connect to device memory segment, segment not found\n");
             return ENOTTY;
 
         case SCI_ERR_CONNECTION_REFUSED:
-            dprintf("Failed to connect to device memory segment, connection was refused\n");
             return EPERM;
 
         default:
-            dprintf("Failed to get device memory reference: %s\n", _SCIGetErrorString(err));
             return ENOMEM;
     }
 }
@@ -115,7 +110,7 @@ void _nvm_device_memory_put(sci_remote_segment_t* segment)
 
 
 
-int _nvm_local_memory_get(sci_local_segment_t* segment, uint32_t* adapter, const struct device* dev, size_t size, void* ptr)
+int _nvm_local_memory_get(sci_local_segment_t* segment, uint32_t* adapter, const struct device* dev, size_t size, void* ptr, bool gpu)
 {
     int status;
     sci_error_t err;
@@ -127,14 +122,14 @@ int _nvm_local_memory_get(sci_local_segment_t* segment, uint32_t* adapter, const
     *segment = NULL;
     *adapter = 0;
 
+    if (gpu && ptr == NULL)
+    {
+        return EINVAL;
+    }
+
     if (ptr != NULL)
     {
-#ifdef _CUDA
         flags |= SCI_FLAG_EMPTY;
-#else
-        dprintf("Must compile with CUDA support\n");
-        return EINVAL;
-#endif
     }
 
     // Query device to get a possible adapter
@@ -155,10 +150,10 @@ int _nvm_local_memory_get(sci_local_segment_t* segment, uint32_t* adapter, const
         return ENOSPC;
     }
 
-#ifdef _CUDA
-    // Attach GPU memory
-    if (ptr != NULL)
+    if (ptr != NULL && gpu)
     {
+#ifdef _CUDA
+        // Attach GPU memory
         SCIAttachPhysicalMemory(0, ptr, 0, size, seg, SCI_FLAG_CUDA_BUFFER, &err);
         if (err != SCI_ERR_OK)
         {
@@ -166,8 +161,22 @@ int _nvm_local_memory_get(sci_local_segment_t* segment, uint32_t* adapter, const
             SCIRemoveSegment(seg, 0, &err);
             return EIO;
         }
-    }
+#else
+        SCIRemoveSegment(seg, 0, &err);
+        return ENOTSUP;
 #endif
+    }
+    else if (ptr != NULL)
+    {
+        // Register segment memory
+        SCIRegisterSegmentMemory(ptr, size, seg, SCI_FLAG_LOCK_USER_MEM, &err);
+        if (err != SCI_ERR_OK)
+        {
+            dprintf("Failed to register local segment memory: %s\n", _SCIGetErrorString(err));
+            SCIRemoveSegment(seg, 0, &err);
+            return ENOTTY;
+        }
+    }
 
     // Export segment on chosen adapter
     SCIPrepareSegment(seg, adapt, 0, &err);

@@ -15,6 +15,8 @@
 
 #ifdef __DIS_CLUSTER__
 #include <sisci_api.h>
+#include <dis/dis_types.h>
+#define MAX_ADAPTERS DIS_MAX_NSCIS
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -23,14 +25,11 @@
 #include "integrity.h"
 
 
-#define MAX_ADAPTERS NVM_DIS_RPC_MAX_ADAPTER
 
 struct arguments
 {
     uint64_t        device_id;
     const char*     device_path;
-    uint32_t        adapter;
-    uint32_t        segment_id;
     uint32_t        ns_id;
     uint16_t        n_queues;
     uint64_t        read_bytes;
@@ -67,10 +66,6 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
         { "read", required_argument, NULL, 'r' },
         { "ctrl", required_argument, NULL, 'c' },
         { "namespace", required_argument, NULL, 'n' },
-#ifdef __DIS_CLUSTER__
-        { "adapter", required_argument, NULL, 'a' },
-        { "id-offset" , required_argument, NULL, 1 },
-#endif
         { "queues", required_argument, NULL, 'q' },
         { NULL, 0, NULL, 0 }
     };
@@ -81,14 +76,12 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
 
     args->device_id = 0;
     args->device_path = NULL;
-    args->adapter = 0;
-    args->segment_id = 5;
     args->ns_id = 1;
     args->n_queues = 1;
     args->read_bytes = 0;
     args->filename = NULL;
 
-    while ((opt = getopt_long(argc, argv, ":hr:c:n:a:q:", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, ":hr:c:n:q:", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -102,11 +95,7 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
                 exit(4);
 
             case 'h':
-#ifdef __DIS_CLUSTER__
-                fprintf(stderr, "Usage: %s --ctrl=device-id [--read=bytes] [-a adapter] [-n namespace] [-q queues] filename\n", argv[0]);
-#else
                 fprintf(stderr, "Usage: %s --ctrl=device-path [--read=bytes] [-n namespace] [-q queues] filename\n", argv[0]);
-#endif
                 exit(4);
 
             case 'r':
@@ -137,26 +126,6 @@ static void parse_arguments(int argc, char** argv, struct arguments* args)
                 }
                 args->ns_id = (uint32_t) num;
                 break;
-
-#ifdef __DIS_CLUSTER__
-            case 1: // set segment identifier offset
-                if (! parse_number(&num, optarg, 0, 0, 0) )
-                {
-                    fprintf(stderr, "Invalid offset: `%s'\n", optarg);
-                    exit(1);
-                }
-                args->segment_id = (uint32_t) num;
-                break;
-
-            case 'a': // set adapter number
-                if (! parse_number(&num, optarg, 10, 0, MAX_ADAPTERS) )
-                {
-                    fprintf(stderr, "Invalid adapter number: `%s'\n", optarg);
-                    exit(1);
-                }
-                args->adapter = (uint32_t) num;
-                break;
-#endif
 
             case 'q': // set number of queues
                 if (! parse_number(&num, optarg, 0, 1, 0xffff) )
@@ -235,7 +204,7 @@ static void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
 }
 
 
-static int identify_controller(nvm_aq_ref ref, const struct arguments* args, struct disk* disk)
+static int identify_controller(nvm_aq_ref ref, struct disk* disk)
 {
     int status;
     nvm_dma_t* window;
@@ -244,7 +213,8 @@ static int identify_controller(nvm_aq_ref ref, const struct arguments* args, str
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
 
 #ifdef __DIS_CLUSTER__
-    status = nvm_dis_dma_create(&window, ctrl, args->adapter, args->segment_id, ctrl->page_size);
+    status = nvm_dis_dma_create(&window, ctrl, ctrl->page_size,
+            SCI_MEMACCESS_HOST_READ | SCI_MEMACCESS_DEVICE_WRITE);
 #else
     status = nvm_dma_create(&window, ctrl, ctrl->page_size);
 #endif
@@ -270,7 +240,7 @@ static int identify_controller(nvm_aq_ref ref, const struct arguments* args, str
 }
 
 
-static int identify_namespace(nvm_aq_ref ref, const struct arguments* args, struct disk* disk)
+static int identify_namespace(nvm_aq_ref ref, struct disk* disk, uint32_t ns_id)
 {
     int status;
     nvm_dma_t* window;
@@ -279,7 +249,8 @@ static int identify_namespace(nvm_aq_ref ref, const struct arguments* args, stru
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
 
 #ifdef __DIS_CLUSTER__
-    status = nvm_dis_dma_create(&window, ctrl, args->adapter, args->segment_id, ctrl->page_size);
+    status = nvm_dis_dma_create(&window, ctrl, ctrl->page_size,
+            SCI_MEMACCESS_HOST_READ | SCI_MEMACCESS_DEVICE_WRITE);
 #else
     status = nvm_dma_create(&window, ctrl, ctrl->page_size);
 #endif
@@ -289,7 +260,7 @@ static int identify_namespace(nvm_aq_ref ref, const struct arguments* args, stru
         return status;
     }
 
-    status = nvm_admin_ns_info(ref, &info, args->ns_id, window->vaddr, window->ioaddrs[0]);
+    status = nvm_admin_ns_info(ref, &info, ns_id, window->vaddr, window->ioaddrs[0]);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to identify namespace: %s\n", nvm_strerror(status));
@@ -352,7 +323,7 @@ static int request_queues(nvm_aq_ref ref, struct arguments* args, struct queue**
     }
 
     // Create completion queue
-    status = create_queue(&q[0], ref, NULL, 1, args->adapter, args->segment_id++);
+    status = create_queue(&q[0], ref, NULL, 1);
     if (status != 0)
     {
         free(q);
@@ -362,7 +333,7 @@ static int request_queues(nvm_aq_ref ref, struct arguments* args, struct queue**
     // Create submission queues
     for (i = 0; i < args->n_queues; ++i)
     {
-        status = create_queue(&q[i + 1], ref, &q[0], i+1, args->adapter, args->segment_id++);
+        status = create_queue(&q[i + 1], ref, &q[0], i+1);
         if (status != 0)
         {
             remove_queues(q, i);
@@ -433,7 +404,7 @@ int main(int argc, char** argv)
 
     // Get controller reference
 #ifdef __DIS_CLUSTER__
-    status = nvm_dis_ctrl_init(&ctrl, args.device_id, args.adapter);
+    status = nvm_dis_ctrl_init(&ctrl, args.device_id);
     if (status != 0)
     {
         fclose(fp);
@@ -463,7 +434,7 @@ int main(int argc, char** argv)
 
     // Create admin queues
 #ifdef __DIS_CLUSTER__
-    status = nvm_dis_dma_create(&aq_dma, ctrl, args.adapter, args.segment_id++, ctrl->page_size * 2);
+    status = nvm_dis_dma_create(&aq_dma, ctrl, ctrl->page_size * 2, 0);
 #else
     status = nvm_dma_create(&aq_dma, ctrl, ctrl->page_size * 2);
 #endif
@@ -487,7 +458,7 @@ int main(int argc, char** argv)
     }
 
     // Allocate buffer
-    status = create_buffer(&buffer, aq_ref, NVM_CTRL_ALIGN(ctrl, file_size), args.adapter, args.segment_id++);
+    status = create_buffer(&buffer, aq_ref, NVM_CTRL_ALIGN(ctrl, file_size));
     if (status != 0)
     {
         nvm_aq_destroy(aq_ref);
@@ -499,13 +470,13 @@ int main(int argc, char** argv)
 
 
     // Extract controller and namespace information
-    status = identify_controller(aq_ref, &args, &disk);
+    status = identify_controller(aq_ref, &disk);
     if (status != 0)
     {
         goto out;
     }
 
-    status = identify_namespace(aq_ref, &args, &disk);
+    status = identify_namespace(aq_ref, &disk, args.ns_id);
     if (status != 0)
     {
         goto out;

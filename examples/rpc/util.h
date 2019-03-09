@@ -8,12 +8,6 @@
 
 
 /*
- * Generate a random identifier.
- */
-uint16_t random_id();
-
-
-/*
  * Parse an uint64_t from a string.
  */
 int parse_u64(const char* str, uint64_t* number, int base);

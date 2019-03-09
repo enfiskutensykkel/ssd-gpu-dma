@@ -9,8 +9,6 @@
 /* Memory descriptor */
 struct buffer
 {
-    uint32_t                id;
-    uint32_t                adapter;
     void*                   buffer;
     nvm_dma_t*              dma;
 };
@@ -35,14 +33,14 @@ struct disk
 };
 
 
-int create_buffer(struct buffer* b, nvm_aq_ref, size_t size, uint32_t adapter, uint32_t id);
+int create_buffer(struct buffer* b, nvm_aq_ref, size_t size);
 
 
 void remove_buffer(struct buffer* b);
 
 
 
-int create_queue(struct queue* q, nvm_aq_ref ref, const struct queue* cq, uint16_t qno, uint32_t adapter, uint32_t id);
+int create_queue(struct queue* q, nvm_aq_ref ref, const struct queue* cq, uint16_t qno);
 
 
 void remove_queue(struct queue* q);

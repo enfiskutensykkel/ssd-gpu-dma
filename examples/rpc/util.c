@@ -60,23 +60,6 @@ int parse_u16(const char* str, uint16_t* num, int base)
 
 
 
-
-uint16_t random_id()
-{
-    static uint16_t unique_counter = 0;
-    struct timeval tv;
-
-    srand(time(NULL));
-    
-    if (gettimeofday(&tv, NULL) == 0)
-    {
-        srand(tv.tv_usec);
-    }
-
-    return (rand() + unique_counter++) & 0xffff;
-}
-
-
 void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
 {
     unsigned char vendor[4];
@@ -104,7 +87,7 @@ void print_ctrl_info(FILE* fp, const struct nvm_ctrl_info* info)
     fprintf(fp, "Serial Number           : %s\n", serial);
     fprintf(fp, "Model Number            : %s\n", model);
     fprintf(fp, "Firmware revision       : %s\n", revision);
-    fprintf(fp, "Max data transfer size  : %zu\n", info->max_data_size);
+    fprintf(fp, "Max data transfer size  : %zu bytes (%zu KiB)\n", info->max_data_size, info->max_data_size >> 10);
     fprintf(fp, "Max outstanding commands: %zu\n", info->max_out_cmds);
     fprintf(fp, "Max number of namespaces: %zu\n", info->max_n_ns);
     fprintf(fp, "--------------------------------------------------\n");
@@ -116,8 +99,8 @@ void print_ns_info(FILE* fp, const struct nvm_ns_info* info)
     fprintf(fp, "------------- Namespace  information -------------\n");
     fprintf(fp, "Namespace identifier    : %x\n", info->ns_id);
     fprintf(fp, "Logical block size      : %zu bytes\n", info->lba_data_size);
-    fprintf(fp, "Namespace size          : %zu blocks\n", info->size);
-    fprintf(fp, "Namespace capacity      : %zu blocks\n", info->capacity);
+    fprintf(fp, "Namespace size          : %zu blocks (%zu MiB)\n", info->size, info->size >> 20);
+    fprintf(fp, "Namespace capacity      : %zu blocks (%zu MiB)\n", info->capacity, info->capacity >> 20);
     fprintf(fp, "--------------------------------------------------\n");
 }
 

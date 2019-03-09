@@ -11,7 +11,7 @@
 #include "integrity.h"
 
 
-int create_buffer(struct buffer* b, nvm_aq_ref ref, size_t size, uint32_t adapter, uint32_t id)
+int create_buffer(struct buffer* b, nvm_aq_ref ref, size_t size)
 {
     int status;
 
@@ -19,7 +19,7 @@ int create_buffer(struct buffer* b, nvm_aq_ref ref, size_t size, uint32_t adapte
 
 #ifdef __DIS_CLUSTER__
     b->buffer = NULL;
-    status = nvm_dis_dma_create(&b->dma, ctrl, adapter, id, size);
+    status = nvm_dis_dma_create(&b->dma, ctrl, size, 0);
 #else
     status = posix_memalign(&b->buffer, ctrl->page_size, size);
     if (status != 0)
@@ -39,9 +39,6 @@ int create_buffer(struct buffer* b, nvm_aq_ref ref, size_t size, uint32_t adapte
 
     memset(b->dma->vaddr, 0, b->dma->page_size * b->dma->n_ioaddrs);
 
-    b->id = id;
-    b->adapter = adapter;
-
     return 0;
 }
 
@@ -53,7 +50,7 @@ void remove_buffer(struct buffer* b)
 }
 
 
-int create_queue(struct queue* q, nvm_aq_ref ref, const struct queue* cq, uint16_t qno, uint32_t adapter, uint32_t id)
+int create_queue(struct queue* q, nvm_aq_ref ref, const struct queue* cq, uint16_t qno)
 {
     int status;
 
@@ -66,7 +63,7 @@ int create_queue(struct queue* q, nvm_aq_ref ref, const struct queue* cq, uint16
         prp_lists = n_entries <= ctrl->max_entries ? n_entries : ctrl->max_entries;
     }
 
-    status = create_buffer(&q->qmem, ref, prp_lists * ctrl->page_size + ctrl->page_size, adapter, id);
+    status = create_buffer(&q->qmem, ref, prp_lists * ctrl->page_size + ctrl->page_size);
     if (!nvm_ok(status))
     {
         return status;
@@ -74,11 +71,11 @@ int create_queue(struct queue* q, nvm_aq_ref ref, const struct queue* cq, uint16
 
     if (cq == NULL)
     {
-        status = nvm_admin_cq_create(ref, &q->queue, qno, NVM_DMA_OFFSET(q->qmem.dma, 0), q->qmem.dma->ioaddrs[0]);
+        status = nvm_admin_cq_create(ref, &q->queue, qno, q->qmem.dma, 0, 1);
     }
     else
     {
-        status = nvm_admin_sq_create(ref, &q->queue, &cq->queue, qno, NVM_DMA_OFFSET(q->qmem.dma, 0), q->qmem.dma->ioaddrs[0]);
+        status = nvm_admin_sq_create(ref, &q->queue, &cq->queue, qno, q->qmem.dma, 0, 1);
     }
 
     if (!nvm_ok(status))

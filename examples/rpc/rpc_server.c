@@ -16,10 +16,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sisci_api.h>
+#include <dis/dis_types.h>
 #include "segment.h"
 #include "util.h"
 
-#define MAX_ADAPTS NVM_DIS_RPC_MAX_ADAPTER 
+#define MAX_ADAPTS DIS_MAX_NSCIS
 
 
 /* Program options */
@@ -72,8 +73,8 @@ static bool request_accepter(nvm_cmd_t* cmd, uint32_t adapter, uint32_t node_id)
 {
     if (verbose)
     {
-        fprintf(stderr, "* Command request received on adapter %u from node %u\n",
-                adapter, node_id);
+        fprintf(stderr, "* Command request received on adapter %u from node %u (%u)\n",
+                adapter, node_id, *NVM_CMD_CID(cmd));
     }
 
     return true;
@@ -172,7 +173,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "Resetting controller...\n");
     }
 
-    int status = nvm_dis_ctrl_init(&ctrl, args.smartio_dev_id, args.ctrl_adapter);
+    int status = nvm_dis_ctrl_init(&ctrl, args.smartio_dev_id);
     if (status != 0)
     {
         fprintf(stderr, "Failed to get controller reference: %s\n", strerror(status));
@@ -180,7 +181,7 @@ int main(int argc, char** argv)
     }
 
     // Create queue memory
-    status = segment_create(&segment, random_id(), ctrl->page_size * 2);
+    status = segment_create(&segment, 2, ctrl->page_size * 2);
     if (status != 0)
     {
         nvm_ctrl_free(ctrl);
@@ -345,7 +346,7 @@ static void identify_controller(const nvm_ctrl_t* ctrl, uint32_t adapter, nvm_aq
     nvm_dma_t* identify_wnd;
     struct nvm_ctrl_info info;
 
-    status = segment_create(&segment, random_id(), 0x1000);
+    status = segment_create(&segment, 3, 0x1000);
     if (status != 0)
     {
         return;

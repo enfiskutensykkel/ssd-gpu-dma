@@ -111,10 +111,11 @@ static struct producer* produce_commands(struct producer* p)
         size_t start_block = p->start_block + NVM_PAGE_TO_BLOCK(page_size, block_size, page_offset);
         nvm_cmd_rw_blks(cmd, start_block, n_blocks);
 
-        uint16_t prp_no = (*NVM_CMD_CID(cmd) % sq->max_entries) + 1;
+        uint16_t prp_no = (*NVM_CMD_CID(cmd) % sq->qs) + 1;
 
-        nvm_cmd_data(cmd, page_size, transfer_pages, NVM_DMA_OFFSET(prp, prp_no),
-                prp->ioaddrs[prp_no], &dma->ioaddrs[page_base+page_offset]);
+        nvm_prp_list_t prp_desc = NVM_PRP_LIST(prp, prp_no);
+
+        nvm_cmd_data(cmd, 1, &prp_desc, transfer_pages, &dma->ioaddrs[page_base + page_offset]);
 
         page_offset += transfer_pages;
         queue->counter++;

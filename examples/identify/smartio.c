@@ -24,7 +24,6 @@
 struct cl_args
 {
     uint64_t    dev_id;
-    uint32_t    segment_id;
     uint32_t    namespace_id;
 };
 
@@ -50,7 +49,7 @@ int main(int argc, char** argv)
     }
 
     nvm_dma_t* window;
-    status = nvm_dis_dma_create(&window, ctrl, args.segment_id, 3 * 0x1000, false, 0);
+    status = nvm_dis_dma_create(&window, ctrl, 3 * 0x1000, 0);
     if (status != 0)
     {
         nvm_ctrl_free(ctrl);
@@ -133,7 +132,6 @@ static void show_help(const char* name)
     fprintf(stderr, "\nCreate a manager and run an IDENTIFY CONTROLLER NVM admin command.\n\n"
             "    --ctrl     <fdid>          SmartIO device identifier (fabric device id).\n"
             "    --ns       <namespace id>  Show information about NVM namespace.\n"
-            "    --segment  <segment id>    SISCI segment identifier (defaults to 0).\n"
             "    --help                     Show this information.\n\n");
 }
 
@@ -155,10 +153,9 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
 
     bool dev_set = false;
     args->dev_id = 0;
-    args->segment_id = 0;
     args->namespace_id = 0;
 
-    while ((opt = getopt_long(argc, argv, ":hc:s:n:", opts, &idx)) != -1)
+    while ((opt = getopt_long(argc, argv, ":hc:n:", opts, &idx)) != -1)
     {
         switch (opt)
         {
@@ -178,14 +175,6 @@ static void parse_args(int argc, char** argv, struct cl_args* args)
                 {
                     give_usage(argv[0]);
                     exit('c');
-                }
-                break;
-
-            case 's':
-                if (parse_u32(optarg, &args->segment_id, 0) != 0)
-                {
-                    give_usage(argv[0]);
-                    exit('s');
                 }
                 break;
 

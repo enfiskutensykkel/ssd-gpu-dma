@@ -92,13 +92,13 @@ static void disk_w(const struct disk_info* disk, struct queue_pair* qp, FILE* fp
     void*           buf_ptr     = NVM_DMA_OFFSET(wnd, 3);
     const uint64_t* buf_ioaddrs = &wnd->ioaddrs[3];
 
-    void*           prp_ptr     = NVM_DMA_OFFSET(wnd, 2);
-    const uint64_t  prp_ioaddr  = wnd->ioaddrs[2];
+    nvm_prp_list_t  prp_list    = NVM_PRP_LIST(wnd, 2);
 
     while (!signal_caught && !feof(fp) && !ferror(fp))
     {
         size_t is = fread(buf_ptr, 1, blks * disk->block_size, fp);
         size_t curr_blks = NVM_PAGE_ALIGN(is, disk->block_size) / disk->block_size;
+        size_t size = NVM_PAGE_ALIGN(curr_blks * disk->block_size, disk->page_size);
 
         nvm_cmd_t* cmd;
         while (!signal_caught && (cmd = nvm_sq_enqueue(&qp->sq)) == NULL)
@@ -112,8 +112,7 @@ static void disk_w(const struct disk_info* disk, struct queue_pair* qp, FILE* fp
         }
 
         nvm_cmd_header(cmd, NVM_DEFAULT_CID(&qp->sq), NVM_IO_WRITE, disk->ns_id);
-        nvm_cmd_data(cmd, disk->page_size, NVM_PAGE_ALIGN(curr_blks * disk->block_size, disk->page_size),
-                    prp_ptr, prp_ioaddr, buf_ioaddrs);
+        nvm_cmd_data(cmd, 1, &prp_list, size / disk->page_size, buf_ioaddrs);
         nvm_cmd_rw_blks(cmd, offset, curr_blks);
 
         nvm_cache_flush(buf_ptr, NVM_PAGE_ALIGN(curr_blks * disk->block_size, disk->page_size));
@@ -168,12 +167,12 @@ static void disk_r(const struct disk_info* disk, struct queue_pair* qp, uint64_t
     void*           buf_ptr     = NVM_DMA_OFFSET(wnd, 3);
     const uint64_t* buf_ioaddrs = &wnd->ioaddrs[3];
 
-    void*           prp_ptr     = NVM_DMA_OFFSET(wnd, 2);
-    const uint64_t  prp_ioaddr  = wnd->ioaddrs[2];
+    nvm_prp_list_t  prp_list    = NVM_PRP_LIST(wnd, 2);
 
     while (!signal_caught && count != 0)
     {
         size_t curr_blks = MIN(blks, count);
+        size_t size = NVM_PAGE_ALIGN(curr_blks * disk->block_size, disk->page_size);
 
         nvm_cmd_t* cmd;
         while (!signal_caught && (cmd = nvm_sq_enqueue(&qp->sq)) == NULL)
@@ -182,11 +181,10 @@ static void disk_r(const struct disk_info* disk, struct queue_pair* qp, uint64_t
         }
 
         nvm_cmd_header(cmd, NVM_DEFAULT_CID(&qp->sq), NVM_IO_READ, disk->ns_id);
-        nvm_cmd_data(cmd, disk->page_size, NVM_PAGE_ALIGN(curr_blks * disk->block_size, disk->page_size),
-                    prp_ptr, prp_ioaddr, buf_ioaddrs);
+        nvm_cmd_data(cmd, 1, &prp_list, size / disk->page_size, buf_ioaddrs);
         nvm_cmd_rw_blks(cmd, offset, curr_blks);
 
-        nvm_cache_flush(buf_ptr, NVM_PAGE_ALIGN(curr_blks * disk->block_size, disk->page_size));
+        nvm_cache_flush(buf_ptr, size);
 
         nvm_sq_submit(&qp->sq);
         qp->cmds++;
@@ -330,14 +328,14 @@ static int create_queues(nvm_aq_ref rpc, uint16_t queue_id, nvm_dma_t* dma, stru
 {
     int status;
 
-    status = nvm_admin_cq_create(rpc, &qp->cq, queue_id, NVM_DMA_OFFSET(dma, 0), dma->ioaddrs[0]);
+    status = nvm_admin_cq_create(rpc, &qp->cq, queue_id, dma, 0, 1);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create IO completion queue (CQ): %s\n", nvm_strerror(status));
         return status;
     }
 
-    status = nvm_admin_sq_create(rpc, &qp->sq, &qp->cq, queue_id, NVM_DMA_OFFSET(dma, 1), dma->ioaddrs[1]);
+    status = nvm_admin_sq_create(rpc, &qp->sq, &qp->cq, queue_id, dma, 1, 1);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create IO submission queue (SQ): %s\n", nvm_strerror(status));
@@ -405,7 +403,7 @@ int main(int argc, char** argv)
     signal(SIGPIPE, (sig_t) catch_signal);
 
     // Get controller reference
-    int status = nvm_dis_ctrl_init(&ctrl, args.controller_id, args.adapter);
+    int status = nvm_dis_ctrl_init(&ctrl, args.controller_id);
     if (status != 0)
     {
         fprintf(stderr, "Failed to get controller reference: %s\n", strerror(status));
@@ -606,7 +604,7 @@ static void parse_args(int argc, char** argv, struct arguments* args)
         {NULL, 0, NULL, 0}
     };
 
-    args->segment_id = random_id();
+    args->segment_id = 345;
     args->adapter = 0;
     args->queue_id = 0;
     args->controller_id = 0;

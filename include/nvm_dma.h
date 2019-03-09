@@ -104,8 +104,8 @@ int nvm_dma_map_device(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* devptr, si
  */
 int nvm_dis_dma_map_local(nvm_dma_t** map,              // Mapping descriptor reference
                           const nvm_ctrl_t* ctrl,       // NVM controller handle
-                          sci_local_segment_t segment,  // Local segment descriptor
                           uint32_t dis_adapter,         // Local DIS adapter segment is prepared on
+                          sci_local_segment_t segment,  // Local segment descriptor
                           bool map_vaddr);              // Should function also map segment into local space
 
 #endif /* __DIS_CLUSTER__ */
@@ -164,7 +164,6 @@ int nvm_dis_dma_create(nvm_dma_t** map, const nvm_ctrl_t* ctrl, size_t size, uns
 
 /*
  * Note: This function requires the IOMMU to be enabled.
- * Currently not implemented.
  */
 int nvm_dis_dma_map_host(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* vaddr, size_t size);
 

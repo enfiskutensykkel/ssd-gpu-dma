@@ -40,7 +40,7 @@ static int show_ctrl_info(nvm_aq_ref rpc, const nvm_ctrl_t* ctrl, uint32_t adapt
     struct segment memory_page;
     nvm_dma_t* dma;
 
-    int status = segment_create(&memory_page, random_id(), 0x1000);
+    int status = segment_create(&memory_page, 12, 0x1000);
     if (status != 0)
     {
         fprintf(stderr, "Failed to create memory segment\n");
@@ -79,7 +79,7 @@ static int show_ns_info(nvm_aq_ref rpc, uint32_t ns_id, uint32_t adapter)
     struct segment memory_page;
     nvm_dma_t* dma;
 
-    int status = segment_create(&memory_page, random_id(), 0x1000);
+    int status = segment_create(&memory_page, 13, 0x1000);
     if (status != 0)
     {
         fprintf(stderr, "Failed to create memory segment\n");
@@ -129,7 +129,7 @@ int main(int argc, char** argv)
     }
 
     // Get controller reference
-    int status = nvm_dis_ctrl_init(&ctrl, args.smartio_dev_id, args.adapter);
+    int status = nvm_dis_ctrl_init(&ctrl, args.smartio_dev_id);
     if (status != 0)
     {
         fprintf(stderr, "Failed to get controller reference: %s\n", strerror(status));

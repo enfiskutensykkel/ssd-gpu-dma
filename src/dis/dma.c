@@ -281,7 +281,7 @@ static void release_range(struct va_range* va)
 /*
  * Create DMA mapping for a local segment.
  */
-int nvm_dis_dma_map_local(nvm_dma_t** map, const nvm_ctrl_t* ctrl, sci_local_segment_t lseg, uint32_t adapter, bool map_va)
+int nvm_dis_dma_map_local(nvm_dma_t** map, const nvm_ctrl_t* ctrl, uint32_t adapter, sci_local_segment_t lseg, bool map_va)
 {
     int status;
     struct local_segment* ls;
@@ -378,7 +378,7 @@ int nvm_dis_dma_map_remote(nvm_dma_t** map, const nvm_ctrl_t* ctrl, sci_remote_s
 /*
  * Helper function to create a local segment and map it.
  */
-static int create_local_segment(struct va_range** va, const nvm_ctrl_t* ctrl, size_t size, void* phys_ptr)
+static int create_local_segment(struct va_range** va, const nvm_ctrl_t* ctrl, size_t size, void* ptr, bool gpu)
 {
     int status;
     struct controller* ref;
@@ -394,7 +394,7 @@ static int create_local_segment(struct va_range** va, const nvm_ctrl_t* ctrl, si
     }
 
     // Create SISCI segment
-    status = _nvm_local_memory_get(&lseg, &adapter, ref->device, size, phys_ptr);
+    status = _nvm_local_memory_get(&lseg, &adapter, ref->device, size, ptr, gpu);
     if (status != 0)
     {
         _nvm_ctrl_put(ref);
@@ -414,7 +414,7 @@ static int create_local_segment(struct va_range** va, const nvm_ctrl_t* ctrl, si
     ls->remove = true;
     
     // Map local segment into virtual address space unless it's physical memory
-    if (phys_ptr == NULL)
+    if (ptr == NULL)
     {
         status = va_map_local(&ls->map, &ls->range, ls->segment, true);
         if (status != 0)
@@ -426,7 +426,7 @@ static int create_local_segment(struct va_range** va, const nvm_ctrl_t* ctrl, si
     else
     {
         // XXX Quick and dirty hack
-        ls->range.vaddr = (volatile void*) phys_ptr;
+        ls->range.vaddr = (volatile void*) ptr;
     }
 
     *va = &ls->range;
@@ -526,7 +526,7 @@ int nvm_dis_dma_create(nvm_dma_t** map, const nvm_ctrl_t* ctrl, size_t size, uns
 
     if (mem_hints == 0)
     {
-        status = create_local_segment(&va, ctrl, size, NULL);
+        status = create_local_segment(&va, ctrl, size, NULL, false);
     }
     else
     {
@@ -552,8 +552,36 @@ int nvm_dis_dma_create(nvm_dma_t** map, const nvm_ctrl_t* ctrl, size_t size, uns
 
 int nvm_dis_dma_map_host(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* vaddr, size_t size)
 {
-    dprintf("Mapping host memory is currently not supported\n");
-    return ENOTSUP;
+    int status;
+    struct va_range* va = NULL;
+
+    *map = NULL;
+
+    if (vaddr == NULL)
+    {
+        return EINVAL;
+    }
+
+    size = NVM_CTRL_ALIGN(ctrl, size);
+    if (size == 0)
+    {
+        return EINVAL;
+    }
+
+    status = create_local_segment(&va, ctrl, size, vaddr, false);
+    if (status != 0)
+    {
+        return status;
+    }
+
+    status = _nvm_dma_init(map, ctrl, va, &release_range);
+    if (status != 0)
+    {
+        release_range(va);
+        return status;
+    }
+
+    return 0;
 }
 
 
@@ -580,7 +608,7 @@ int nvm_dis_dma_map_device(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* devptr
         return EINVAL;
     }
 
-    status = create_local_segment(&va, ctrl, size, devptr);
+    status = create_local_segment(&va, ctrl, size, devptr, true);
     if (status != 0)
     {
         return status;

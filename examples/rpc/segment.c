@@ -21,7 +21,7 @@ int segment_create(struct segment* segment, uint32_t segment_id, size_t size)
         return EIO;
     }
 
-    SCICreateSegment(segment->sd, &segment->segment, segment_id, size, NULL, NULL, 0, &err);
+    SCICreateSegment(segment->sd, &segment->segment, segment_id, size, NULL, NULL, SCI_FLAG_AUTO_ID, &err);
     if (err != SCI_ERR_OK)
     {
         SCIClose(segment->sd, 0, &status);
@@ -34,7 +34,7 @@ int segment_create(struct segment* segment, uint32_t segment_id, size_t size)
         return ENOSPC;
     }
 
-    segment->id = segment_id;
+    segment->id = SCIGetLocalSegmentId(segment->segment);
     segment->size = size;
     return 0;
 }

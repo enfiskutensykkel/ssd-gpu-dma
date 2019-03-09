@@ -55,13 +55,15 @@ void _nvm_device_memory_put(sci_remote_segment_t* segment);
 
 /*
  * Create local segment.
- * If phys_ptr is not NULL, attach it as physical memory.
+ * If ptr is not NULL, create empty segment and register segment memory.
+ * If ptr is not NULL and gpu_mem is set, attach it CUDA device memory
  */
 int _nvm_local_memory_get(sci_local_segment_t* segment,
                           uint32_t* adapter,
                           const struct device* dev,
                           size_t size,
-                          void* phys_ptr);
+                          void* ptr,
+                          bool gpu_mem);
 
 
 
