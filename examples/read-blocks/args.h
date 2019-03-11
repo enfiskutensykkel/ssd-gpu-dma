@@ -11,8 +11,6 @@ struct options
 {
 #ifdef __DIS_CLUSTER__
     uint64_t    controller_id;
-    uint32_t    adapter;
-    uint32_t    segment_id; // TODO: FIXME: This needs to be memory region for sq_mem instead
 #else
     const char* controller_path;
 #endif

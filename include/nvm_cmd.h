@@ -226,7 +226,7 @@ size_t nvm_cmd_data(nvm_cmd_t* cmd, size_t n_lists, const nvm_prp_list_t* lists,
 
 /* Make PRP list descriptor from values */
 #define NVM_PRP_LIST_INIT(vaddr, local, page_size, ioaddr) \
-    {(vaddr), !!(local), (page_size), (ioaddr)}
+    ((nvm_prp_list_t) {(vaddr), !!(local), (page_size), (ioaddr)})
 
 
 /* Make PRP list descriptor from DMA descriptor */

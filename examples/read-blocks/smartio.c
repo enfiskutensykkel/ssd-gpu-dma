@@ -42,7 +42,7 @@ int main(int argc, char** argv)
     }
     
     // Get controller reference
-    status = nvm_dis_ctrl_init(&ctrl, args.controller_id, args.adapter);
+    status = nvm_dis_ctrl_init(&ctrl, args.controller_id);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to get controller reference: %s\n", nvm_strerror(status));
@@ -50,7 +50,7 @@ int main(int argc, char** argv)
     }
 
     // Create admin queue pair + page for identify commands
-    status = nvm_dis_dma_create(&aq_mem, ctrl, args.adapter, args.segment_id++, ctrl->page_size * 3);
+    status = nvm_dis_dma_create(&aq_mem, ctrl, ctrl->page_size * 3, 0);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create queue memory: %s\n", nvm_strerror(status));
@@ -74,7 +74,8 @@ int main(int argc, char** argv)
 
     // Create data buffer
     size_t buffer_size = (args.chunk_size <= args.num_blocks ? args.chunk_size : args.num_blocks) * info.block_size;
-    status = nvm_dis_dma_create(&buffer, ctrl, args.adapter, args.segment_id++, buffer_size);
+
+    status = nvm_dis_dma_create(&buffer, ctrl, buffer_size, 0);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create data buffer: %s\n", nvm_strerror(status));
@@ -82,7 +83,7 @@ int main(int argc, char** argv)
     }
 
     // Create memory for completion queue
-    status = nvm_dis_dma_create(&cq_mem, ctrl, args.adapter, args.segment_id++, ctrl->page_size);
+    status = nvm_dis_dma_create(&cq_mem, ctrl, ctrl->page_size, SCI_MEMACCESS_HOST_READ | SCI_MEMACCESS_DEVICE_WRITE);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create completion queue memory: %s\n", nvm_strerror(status));
@@ -96,8 +97,8 @@ int main(int argc, char** argv)
         n_prp_lists = ctrl->max_entries;
     }
 
-    // FIXME: make this false when supported as well as using args.segment_id
-    status = nvm_dis_dma_connect(&sq_mem, ctrl, args.adapter, 1, ctrl->page_size * (n_prp_lists + 1), true); 
+    status = nvm_dis_dma_create(&sq_mem, ctrl, ctrl->page_size * (n_prp_lists + 1), 
+            SCI_MEMACCESS_HOST_WRITE | SCI_MEMACCESS_DEVICE_READ); 
     if (!nvm_ok(status))
     {
         goto leave;

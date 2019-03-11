@@ -12,11 +12,6 @@
 static struct option opts[] = {
     { .name = "help", .has_arg = no_argument, .flag = NULL, .val = 'h' },
     { .name = "ctrl", .has_arg = required_argument, .flag = NULL, .val = 'c' },
-#ifdef __DIS_CLUSTER__
-    { .name = "adapter", .has_arg = required_argument, .flag = NULL, .val = 'a' },
-    { .name = "segment-id", .has_arg = required_argument, .flag = NULL, .val = 1 },
-    { .name = "id-offset", .has_arg = required_argument, .flag = NULL, .val = 1 },
-#endif
     { .name = "namespace", .has_arg = required_argument, .flag = NULL, .val = 'n' },
     { .name = "ns", .has_arg = required_argument, .flag = NULL, .val = 'n' },
     { .name = "blocks", .has_arg = required_argument, .flag = NULL, .val = 'b' },
@@ -49,7 +44,6 @@ static void show_help(const char* name)
     fprintf(stderr, ""
 #ifdef __DIS_CLUSTER__
             "    --ctrl         <id>      Specify controller's device identifier.\n"
-            "    --adapter      <no>      Specify local DIS adapter.\n"
 #else
             "    --ctrl         <path>    Specify path to controller.\n"
 #endif
@@ -80,8 +74,6 @@ void parse_options(int argc, char** argv, struct options* args)
 
 #ifdef __DIS_CLUSTER__
     args->controller_id = 0;
-    args->adapter = 0;
-    args->segment_id = 0xdeadbeef;
     args->chunk_size = (64UL << 20) / 512;
 #else
     args->controller_path = NULL;
@@ -152,30 +144,6 @@ void parse_options(int argc, char** argv, struct options* args)
                 if (args->controller_id == 0)
                 {
                     fprintf(stderr, "Controller id can not be 0!\n");
-                    exit(1);
-                }
-                break;
-
-            case 'a':
-                args->adapter = strtoul(optarg, &endptr, 10);
-                if (endptr == NULL || *endptr != '\0')
-                {
-                    fprintf(stderr, "Invalid adapter number: `%s'\n", optarg);
-                    exit(1);
-                }
-
-                if (args->adapter >= 4)
-                {
-                    fprintf(stderr, "Adapter number is too large!\n");
-                    exit(1);
-                }
-                break;
-
-            case 1:
-                args->segment_id = strtoul(optarg, &endptr, 0);
-                if (endptr == NULL || *endptr != '\0')
-                {
-                    fprintf(stderr, "Invalid segment id: `%s'\n", optarg);
                     exit(1);
                 }
                 break;
