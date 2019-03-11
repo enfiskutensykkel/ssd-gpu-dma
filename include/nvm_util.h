@@ -188,7 +188,7 @@ void _nvm_wcb_flush()
 
 
 /* Convenience macro for creating a default CID based on submission queue */
-#define NVM_DEFAULT_CID(sq)         ((uint16_t) (sq)->tail)
+#define NVM_DEFAULT_CID(sq)         ((uint16_t) ((sq)->tail + (!(sq)->phase) * (sq)->qs))
 
 
 #ifdef __cplusplus

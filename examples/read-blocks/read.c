@@ -261,8 +261,9 @@ int read_and_dump(const struct disk_info* disk, struct queue_pair* qp, const nvm
 
     while (size_remaining != 0)
     {
-        fprintf(stderr, "Reading %zu bytes (total=%zu)\n", 
+        fprintf(stderr, "Reading %zu bytes [%zu MB] (total=%zu)\n", 
                 buffer->n_ioaddrs * disk->page_size, 
+                (buffer->n_ioaddrs * disk->page_size) >> 20,
                 args->num_blocks * disk->block_size - size_remaining);
         size_t remaining = size_remaining;
 
@@ -313,8 +314,9 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
 
     while (size_remaining != 0)
     {
-        fprintf(stderr, "Writing %zu bytes (total=%zu)\n", 
+        fprintf(stderr, "Writing %zu bytes [%zu MB] (total=%zu)\n", 
                 buffer->n_ioaddrs * disk->page_size, 
+                (buffer->n_ioaddrs * disk->page_size) >> 20,
                 args->num_blocks * disk->block_size - size_remaining);
 
         if (!feof(args->input) && !ferror(args->input))

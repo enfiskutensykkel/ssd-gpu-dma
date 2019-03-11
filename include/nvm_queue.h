@@ -67,22 +67,23 @@ void nvm_queue_reset(nvm_queue_t* q);
 __host__ __device__ static inline
 nvm_cmd_t* nvm_sq_enqueue(nvm_queue_t* sq)
 {
-    // Check if queue has available slots
-    if (((uint16_t) (sq->tail - sq->head)) < sq->qs)
+    // Check if queue is full
+    if (((uint16_t) (sq->tail - sq->head) % sq->qs) == sq->qs - 1)
     {
-        // Take slot and end of queue
-        nvm_cmd_t* cmd = (nvm_cmd_t*) (((unsigned char*) sq->vaddr) + sq->es * (sq->tail % sq->qs));
-
-        // Increase tail pointer and invert phase tag if necessary
-        if (++sq->tail % sq->qs == 0)
-        {
-            sq->phase = !sq->phase;
-        }
-
-        return cmd;
+        return NULL;
     }
 
-    return NULL;
+    // Take slot and end of queue
+    nvm_cmd_t* cmd = (nvm_cmd_t*) (((unsigned char*) sq->vaddr) + sq->es * sq->tail);
+
+    // Increase tail pointer and invert phase tag if necessary
+    if (++sq->tail == sq->qs)
+    {
+        sq->phase = !sq->phase;
+        sq->tail = 0;
+    }
+
+    return cmd;
 }
 
 
@@ -129,7 +130,7 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
     // The 0'th thread should update the state
     if (i == 0)
     {
-        sq->tail += n;
+        sq->tail = (((uint32_t) sq->tail) + ((uint32_t) n)) % sq->qs;
     }
 
     // Wait state updating here
@@ -153,7 +154,7 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
 __host__ __device__ static inline
 nvm_cpl_t* nvm_cq_poll(const nvm_queue_t* cq)
 {
-    nvm_cpl_t* cpl = (nvm_cpl_t*) (((unsigned char*) cq->vaddr) + cq->es * (cq->head % cq->qs));
+    nvm_cpl_t* cpl = (nvm_cpl_t*) (((unsigned char*) cq->vaddr) + cq->es * cq->head);
 
 #ifndef __CUDA_ARCH__
     if (cq->local) 
@@ -191,8 +192,9 @@ nvm_cpl_t* nvm_cq_dequeue(nvm_queue_t* cq)
     if (cpl != NULL)
     {
         // Increase head pointer and invert phase tag
-        if (++cq->head % cq->qs == 0)
+        if (++cq->head == cq->qs)
         {
+            cq->head = 0;
             cq->phase = !cq->phase;
         }
     }
@@ -233,13 +235,12 @@ nvm_cpl_t* nvm_cq_dequeue_block(nvm_queue_t* cq, uint64_t timeout);
 __host__ __device__ static inline
 void nvm_sq_submit(nvm_queue_t* sq)
 {
-    const uint16_t t = sq->tail % sq->qs;
-
-    if (sq->last != t && sq->db != NULL)
+    if (sq->last != sq->tail && sq->db != NULL)
     {
 #ifndef __CUDA_ARCH__
         if (sq->local)
         {
+            // TODO: only flush the actual entries
             nvm_cache_flush((void*) sq->vaddr, sq->es * sq->qs);
         }
         else 
@@ -248,8 +249,8 @@ void nvm_sq_submit(nvm_queue_t* sq)
         }
 #endif
 
-        *((volatile uint32_t*) sq->db) = t;
-        sq->last = t;
+        *((volatile uint32_t*) sq->db) = sq->tail;
+        sq->last = sq->tail;
     }
 }
 
@@ -262,9 +263,9 @@ __host__ __device__ static inline
 void nvm_sq_update(nvm_queue_t* sq)
 {
     // Update head pointer of submission queue
-    if (sq->db != NULL)
+    if (sq->db != NULL && ++sq->head == sq->qs)
     {
-        ++sq->head;
+        sq->head = 0;
     }
 }
 
@@ -280,11 +281,10 @@ void nvm_sq_update(nvm_queue_t* sq)
 __host__ __device__ static inline
 void nvm_cq_update(nvm_queue_t* cq)
 {
-    if (cq->last != cq->head % cq->qs && cq->db != NULL)
+    if (cq->last != cq->head && cq->db != NULL)
     {
-        cq->last = cq->head % cq->qs;
-        *((volatile uint32_t*) cq->db) = cq->last;
-        cq->tail = cq->head;
+        *((volatile uint32_t*) cq->db) = cq->head;
+        cq->tail = cq->last = cq->head;
     }
 }
 

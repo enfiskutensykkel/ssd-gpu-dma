@@ -142,5 +142,11 @@ leave:
     nvm_dma_unmap(aq_mem);
     nvm_ctrl_free(ctrl);
     SCITerminate();
+
+    if (status != 0)
+    {
+        fprintf(stderr, "%d\n", status);
+    }
+
     exit(status);
 }
