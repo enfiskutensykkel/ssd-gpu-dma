@@ -311,6 +311,7 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
     size_t num_cmds = 0;
     uint64_t start_block = args->offset;
     size_t size_remaining = args->num_blocks * disk->block_size;
+    ssize_t file_size = 0;
 
     while (size_remaining != 0)
     {
@@ -321,11 +322,13 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
 
         if (!feof(args->input) && !ferror(args->input))
         {
-            fread(buffer->vaddr, 1, buffer->n_ioaddrs * buffer->page_size, args->input);
+            file_size = fread(buffer->vaddr, 1, buffer->n_ioaddrs * buffer->page_size, args->input);
         }
-        else
+
+        if (feof(args->input) || ferror(args->input) || file_size < buffer->n_ioaddrs * buffer->page_size)
         {
-            fprintf(stderr, "WARNING: End of file was reached\n");
+            fprintf(stderr, "WARNING: End of file was reached (read %zu bytes, buffer is %zu)\n", 
+                    file_size, buffer->n_ioaddrs * buffer->page_size);
         }
         size_t remaining = size_remaining;
 
