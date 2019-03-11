@@ -129,8 +129,9 @@ nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, const uint64_t ioaddr, u
     const uint64_t currBlock = NVM_PAGE_TO_BLOCK(pageSize, blockSize, (currChunk + threadNum) * chunkPages);
 
     // Prepare PRP list building
-    void* prpList = NVM_PTR_OFFSET(qp->prpList, pageSize, threadOffset);
+    void* prpListPtr = NVM_PTR_OFFSET(qp->prpList, pageSize, threadOffset);
     uint64_t prpListAddr = NVM_ADDR_OFFSET(qp->prpListIoAddr, pageSize, threadOffset);
+    nvm_prp_list_t prpList = NVM_PRP_LIST_INIT(prpListPtr, true, pageSize, prpListAddr);
 
     uint64_t addrs[0x1000 / sizeof(uint64_t)]; // FIXME: This assumes that page size is 4K
     for (uint32_t page = 0; page < chunkPages; ++page)
@@ -143,7 +144,7 @@ nvm_cmd_t* prepareChunk(QueuePair* qp, nvm_cmd_t* last, const uint64_t ioaddr, u
 
     // Set command fields
     nvm_cmd_header(&local, threadNum, NVM_IO_READ, nvmNamespace);
-    nvm_cmd_data(&local, pageSize, chunkPages, prpList, prpListAddr, addrs);
+    nvm_cmd_data(&local, 1, &prpList, chunkPages, addrs);
     nvm_cmd_rw_blks(&local, currBlock + blockOffset, blocksPerChunk);
     
     *cmd = local;
@@ -400,14 +401,6 @@ static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, con
     QueuePair queuePair;
     DmaPtr queueMemory = prepareQueuePair(queuePair, ctrl, settings);
 
-    // Set up and prepare queues
-    auto deviceQueue = createBuffer(sizeof(QueuePair), settings.cudaDevice);
-    auto err = cudaMemcpy(deviceQueue.get(), &queuePair, sizeof(QueuePair), cudaMemcpyHostToDevice);
-    if (err != cudaSuccess)
-    {
-        throw err;
-    }
-
     const size_t pageSize = ctrl.info.page_size;
     const size_t chunkSize = pageSize * settings.numPages;
     const size_t totalChunks = settings.numChunks * settings.numThreads;
@@ -415,6 +408,14 @@ static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, con
     // Create input buffer
     const size_t sourceBufferSize = NVM_PAGE_ALIGN((settings.doubleBuffered + 1) * chunkSize * settings.numThreads, 1UL << 16);
     auto source = createDma(ctrl.ctrl, sourceBufferSize, settings.cudaDevice, settings.adapter, settings.segmentId + 1); // vaddr is a dev ptr
+
+    // Set up and prepare queues
+    auto deviceQueue = createBuffer(sizeof(QueuePair), settings.cudaDevice);
+    auto err = cudaMemcpy(deviceQueue.get(), &queuePair, sizeof(QueuePair), cudaMemcpyHostToDevice);
+    if (err != cudaSuccess)
+    {
+        throw err;
+    }
 
     std::shared_ptr<CmdTime> times;
     if (settings.stats)
@@ -532,7 +533,7 @@ static int useBlockDevice(const Settings& settings, const cudaDeviceProp& proper
     fprintf(stderr, "Double buffering      : %s\n", settings.doubleBuffered ? "yes" : "no");
 
     void* ptr = mmap(nullptr, totalPages * pageSize, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, settings.startBlock * blockSize);
-    if (ptr == nullptr)
+    if (ptr == nullptr || ptr == MAP_FAILED)
     {
         close(fd);
         fprintf(stderr, "Failed to memory map block device: %s\n", strerror(errno));
@@ -615,7 +616,7 @@ int main(int argc, char** argv)
     }
     sleep(1); // FIXME: Hack due to race condition in SmartIO
 
-    sci_device_t cudaDev;
+    sci_smartio_device_t cudaDev;
     if (settings.cudaDeviceId != 0)
     {
         SCIBorrowDevice(sd, &cudaDev, settings.cudaDeviceId, SCI_FLAG_EXCLUSIVE, &err);
@@ -713,7 +714,7 @@ int main(int argc, char** argv)
         catch (const cudaError_t err)
         {
             cudaHostUnregister((void*) ctrl.ctrl->mm_ptr);
-            throw error(string("Unexpected CUDA error: ") + cudaGetErrorString(err));
+            throw error(string("Unexpected CUDA error (main): ") + cudaGetErrorString(err));
         }
     }
     catch (const error& e)

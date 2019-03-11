@@ -70,7 +70,6 @@ static int ioctl_map(const struct device* dev, const struct va_range* va, uint64
             return EINVAL;
     }
 
-
     struct nvm_ioctl_map request = {
         .vaddr_start = (uintptr_t) m->buffer,
         .n_pages = va->n_pages,
@@ -80,7 +79,8 @@ static int ioctl_map(const struct device* dev, const struct va_range* va, uint64
     int err = ioctl(dev->fd, type, &request);
     if (err < 0)
     {
-        dprintf("Page mapping kernel request failed: %s\n", strerror(errno));
+        dprintf("Page mapping kernel request failed (ptr=%p, n_pages=%zu): %s\n", 
+                m->buffer, va->n_pages, strerror(errno));
         return errno;
     }
     

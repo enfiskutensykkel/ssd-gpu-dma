@@ -44,29 +44,13 @@ static void release_mapping_descriptor(struct va_range* va)
 
 
 
-static int create_mapping_descriptor(struct ioctl_mapping** handle, enum mapping_type type, void* buffer, size_t size)
+static int create_mapping_descriptor(struct ioctl_mapping** handle, size_t page_size, enum mapping_type type, void* buffer, size_t size)
 {
-    size_t page_size = 0;
-
-    switch (type)
-    {
-        case MAP_TYPE_API:
-        case MAP_TYPE_HOST:
-            page_size = _nvm_host_page_size();
-            break;
-
-#ifdef _CUDA
-        case MAP_TYPE_CUDA:
-            page_size = (1ULL << 16);
-            break;
-#endif
-
-        default:
-            dprintf("Unknown memory type\n");
-            return EINVAL;
-    }
-
     size_t n_pages = NVM_PAGE_ALIGN(size, page_size) / page_size;
+    if (n_pages == 0)
+    {
+        return EINVAL;
+    }
 
     struct ioctl_mapping* md = malloc(sizeof(struct ioctl_mapping));
     if (md == NULL)
@@ -92,7 +76,12 @@ int nvm_dma_create(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, size_t size)
 {
     void* buffer;
     struct ioctl_mapping* md;
+
     size = NVM_CTRL_ALIGN(ctrl, size);
+    if (size == 0)
+    {
+        return EINVAL;
+    }
 
     *handle = NULL;
     if (_nvm_ctrl_type(ctrl) != DEVICE_TYPE_IOCTL)
@@ -107,7 +96,7 @@ int nvm_dma_create(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, size_t size)
         return err;
     }
 
-    err = create_mapping_descriptor(&md, MAP_TYPE_API, buffer, size);
+    err = create_mapping_descriptor(&md, ctrl->page_size, MAP_TYPE_API, buffer, size);
     if (err != 0)
     {
         free(buffer);
@@ -131,12 +120,18 @@ int nvm_dma_map_host(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* vaddr, si
     struct ioctl_mapping* md;
     *handle = NULL;
 
+    size = NVM_CTRL_ALIGN(ctrl, size);
+    if (size == 0)
+    {
+        return EINVAL;
+    }
+
     if (_nvm_ctrl_type(ctrl) != DEVICE_TYPE_IOCTL)
     {
         return EBADF;
     }
 
-    int err = create_mapping_descriptor(&md, MAP_TYPE_HOST, vaddr, size);
+    int err = create_mapping_descriptor(&md, ctrl->page_size, MAP_TYPE_HOST, vaddr, size);
     if (err != 0)
     {
         return err;
@@ -165,7 +160,7 @@ int nvm_dma_map_device(nvm_dma_t** handle, const nvm_ctrl_t* ctrl, void* devptr,
         return EBADF;
     }
 
-    int err = create_mapping_descriptor(&md, MAP_TYPE_CUDA, devptr, size);
+    int err = create_mapping_descriptor(&md, 1ULL << 16, MAP_TYPE_CUDA, devptr, size);
     if (err != 0)
     {
         return err;

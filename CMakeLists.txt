@@ -72,7 +72,11 @@ if (CUDA_FOUND AND NOT no_cuda)
         get_filename_component (driver_dir "${driver_dir}" DIRECTORY)
     endif ()
 
-    message(STATUS "Using NVIDIA driver found in ${driver_dir}")
+    if ("${driver_dir}" STREQUAL "")
+        message(STATUS "No NVIDIA driver symbols found")
+    else ()
+        message(STATUS "Using NVIDIA driver found in ${driver_dir}")
+    endif ()
 endif ()
 
 

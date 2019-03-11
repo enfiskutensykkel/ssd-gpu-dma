@@ -150,11 +150,11 @@ BufferPtr createBuffer(size_t size, int cudaDevice)
 
 
 #ifdef __DIS_CLUSTER__
-DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t adapter, uint32_t id)
+DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t, uint32_t)
 {
     nvm_dma_t* dma = nullptr;
 
-    int status = nvm_dis_dma_create(&dma, ctrl, adapter, id, size);
+    int status = nvm_dis_dma_create(&dma, ctrl, size, 0);
     if (!nvm_ok(status))
     {
         throw error(string("Failed to create local segment: ") + nvm_strerror(status));
@@ -171,11 +171,11 @@ DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t, uint32_t)
 
 
 #ifdef __DIS_CLUSTER__
-DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t adapter, uint32_t id)
+DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t, uint32_t)
 {
     if (cudaDevice < 0)
     {
-        return createDma(ctrl, size, adapter, id);
+        return createDma(ctrl, size, 0, 0);
     }
 
     nvm_dma_t* dma = nullptr;
@@ -184,13 +184,13 @@ DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t a
 
     getDeviceMemory(cudaDevice, bufferPtr, devicePtr, size);
 
-    int status = nvm_dis_dma_map_device(&dma, ctrl, adapter, id, devicePtr, size);
+    int status = nvm_dis_dma_map_device(&dma, ctrl, devicePtr, size);
     if (!nvm_ok(status))
     {
         throw error(string("Failed to create local segment: ") + nvm_strerror(status));
     }
 
-    dma->vaddr = devicePtr;
+    //dma->vaddr = devicePtr;
 
     return DmaPtr(dma, nvm_dma_unmap);
 }
@@ -198,22 +198,6 @@ DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t a
 DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t, uint32_t)
 {
     return createDma(ctrl, size, cudaDevice);
-}
-#endif
-
-
-#ifdef __DIS_CLUSTER__
-DmaPtr createRemoteDma(const nvm_ctrl_t* ctrl, size_t size, uint32_t adapter, uint32_t segno)
-{
-    nvm_dma_t* dma = nullptr;
-
-    int status = nvm_dis_dma_connect(&dma, ctrl, adapter, segno, size, true);
-    if (!nvm_ok(status))
-    {
-        throw error(string("Failed to connect to segment: ") + nvm_strerror(status));
-    }
-
-    return DmaPtr(dma, nvm_dma_unmap);
 }
 #endif
 

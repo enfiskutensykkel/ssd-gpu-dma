@@ -386,6 +386,11 @@ static int create_local_segment(struct va_range** va, const nvm_ctrl_t* ctrl, si
     sci_local_segment_t lseg;
     uint32_t adapter;
 
+    if (size == 0)
+    {
+        return ERANGE;
+    }
+
     // Take controller reference
     ref = _nvm_ctrl_get(ctrl);
     if (ref == NULL)
@@ -563,10 +568,6 @@ int nvm_dis_dma_map_host(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* vaddr, s
     }
 
     size = NVM_CTRL_ALIGN(ctrl, size);
-    if (size == 0)
-    {
-        return EINVAL;
-    }
 
     status = create_local_segment(&va, ctrl, size, vaddr, false);
     if (status != 0)
@@ -603,10 +604,6 @@ int nvm_dis_dma_map_device(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* devptr
     }
 
     size = NVM_PAGE_ALIGN(size, (1ULL << 16));
-    if (size == 0)
-    {
-        return EINVAL;
-    }
 
     status = create_local_segment(&va, ctrl, size, devptr, true);
     if (status != 0)

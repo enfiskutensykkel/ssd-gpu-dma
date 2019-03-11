@@ -182,8 +182,8 @@ int _nvm_local_memory_get(sci_local_segment_t* segment, uint32_t* adapter, const
     SCIPrepareSegment(seg, adapt, 0, &err);
     if (err != SCI_ERR_OK)
     {
-        dprintf("Failed to prepare local segment on adapter %u: %s\n", 
-                adapt, _SCIGetErrorString(err));
+        dprintf("Failed to prepare local segment on adapter %u (ptr=%p, size=%zx): %s\n", 
+                adapt, ptr, size, _SCIGetErrorString(err));
         SCIRemoveSegment(seg, 0, &err);
         return EIO;
     }

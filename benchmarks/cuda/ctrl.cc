@@ -57,19 +57,19 @@ static void initializeController(struct Controller& ctrl, uint32_t ns_id)
 
 
 #ifdef __DIS_CLUSTER__
-Controller::Controller(uint64_t ctrl_id, uint32_t ns_id, uint32_t adapter, uint32_t segment_id)
+Controller::Controller(uint64_t ctrl_id, uint32_t ns_id, uint32_t, uint32_t)
     : ctrl(nullptr)
     , aq_ref(nullptr)
 {
     // Get controller reference
-    int status = nvm_dis_ctrl_init(&ctrl, ctrl_id, adapter);
+    int status = nvm_dis_ctrl_init(&ctrl, ctrl_id);
     if (!nvm_ok(status))
     {
         throw error(string("Failed to get controller reference: ") + nvm_strerror(status));
     }
 
     // Create admin queue memory
-    aq_mem = createDma(ctrl, ctrl->page_size * 3, adapter, segment_id);
+    aq_mem = createDma(ctrl, ctrl->page_size * 3, 0, 0);
 
     initializeController(*this, ns_id);
 }
