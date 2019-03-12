@@ -137,7 +137,7 @@ static void populate_handle(nvm_dma_t* handle, const struct va_range* va, const 
 
         handle->ioaddrs[i_page] = ioaddrs[current_page] + offset_within_page;
 
-        if (i_page > 0 && handle->ioaddrs[i_page - 1] != handle->ioaddrs[i_page] + handle->page_size)
+        if (i_page > 0 && handle->ioaddrs[i_page - 1] + handle->page_size != handle->ioaddrs[i_page])
         {
             handle->contiguous = false;
         }

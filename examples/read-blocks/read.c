@@ -95,7 +95,7 @@ int get_disk_info(nvm_aq_ref ref, struct disk_info* info, uint32_t ns_id, void* 
 
 
 
-int create_queue_pair(nvm_aq_ref ref, struct queue_pair* qp, nvm_dma_t* cq_mem, nvm_dma_t* sq_mem)
+int create_queue_pair(nvm_aq_ref ref, struct queue_pair* qp, nvm_dma_t* cq_mem, nvm_dma_t* sq_mem, size_t sqs)
 {
     int status;
 
@@ -107,7 +107,7 @@ int create_queue_pair(nvm_aq_ref ref, struct queue_pair* qp, nvm_dma_t* cq_mem, 
     }
 
     memset(cq_mem->vaddr, 0, cq_mem->page_size);
-    status = nvm_admin_cq_create(ref, &qp->cq, 2, cq_mem, 0, NVM_CQ_SIZE(cq_mem->page_size, 1));
+    status = nvm_admin_cq_create(ref, &qp->cq, 2, cq_mem, 0, NVM_CQ_SIZE(cq_mem, 1));
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create completion queue: %s\n", nvm_strerror(status));
@@ -116,7 +116,7 @@ int create_queue_pair(nvm_aq_ref ref, struct queue_pair* qp, nvm_dma_t* cq_mem, 
 
     memset(sq_mem->vaddr, 0, cq_mem->page_size);
 
-    status = nvm_admin_sq_create(ref, &qp->sq, &qp->cq, 2, sq_mem, 0, NVM_SQ_SIZE(sq_mem->page_size, 1));
+    status = nvm_admin_sq_create(ref, &qp->sq, &qp->cq, 2, sq_mem, 0, sqs);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create submission queue: %s\n", nvm_strerror(status));
@@ -216,13 +216,13 @@ static size_t rw_bytes(const struct disk_info* disk, struct queue_pair* qp, cons
             usleep(1);
         }
 
-        uint16_t prp_list = (num_cmds % qp->sq.qs) + 1;
+        uint16_t prp_list = num_cmds % qp->sq.qs;
         size_t num_blocks = NVM_PAGE_TO_BLOCK(disk->page_size, disk->block_size, num_pages);
         size_t start_block = offset + NVM_PAGE_TO_BLOCK(disk->page_size, disk->block_size, page);
 
         nvm_cmd_header(cmd, NVM_DEFAULT_CID(&qp->sq), op, disk->ns_id);
 
-        list = NVM_PRP_LIST(qp->sq_mem, prp_list);
+        list = NVM_PRP_LIST(qp->sq_mem, NVM_SQ_PAGES(qp->sq_mem, qp->sq.qs) + prp_list);
 
         page += nvm_cmd_data(cmd, 1, &list, num_pages, &buffer->ioaddrs[page]);
 
@@ -253,7 +253,8 @@ int read_and_dump(const struct disk_info* disk, struct queue_pair* qp, const nvm
     }
 
     // Clear all PRP lists
-    memset(NVM_DMA_OFFSET(qp->sq_mem, 1), 0, qp->sq_mem->page_size * (qp->sq_mem->n_ioaddrs - 1));
+    size_t sq_pages = NVM_SQ_PAGES(qp->sq_mem, qp->sq.qs);
+    memset(NVM_DMA_OFFSET(qp->sq_mem, sq_pages), 0, qp->sq_mem->page_size * (qp->sq_mem->n_ioaddrs - sq_pages));
 
     size_t num_cmds = 0;
     uint64_t start_block = args->offset;
@@ -306,12 +307,13 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
     }
 
     // Clear all PRP lists
-    memset(NVM_DMA_OFFSET(qp->sq_mem, 1), 0, qp->sq_mem->page_size * (qp->sq_mem->n_ioaddrs - 1));
+    size_t sq_pages = NVM_SQ_PAGES(qp->sq_mem, qp->sq.qs);
+    memset(NVM_DMA_OFFSET(qp->sq_mem, sq_pages), 0, qp->sq_mem->page_size * (qp->sq_mem->n_ioaddrs - sq_pages));
 
     size_t num_cmds = 0;
     uint64_t start_block = args->offset;
     size_t size_remaining = args->num_blocks * disk->block_size;
-    ssize_t file_size = 0;
+    size_t file_size = 0;
 
     while (size_remaining != 0)
     {
@@ -322,7 +324,12 @@ int write_blocks(const struct disk_info* disk, struct queue_pair* qp, const nvm_
 
         if (!feof(args->input) && !ferror(args->input))
         {
-            file_size = fread(buffer->vaddr, 1, buffer->n_ioaddrs * buffer->page_size, args->input);
+            ssize_t ret = fread(buffer->vaddr, 1, buffer->n_ioaddrs * buffer->page_size, args->input);
+            if (ret < 0)
+            {
+                ret = 0;
+            }
+            file_size = (size_t) ret;
         }
 
         if (feof(args->input) || ferror(args->input) || file_size < buffer->n_ioaddrs * buffer->page_size)

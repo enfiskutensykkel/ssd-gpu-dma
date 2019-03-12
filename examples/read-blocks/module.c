@@ -20,31 +20,35 @@ static int prepare_and_read(nvm_aq_ref ref, const struct disk_info* disk, const 
 {
     int status = 0;
 
+    const size_t qs = args->queue_size;
     void* buffer_ptr = NULL;
     nvm_dma_t* buffer = NULL;
     void* queue_ptr = NULL;
     nvm_dma_t* sq_mem = NULL;
     nvm_dma_t* cq_mem = NULL;
-    size_t n_prp_lists = disk->page_size / sizeof(nvm_cmd_t);
+    size_t n_prp_lists = qs;
     struct queue_pair queues;
 
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
 
-    status = posix_memalign(&buffer_ptr, disk->page_size, NVM_CTRL_ALIGN(ctrl, args->num_blocks * disk->block_size));
+    const size_t buffer_blocks = args->chunk_size <= args->num_blocks ? args->chunk_size : args->num_blocks;
+    status = posix_memalign(&buffer_ptr, disk->page_size, NVM_CTRL_ALIGN(ctrl, buffer_blocks * disk->block_size));
     if (status != 0)
     {
         fprintf(stderr, "Failed to allocate memory buffer: %s\n", strerror(status));
         goto leave;
     }
 
-    status = posix_memalign(&queue_ptr, disk->page_size, disk->page_size * (n_prp_lists + 2));
+    status = posix_memalign(&queue_ptr, disk->page_size, 
+            NVM_SQ_PAGES(disk, qs) * disk->page_size + disk->page_size * (n_prp_lists + 2));
     if (status != 0)
     {
         fprintf(stderr, "Failed to allocate queue memory: %s\n", strerror(status));
         goto leave;
     }
 
-    status = nvm_dma_map_host(&sq_mem, ctrl, NVM_PTR_OFFSET(queue_ptr, disk->page_size, 1), disk->page_size * (n_prp_lists + 1));
+    status = nvm_dma_map_host(&sq_mem, ctrl, NVM_PTR_OFFSET(queue_ptr, disk->page_size, 1), 
+            NVM_SQ_PAGES(disk, qs) * disk->page_size + disk->page_size * (n_prp_lists + 1));
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to map memory for controller: %s\n", nvm_strerror(status));
@@ -58,14 +62,14 @@ static int prepare_and_read(nvm_aq_ref ref, const struct disk_info* disk, const 
         goto leave;
     }
 
-    status = nvm_dma_map_host(&buffer, ctrl, buffer_ptr, args->num_blocks * disk->block_size);
+    status = nvm_dma_map_host(&buffer, ctrl, buffer_ptr, buffer_blocks * disk->block_size);
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to map memory for controller: %s\n", nvm_strerror(status));
         goto leave;
     }
 
-    status = create_queue_pair(ref, &queues, cq_mem, sq_mem);
+    status = create_queue_pair(ref, &queues, cq_mem, sq_mem, qs);
     if (status != 0)
     {
         goto leave;

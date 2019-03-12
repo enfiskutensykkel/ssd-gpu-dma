@@ -91,13 +91,10 @@ int main(int argc, char** argv)
     }
 
     // Create memory for submission queue and PRP lists
-    size_t n_prp_lists = ctrl->page_size / sizeof(nvm_cmd_t);
-    if (ctrl->max_qs < n_prp_lists)
-    {
-        n_prp_lists = ctrl->max_qs;
-    }
+    size_t n_prp_lists = args.queue_size;
 
-    status = nvm_dis_dma_create(&sq_mem, ctrl, ctrl->page_size * (n_prp_lists + 1), 
+    status = nvm_dis_dma_create(&sq_mem, ctrl, 
+            NVM_SQ_PAGES(ctrl, args.queue_size) * ctrl->page_size + ctrl->page_size * (n_prp_lists + 1), 
             SCI_MEMACCESS_HOST_WRITE | SCI_MEMACCESS_DEVICE_READ); 
     if (!nvm_ok(status))
     {
@@ -105,7 +102,7 @@ int main(int argc, char** argv)
     }
 
     // Create queues
-    status = create_queue_pair(aq_ref, &queues, cq_mem, sq_mem);
+    status = create_queue_pair(aq_ref, &queues, cq_mem, sq_mem, args.queue_size);
     if (!nvm_ok(status))
     {
         goto leave;

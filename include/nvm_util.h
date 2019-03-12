@@ -178,30 +178,30 @@ void _nvm_wcb_flush()
  * Calculate number of pages needed for a 
  * submission queue (SQ) with a given size.
  */
-#define NVM_SQ_PAGES(page_size, qs) \
-    ((((uint16_t) ((qs) - 1))* sizeof(nvm_cmd_t)) / (page_size) + 1)
+#define NVM_SQ_PAGES(ctrl_ptr, qs) \
+    ((((uint16_t) ((qs) - 1))* sizeof(nvm_cmd_t)) / (ctrl_ptr)->page_size + 1)
 
 
 /*
  * Calculate number of pages needed for a 
  * completion queue (CQ) with a given size.
  */
-#define NVM_CQ_PAGES(page_size, qs) \
-    ((((uint16_t) ((qs) - 1)) * sizeof(nvm_cpl_t)) / (page_size) + 1)
+#define NVM_CQ_PAGES(ctrl_ptr, qs) \
+    ((((uint16_t) ((qs) - 1)) * sizeof(nvm_cpl_t)) / (ctrl_ptr)->page_size + 1)
 
 
 /*
  * Number of submission queue entries aligned to a page size.
  */
-#define NVM_SQ_SIZE(page_size, num_pages)   \
-    ((page_size) / sizeof(nvm_cmd_t))
+#define NVM_SQ_SIZE(ctrl_ptr, num_pages)   \
+    ((ctrl_ptr)->page_size / sizeof(nvm_cmd_t))
 
 
 /*
  * Number of completion queue entries aligned to a page size.
  */
-#define NVM_CQ_SIZE(page_size, num_pages)   \
-    ((page_size) / sizeof(nvm_cpl_t))
+#define NVM_CQ_SIZE(ctrl_ptr, num_pages)   \
+    ((ctrl_ptr)->page_size / sizeof(nvm_cpl_t))
 
 
 

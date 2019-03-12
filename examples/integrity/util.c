@@ -71,11 +71,11 @@ int create_queue(struct queue* q, nvm_aq_ref ref, const struct queue* cq, uint16
 
     if (cq == NULL)
     {
-        status = nvm_admin_cq_create(ref, &q->queue, qno, q->qmem.dma, 0, NVM_CQ_SIZE(ctrl->page_size, 1));
+        status = nvm_admin_cq_create(ref, &q->queue, qno, q->qmem.dma, 0, NVM_CQ_SIZE(ctrl, 1));
     }
     else
     {
-        status = nvm_admin_sq_create(ref, &q->queue, &cq->queue, qno, q->qmem.dma, 0, NVM_SQ_SIZE(ctrl->page_size, 1));
+        status = nvm_admin_sq_create(ref, &q->queue, &cq->queue, qno, q->qmem.dma, 0, NVM_SQ_SIZE(ctrl, 1));
     }
 
     if (!nvm_ok(status))

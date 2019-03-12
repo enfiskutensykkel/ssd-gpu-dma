@@ -253,10 +253,10 @@ int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, const nvm_
     // Check if a valid queue size was supplied
     if (qs < 2 || qs > 0x10000 || qs > ctrl->max_qs)
     {
-        return NVM_ERR_PACK(NULL, ERANGE);
+        return NVM_ERR_PACK(NULL, EINVAL);
     }
 
-    n_pages = NVM_CQ_PAGES(ctrl->page_size, qs);
+    n_pages = NVM_CQ_PAGES(ctrl, qs);
 
     // We currently only support contiguous memory
     if (n_pages > 1 && !dma->contiguous)
@@ -275,7 +275,7 @@ int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, const nvm_
             || offset > dma->n_ioaddrs 
             || offset + n_pages > dma->n_ioaddrs)
     {
-        return NVM_ERR_PACK(NULL, ERANGE);
+        return NVM_ERR_PACK(NULL, EINVAL);
     }
 
     err = nvm_queue_clear(&queue, ctrl, true, id, qs, 
@@ -348,7 +348,7 @@ int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, 
     // Check if a valid queue size was supplied
     if (qs < 2 || qs > 0x10000)
     {
-        return NVM_ERR_PACK(NULL, ERANGE);
+        return NVM_ERR_PACK(NULL, EINVAL);
     }
 
     // Get controller reference
@@ -361,10 +361,10 @@ int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, 
     // Check if a valid queue size was supplied
     if (qs < 2 || qs > 0x10000 || qs > ctrl->max_qs)
     {
-        return NVM_ERR_PACK(NULL, ERANGE);
+        return NVM_ERR_PACK(NULL, EINVAL);
     }
 
-    n_pages = NVM_SQ_PAGES(ctrl->page_size, qs);
+    n_pages = NVM_SQ_PAGES(ctrl, qs);
 
     // We currently only support contiguous memory
     if (n_pages > 1 && !dma->contiguous)
@@ -383,7 +383,7 @@ int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, 
             || offset > dma->n_ioaddrs 
             || offset + n_pages > dma->n_ioaddrs)
     {
-        return NVM_ERR_PACK(NULL, ERANGE);
+        return NVM_ERR_PACK(NULL, EINVAL);
     }
 
     err = nvm_queue_clear(&queue, ctrl, false, id, qs,

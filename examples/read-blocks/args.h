@@ -14,6 +14,7 @@ struct options
 #else
     const char* controller_path;
 #endif
+    size_t      queue_size;
     size_t      chunk_size;
     uint32_t    namespace_id;
     size_t      num_blocks;

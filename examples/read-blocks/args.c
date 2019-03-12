@@ -20,6 +20,7 @@ static struct option opts[] = {
     { .name = "ascii", .has_arg = no_argument, .flag = NULL, .val = 2 },
     { .name = "identify", .has_arg = no_argument, .flag = NULL, .val = 3 },
     { .name = "chunk", .has_arg = required_argument, .flag = NULL, .val = 's' },
+    { .name = "depth", .has_arg = required_argument, .flag = NULL, .val = 'q' },
     { .name = "write", .has_arg = required_argument, .flag = NULL, .val = 'w' },
     { .name = NULL, .has_arg = no_argument, .flag = NULL, .val = 0 }
 };
@@ -48,6 +49,7 @@ static void show_help(const char* name)
             "    --ctrl         <path>    Specify path to controller.\n"
 #endif
             "    --chunk        <count>   Limit reads to a number of blocks at the time.\n"
+            "    --depth        <count>   Set submission queue depth.\n"
             "    --blocks       <count>   Read specified number of blocks from disk.\n"
             "    --offset       <count>   Start reading at specified block (default 0).\n"
             "    --namespace    <id>      Namespace identifier (default 1).\n"
@@ -63,9 +65,9 @@ static void show_help(const char* name)
 void parse_options(int argc, char** argv, struct options* args)
 {
 #ifdef __DIS_CLUSTER__
-    const char* argstr = ":hc:a:n:b:o:s:w:";
+    const char* argstr = ":hc:a:n:b:o:s:w:q:";
 #else
-    const char* argstr = ":hc:b:n:o:s:w:";
+    const char* argstr = ":hc:b:n:o:s:w:q:";
 #endif
 
     int opt;
@@ -74,11 +76,11 @@ void parse_options(int argc, char** argv, struct options* args)
 
 #ifdef __DIS_CLUSTER__
     args->controller_id = 0;
-    args->chunk_size = (64UL << 20) / 512;
 #else
     args->controller_path = NULL;
-    args->chunk_size = 0;
 #endif
+    args->queue_size = 0;
+    args->chunk_size = 0;
     args->namespace_id = 1;
     args->num_blocks = 0;
     args->offset = 0;
@@ -205,6 +207,15 @@ void parse_options(int argc, char** argv, struct options* args)
                     exit(2);
                 }
                 break;
+
+            case 'q':
+                args->queue_size = strtoul(optarg, &endptr, 0);
+                if (endptr == NULL || *endptr != '\0')
+                {
+                    fprintf(stderr, "Invalid queue depth: `%s'\n", optarg);
+                    exit(2);
+                }
+                break;
         }
     }
 
@@ -234,6 +245,11 @@ void parse_options(int argc, char** argv, struct options* args)
     if (args->chunk_size == 0)
     {
         args->chunk_size = args->num_blocks;
+    }
+
+    if (args->queue_size == 0)
+    {
+        args->queue_size = 64;
     }
 }
 
