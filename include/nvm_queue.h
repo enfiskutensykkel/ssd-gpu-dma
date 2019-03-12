@@ -113,6 +113,11 @@ nvm_cmd_t* nvm_sq_enqueue_n(nvm_queue_t* sq, nvm_cmd_t* last, uint16_t n, uint16
     unsigned char* end = start + (sq->qs * sq->es);
     nvm_cmd_t* cmd = NULL;
 
+    if (n >= sq->qs)
+    {
+        return NULL;
+    }
+
     if (last == NULL)
     {
         cmd = (nvm_cmd_t*) (start + sq->es * i);

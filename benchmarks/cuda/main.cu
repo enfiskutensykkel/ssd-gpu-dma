@@ -90,7 +90,7 @@ void moveBytes(const void* src, size_t srcOffset, void* dst, size_t dstOffset, s
 
 
 __device__ static
-void waitForIoCompletion(nvm_queue_t* cq, nvm_queue_t* sq, uint64_t* errCount)
+void waitForIoCompletion(nvm_queue_t* cq, nvm_queue_t* sq, int* errCode)
 {
     const uint16_t numThreads = blockDim.x;
 
@@ -103,7 +103,9 @@ void waitForIoCompletion(nvm_queue_t* cq, nvm_queue_t* sq, uint64_t* errCount)
 
         if (!NVM_ERR_OK(cpl))
         {
-            *errCount = *errCount + 1;
+            //*errCount = *errCount + 1;
+            *errCode = NVM_ERR_PACK(cpl, 0);
+            return;
         }
     }
 
@@ -218,7 +220,7 @@ static double launchMoveKernelLoop(void* fileMap, BufferPtr destination, size_t 
 
 
 __global__ static
-void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t startBlock, uint64_t* errCount, CmdTime* times)
+void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t startBlock, int* errCode, CmdTime* times)
 {
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
@@ -237,7 +239,7 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
     auto beforeSubmit = clock();
     if (threadNum == 0)
     {
-        *errCount = 0;
+        *errCode = 0;
         nvm_sq_submit(sq);
     }
     __syncthreads();
@@ -251,11 +253,16 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
         beforeSubmit = clock();
         if (threadNum == 0)
         {
-            waitForIoCompletion(&qp->cq, sq, errCount);
+            waitForIoCompletion(&qp->cq, sq, errCode);
             nvm_sq_submit(sq);
         }
         __syncthreads();
         auto afterSync = clock();
+
+        if (*errCode != 0)
+        {
+            return;
+        }
 
         // Move received chunk
         moveBytes(src, bufferOffset * numThreads * chunkSize, dst, currChunk * chunkSize, chunkSize * numThreads);
@@ -281,10 +288,15 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
     // Wait for final buffer to complete
     if (threadNum == 0)
     {
-        waitForIoCompletion(&qp->cq, sq, errCount);
+        waitForIoCompletion(&qp->cq, sq, errCode);
     }
     __syncthreads();
     auto afterSync = clock();
+
+    if (*errCode != 0)
+    {
+        return;
+    }
 
     moveBytes(src, bufferOffset * numThreads * chunkSize, dst, currChunk * chunkSize, chunkSize * numThreads);
     auto afterMove = clock();
@@ -303,7 +315,7 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
 
 
 __global__ static
-void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t startBlock, uint64_t* errCount, CmdTime* times)
+void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* dst, size_t numChunks, uint64_t startBlock, int* errCode, CmdTime* times)
 {
     const uint16_t numThreads = blockDim.x;
     const uint16_t threadNum = threadIdx.x;
@@ -320,7 +332,7 @@ void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
 
     if (threadNum == 0)
     {
-        *errCount = 0;
+        *errCode = 0;
     }
     __syncthreads();
 
@@ -334,10 +346,14 @@ void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
         if (threadNum == 0)
         {
             nvm_sq_submit(sq);
-            waitForIoCompletion(&qp->cq, sq, errCount);
+            waitForIoCompletion(&qp->cq, sq, errCode);
         }
         __syncthreads();
         auto afterSync = clock();
+
+        if (*errCode != 0) {
+            return;
+        }
 
         // Move received chunk
         moveBytes(src, 0, dst, currChunk * chunkSize, chunkSize * numThreads);
@@ -430,8 +446,8 @@ static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, con
     }
 
     // We want to count number of errors
-    uint64_t* ec = nullptr;
-    err = cudaMalloc(&ec, sizeof(uint64_t));
+    int* ec = nullptr;
+    err = cudaMalloc(&ec, sizeof(int));
     if (err != cudaSuccess)
     {
         throw err;
@@ -472,13 +488,13 @@ static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, con
     }
 
     // Check error status
-    uint64_t errorCount = 0;
-    cudaMemcpy(&errorCount, ec, sizeof(uint64_t), cudaMemcpyDeviceToHost);
+    int errorCode = 0;
+    cudaMemcpy(&errorCode, ec, sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(ec);
 
-    if (errorCount != 0)
+    if (errorCode != 0)
     {
-        fprintf(stderr, "WARNING: There were NVM errors\n");
+        fprintf(stderr, "WARNING: There were NVM errors: %s\n", nvm_strerror(errorCode));
     }
 
     if (settings.stats)
@@ -619,7 +635,7 @@ int main(int argc, char** argv)
     sci_smartio_device_t cudaDev;
     if (settings.cudaDeviceId != 0)
     {
-        SCIBorrowDevice(sd, &cudaDev, settings.cudaDeviceId, SCI_FLAG_EXCLUSIVE, &err);
+        SCIBorrowDevice(sd, &cudaDev, settings.cudaDeviceId, 0, &err);
         if (err != SCI_ERR_OK)
         {
             fprintf(stderr, "Failed to get SmartIO device reference for CUDA device: %s\n", SCIGetErrorString(err));
