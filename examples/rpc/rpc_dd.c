@@ -328,14 +328,14 @@ static int create_queues(nvm_aq_ref rpc, uint16_t queue_id, nvm_dma_t* dma, stru
 {
     int status;
 
-    status = nvm_admin_cq_create(rpc, &qp->cq, queue_id, dma, 0, 1);
+    status = nvm_admin_cq_create(rpc, &qp->cq, queue_id, dma, 0, NVM_CQ_SIZE(dma->page_size, 1));
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create IO completion queue (CQ): %s\n", nvm_strerror(status));
         return status;
     }
 
-    status = nvm_admin_sq_create(rpc, &qp->sq, &qp->cq, queue_id, dma, 1, 1);
+    status = nvm_admin_sq_create(rpc, &qp->sq, &qp->cq, queue_id, dma, 1, NVM_SQ_SIZE(dma->page_size, 1));
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create IO submission queue (SQ): %s\n", nvm_strerror(status));

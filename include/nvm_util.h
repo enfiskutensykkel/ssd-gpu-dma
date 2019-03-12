@@ -174,6 +174,37 @@ void _nvm_wcb_flush()
     NVM_PTR_OFFSET((dma_ptr)->vaddr, (dma_ptr)->page_size, (pageno))
 
 
+/*
+ * Calculate number of pages needed for a 
+ * submission queue (SQ) with a given size.
+ */
+#define NVM_SQ_PAGES(page_size, qs) \
+    ((((uint16_t) ((qs) - 1))* sizeof(nvm_cmd_t)) / (page_size) + 1)
+
+
+/*
+ * Calculate number of pages needed for a 
+ * completion queue (CQ) with a given size.
+ */
+#define NVM_CQ_PAGES(page_size, qs) \
+    ((((uint16_t) ((qs) - 1)) * sizeof(nvm_cpl_t)) / (page_size) + 1)
+
+
+/*
+ * Number of submission queue entries aligned to a page size.
+ */
+#define NVM_SQ_SIZE(page_size, num_pages)   \
+    ((page_size) / sizeof(nvm_cmd_t))
+
+
+/*
+ * Number of completion queue entries aligned to a page size.
+ */
+#define NVM_CQ_SIZE(page_size, num_pages)   \
+    ((page_size) / sizeof(nvm_cpl_t))
+
+
+
 /* Standard fields in a command */
 #define NVM_CMD_CID(p)              _REG(p, 2, 16)
 #define NVM_CMD_NSID(p)             _REG(p, 1, 32)

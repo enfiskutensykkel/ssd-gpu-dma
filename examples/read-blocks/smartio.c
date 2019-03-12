@@ -92,9 +92,9 @@ int main(int argc, char** argv)
 
     // Create memory for submission queue and PRP lists
     size_t n_prp_lists = ctrl->page_size / sizeof(nvm_cmd_t);
-    if (ctrl->max_entries < n_prp_lists)
+    if (ctrl->max_qs < n_prp_lists)
     {
-        n_prp_lists = ctrl->max_entries;
+        n_prp_lists = ctrl->max_qs;
     }
 
     status = nvm_dis_dma_create(&sq_mem, ctrl, ctrl->page_size * (n_prp_lists + 1), 

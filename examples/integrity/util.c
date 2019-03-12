@@ -60,7 +60,7 @@ int create_queue(struct queue* q, nvm_aq_ref ref, const struct queue* cq, uint16
     if (cq != NULL)
     {
         size_t n_entries = ctrl->page_size / sizeof(nvm_cmd_t);
-        prp_lists = n_entries <= ctrl->max_entries ? n_entries : ctrl->max_entries;
+        prp_lists = n_entries <= ctrl->max_qs ? n_entries : ctrl->max_qs;
     }
 
     status = create_buffer(&q->qmem, ref, prp_lists * ctrl->page_size + ctrl->page_size);
@@ -71,11 +71,11 @@ int create_queue(struct queue* q, nvm_aq_ref ref, const struct queue* cq, uint16
 
     if (cq == NULL)
     {
-        status = nvm_admin_cq_create(ref, &q->queue, qno, q->qmem.dma, 0, 1);
+        status = nvm_admin_cq_create(ref, &q->queue, qno, q->qmem.dma, 0, NVM_CQ_SIZE(ctrl->page_size, 1));
     }
     else
     {
-        status = nvm_admin_sq_create(ref, &q->queue, &cq->queue, qno, q->qmem.dma, 0, 1);
+        status = nvm_admin_sq_create(ref, &q->queue, &cq->queue, qno, q->qmem.dma, 0, NVM_SQ_SIZE(ctrl->page_size, 1));
     }
 
     if (!nvm_ok(status))

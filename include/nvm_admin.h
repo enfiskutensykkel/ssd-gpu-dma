@@ -53,14 +53,16 @@ int nvm_admin_request_num_queues(nvm_aq_ref ref, uint16_t* n_cqs, uint16_t* n_sq
 /*
  * Create IO completion queue (CQ)
  * Caller must set queue memory to zero manually.
- * If n_pages > 1, DMA memory must be contiguous.
+ *
+ * If number of queue entries (qs) exceeds a page,
+ * DMA memory must be contiguous.
  */
 int nvm_admin_cq_create(nvm_aq_ref ref,                 // AQ pair reference
                         nvm_queue_t* cq,                // CQ descriptor
                         uint16_t id,                    // Queue identifier
                         const nvm_dma_t* dma,           // Queue memory handle
                         size_t page_offset,             // Number of pages to offset into the handle
-                        size_t n_pages);                // Number of pages to use 
+                        size_t qs);                     // Queue size/depth
 
 /*
  * Delete IO completion queue (CQ)
@@ -74,7 +76,9 @@ int nvm_admin_cq_delete(nvm_aq_ref ref, nvm_queue_t* cq);
 /*
  * Create IO submission queue (SQ)
  * Caller must set queue memory to zero manually.
- * If n_pages > 1, DMA memory must be contiguous.
+ *
+ * If number of queue entries (qs) exceeds a page,
+ * DMA memory must be contiguous.
  */
 int nvm_admin_sq_create(nvm_aq_ref ref,                 // AQ pair reference
                         nvm_queue_t* sq,                // SQ descriptor
@@ -82,7 +86,7 @@ int nvm_admin_sq_create(nvm_aq_ref ref,                 // AQ pair reference
                         uint16_t id,                    // Queue identifier
                         const nvm_dma_t* dma,           // Queue memory handle
                         size_t page_offset,             // Number of pages to offset into the handle
-                        size_t n_pages);                // Number of pages to use
+                        size_t qs);                     // Number of pages to use
 
 
 

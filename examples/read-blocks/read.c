@@ -107,7 +107,7 @@ int create_queue_pair(nvm_aq_ref ref, struct queue_pair* qp, nvm_dma_t* cq_mem, 
     }
 
     memset(cq_mem->vaddr, 0, cq_mem->page_size);
-    status = nvm_admin_cq_create(ref, &qp->cq, 2, cq_mem, 0, 1);
+    status = nvm_admin_cq_create(ref, &qp->cq, 2, cq_mem, 0, NVM_CQ_SIZE(cq_mem->page_size, 1));
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create completion queue: %s\n", nvm_strerror(status));
@@ -116,7 +116,7 @@ int create_queue_pair(nvm_aq_ref ref, struct queue_pair* qp, nvm_dma_t* cq_mem, 
 
     memset(sq_mem->vaddr, 0, cq_mem->page_size);
 
-    status = nvm_admin_sq_create(ref, &qp->sq, &qp->cq, 2, sq_mem, 0, 1);
+    status = nvm_admin_sq_create(ref, &qp->sq, &qp->cq, 2, sq_mem, 0, NVM_SQ_SIZE(sq_mem->page_size, 1));
     if (!nvm_ok(status))
     {
         fprintf(stderr, "Failed to create submission queue: %s\n", nvm_strerror(status));

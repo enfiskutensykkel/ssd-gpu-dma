@@ -123,9 +123,9 @@ int nvm_admin_ctrl_info(nvm_aq_ref ref, struct nvm_ctrl_info* info, void* ptr, u
     info->nvme_version = (uint32_t) *VER(ctrl->mm_ptr);
     info->page_size = ctrl->page_size;
     info->db_stride = 1UL << ctrl->dstrd;
-    info->timeout = ctrl->timeout;
+    info->timeout = CAP$TO(ctrl->mm_ptr) * 500UL;
     info->contiguous = !!CAP$CQR(ctrl->mm_ptr);
-    info->max_entries = ctrl->max_entries;
+    info->max_entries = CAP$MQES(ctrl->mm_ptr) + 1;
 
     admin_identify_ctrl(&command, ioaddr);
 
@@ -229,17 +229,40 @@ int nvm_admin_get_log_page(nvm_aq_ref ref, uint32_t ns_id, void* ptr, uint64_t i
 
 
 
-int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, const nvm_dma_t* dma, size_t offset, size_t n_pages)
+int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, const nvm_dma_t* dma, size_t offset, size_t qs)
 {
+    int err;
     nvm_cmd_t command;
     nvm_cpl_t completion;
     nvm_queue_t queue;
-    const size_t cpls_per_page = dma->page_size / sizeof(nvm_cpl_t);
+    size_t n_pages = 0;
 
     // Queue number 0 is reserved for admin queues
     if (id == 0)
     {
         return NVM_ERR_PACK(NULL, EINVAL);
+    }
+
+    // Get controller reference
+    const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
+    if (ctrl == NULL)
+    {
+        return NVM_ERR_PACK(NULL, ENOTTY);
+    }
+
+    // Check if a valid queue size was supplied
+    if (qs < 2 || qs > 0x10000 || qs > ctrl->max_qs)
+    {
+        return NVM_ERR_PACK(NULL, ERANGE);
+    }
+
+    n_pages = NVM_CQ_PAGES(ctrl->page_size, qs);
+
+    // We currently only support contiguous memory
+    if (n_pages > 1 && !dma->contiguous)
+    {
+        dprintf("Non-contiguous queues are not supported\n");
+        return NVM_ERR_PACK(NULL, ENOTSUP);
     }
 
     // Do some sanity checking
@@ -255,29 +278,19 @@ int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, const nvm_
         return NVM_ERR_PACK(NULL, ERANGE);
     }
 
-    // We currently only support contiguous memory
-    if (n_pages > 1 && !dma->contiguous)
-    {
-        dprintf("Non-contiguous queues are not supported\n");
-        return NVM_ERR_PACK(NULL, ENOTSUP);
-    }
-
-    // Get controller reference
-    const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
-    if (ctrl == NULL)
-    {
-        return NVM_ERR_PACK(NULL, ENOTTY);
-    }
-    
-    nvm_queue_clear(&queue, ctrl, true, id, cpls_per_page * n_pages, 
+    err = nvm_queue_clear(&queue, ctrl, true, id, qs, 
             dma->local, NVM_DMA_OFFSET(dma, offset), dma->ioaddrs[offset]);
+    if (err != 0)
+    {
+        return NVM_ERR_PACK(NULL, err);
+    }
 
     memset(&command, 0, sizeof(command));
     memset(&completion, 0, sizeof(completion));
 
     admin_cq_create(&command, &queue, dma->ioaddrs[offset]);
 
-    int err = nvm_raw_rpc(ref, &command, &completion);
+    err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
     {
         dprintf("Creating completion queue failed: %s\n", nvm_strerror(err));
@@ -318,17 +331,46 @@ int nvm_admin_cq_delete(nvm_aq_ref ref, nvm_queue_t* cq)
 
 
 
-int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, uint16_t id, const nvm_dma_t* dma, size_t offset, size_t n_pages)
+int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, uint16_t id, const nvm_dma_t* dma, size_t offset, size_t qs)
 {
+    int err;
     nvm_cmd_t command;
     nvm_cpl_t completion;
     nvm_queue_t queue;
-    const size_t cmds_per_page = dma->page_size / sizeof(nvm_cmd_t);
+    size_t n_pages = 0;
 
     // Queue number 0 is reserved for admin queues
     if (id == 0)
     {
         return NVM_ERR_PACK(NULL, EINVAL);
+    }
+
+    // Check if a valid queue size was supplied
+    if (qs < 2 || qs > 0x10000)
+    {
+        return NVM_ERR_PACK(NULL, ERANGE);
+    }
+
+    // Get controller reference
+    const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
+    if (ctrl == NULL)
+    {
+        return NVM_ERR_PACK(NULL, ENOTTY);
+    }
+
+    // Check if a valid queue size was supplied
+    if (qs < 2 || qs > 0x10000 || qs > ctrl->max_qs)
+    {
+        return NVM_ERR_PACK(NULL, ERANGE);
+    }
+
+    n_pages = NVM_SQ_PAGES(ctrl->page_size, qs);
+
+    // We currently only support contiguous memory
+    if (n_pages > 1 && !dma->contiguous)
+    {
+        dprintf("Non-contiguous queues are not supported\n");
+        return NVM_ERR_PACK(NULL, ENOTSUP);
     }
 
     // Do some sanity checking
@@ -344,28 +386,18 @@ int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, 
         return NVM_ERR_PACK(NULL, ERANGE);
     }
 
-    // We currently only support contiguous memory
-    if (n_pages > 1 && !dma->contiguous)
-    {
-        dprintf("Non-contiguous queues are not supported\n");
-        return NVM_ERR_PACK(NULL, ENOTSUP);
-    }
-
-    // Get controller reference
-    const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
-    if (ctrl == NULL)
-    {
-        return NVM_ERR_PACK(NULL, ENOTTY);
-    }
-
-    nvm_queue_clear(&queue, ctrl, false, id, cmds_per_page * n_pages, 
+    err = nvm_queue_clear(&queue, ctrl, false, id, qs,
             dma->local, NVM_DMA_OFFSET(dma, offset), dma->ioaddrs[offset]);
+    if (err != 0)
+    {
+        return NVM_ERR_PACK(NULL, err);
+    }
 
     memset(&command, 0, sizeof(command));
     memset(&completion, 0, sizeof(completion));
     admin_sq_create(&command, &queue, cq, dma->ioaddrs[offset]);
 
-    int err = nvm_raw_rpc(ref, &command, &completion);
+    err = nvm_raw_rpc(ref, &command, &completion);
     if (!nvm_ok(err))
     {
         dprintf("Creating submission queue failed: %s\n", nvm_strerror(err));

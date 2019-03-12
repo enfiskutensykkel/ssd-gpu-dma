@@ -24,7 +24,7 @@ typedef struct
     size_t                  page_size;      // Memory page size used by the controller (MPS)
     uint8_t                 dstrd;          // Doorbell stride (in encoded form)
     uint64_t                timeout;        // Controller timeout in milliseconds (TO)
-    uint16_t                max_entries;    // Maximum queue entries supported (MQES)
+    uint32_t                max_qs;         // Maximum queue entries supported (MQES)
     size_t                  mm_size;        // Size of memory-mapped region
     volatile void*          mm_ptr;         // Memory-mapped pointer to BAR0 of the physical device
 } nvm_ctrl_t;
@@ -91,7 +91,7 @@ typedef struct __align__(64)
 {
     uint16_t                no;             // Queue number (must be unique per SQ/CQ pair)
     uint16_t                es;             // Queue entry size
-    uint16_t                qs;             // Queue size (number of entries)
+    uint32_t                qs;             // Queue size (number of entries)
     uint16_t                head;           // Queue's head pointer
     uint16_t                tail;           // Queue's tail pointer
     int8_t                  phase;          // Current phase tag
