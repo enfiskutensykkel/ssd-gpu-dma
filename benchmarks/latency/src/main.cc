@@ -34,7 +34,7 @@ static QueuePtr createQueue(const CtrlPtr& ctrl, const QueueParam& qp, Settings&
     uint16_t depth = qp.depth;
     if (depth == 0)
     {
-        depth = ctrl->maxEntries - 1;
+        depth = std::min(ctrl->maxEntries, ctrl->pageSize / sizeof(nvm_cmd_t));
     }
 
     size_t chunk = qp.pages;
@@ -155,7 +155,8 @@ static MemoryPtr readFile(const string& filename, size_t size)
     size_t read = fread(buffer.get(), 1, size, fp);
     if (read < size) 
     {
-        fprintf(stderr, "\nWARNING: Could only read %zu out of %zu bytes from file `%s'\n", read, size, filename.c_str());
+        fprintf(stderr, "\nWARNING: Could only read %zu out of %zu bytes from file `%s' (diff=%zu bytes)\n", 
+                read, size, filename.c_str(), size - read);
     }
     else
     {

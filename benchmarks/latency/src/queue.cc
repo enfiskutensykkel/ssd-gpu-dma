@@ -29,13 +29,13 @@ QueuePair::QueuePair()
 
 QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t pages, DmaPtr cqPtr, DmaPtr sqPtr)
     : no(no)
-    , depth(std::max(std::min(depth, ctrl->maxEntries - 1), (size_t) 1))
+    , depth(depth)
     , pages(std::max(pages, (size_t) 1))
     , controller(ctrl)
     , cqMemory(cqPtr)
     , sqMemory(sqPtr)
 {
-    if (depth > this->depth)
+    if (depth > ctrl->maxEntries)
     {
         throw error("Queue depth is greater than maximum queue size");
     }
@@ -45,22 +45,27 @@ QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t page
         throw error("Chunk size is greater than maximum data transfer size");
     }
 
-    if (sqPtr->n_ioaddrs < 1 + this->depth)
+    if (sqPtr->n_ioaddrs < NVM_SQ_PAGES(ctrl->handle, depth) + depth)
     {
-        throw error("Invalid DMA mapping for submission queue memory");
+        throw error("Submission queue memory is not large enough for queue depth and PRP lists");
+    }
+
+    if (cqPtr->n_ioaddrs < NVM_CQ_PAGES(ctrl->handle, depth))
+    {
+        throw error("Completion queue memory is not large enough for queue depth");
     }
 
     nvm_aq_ref ref = controller->adminReference();
 
-    memset(cqMemory->vaddr, 0, controller->pageSize);
-    int status = nvm_admin_cq_create(ref, &cq, no, cqMemory->vaddr, cqMemory->ioaddrs[0]);
+    memset(cqMemory->vaddr, 0, NVM_CQ_PAGES(ctrl->handle, depth) * controller->pageSize);
+    int status = nvm_admin_cq_create(ref, &cq, no, cqMemory.get(), 0, depth);
     if (!nvm_ok(status))
     {
         throw error("Failed to create completion queue: " + string(nvm_strerror(status)));
     }
 
-    memset(sqMemory->vaddr, 0, controller->pageSize);
-    status = nvm_admin_sq_create(ref, &sq, &cq, no, sqMemory->vaddr, sqMemory->ioaddrs[0]);
+    memset(sqMemory->vaddr, 0, NVM_SQ_PAGES(ctrl->handle, depth) * controller->pageSize);
+    status = nvm_admin_sq_create(ref, &sq, &cq, no, sqMemory.get(), 0, depth);
     if (!nvm_ok(status))
     {
         throw error("Failed to create submission queue: " + string(nvm_strerror(status)));
@@ -71,13 +76,13 @@ QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t page
 
 QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t pages, DmaPtr queueMemory)
     : no(no)
-    , depth(std::max((size_t) 1, std::min(depth, ctrl->maxEntries - 1)))
+    , depth(depth)
     , pages(std::max(pages, (size_t) 1))
     , controller(ctrl)
     , cqMemory(nullptr)
     , sqMemory(queueMemory)
 {
-    if (depth > this->depth)
+    if (depth > ctrl->maxEntries)
     {
         throw error("Queue depth is greater than maximum queue size");
     }
@@ -87,23 +92,25 @@ QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t page
         throw error("Chunk size is greater than maximum data transfer size");
     }
 
-    if (queueMemory->n_ioaddrs < 2 + this->depth)
+    if (queueMemory->n_ioaddrs < NVM_CQ_PAGES(ctrl->handle, depth) + NVM_SQ_PAGES(ctrl->handle, depth) + this->depth)
     {
-        throw error("Invalid DMA mapping for queue memory");
+        throw error("Queue memory is not large enough for queue depth and PRP lists");
     }
 
     nvm_aq_ref ref = controller->adminReference();
 
-    void* cqPtr = NVM_DMA_OFFSET(queueMemory, 1 + this->depth);
-    memset(cqPtr, 0, ctrl->pageSize);
-    int status = nvm_admin_cq_create(ref, &cq, no, cqPtr, queueMemory->ioaddrs[1 + this->depth]);
+    size_t cqOffset = NVM_SQ_PAGES(ctrl->handle, this->depth) + this->depth;
+    void* cqPtr = NVM_DMA_OFFSET(queueMemory, cqOffset);
+
+    memset(cqPtr, 0, NVM_CQ_PAGES(ctrl->handle, this->depth) * ctrl->pageSize);
+    int status = nvm_admin_cq_create(ref, &cq, no, queueMemory.get(), cqOffset, this->depth);
     if (!nvm_ok(status))
     {
         throw error("Failed to create completion queue: " + string(nvm_strerror(status)));
     }
 
-    memset(queueMemory->vaddr, 0, controller->pageSize);
-    status = nvm_admin_sq_create(ref, &sq, &cq, no, queueMemory->vaddr, queueMemory->ioaddrs[0]);
+    memset(queueMemory->vaddr, 0, NVM_SQ_PAGES(ctrl->handle, this->depth) * controller->pageSize);
+    status = nvm_admin_sq_create(ref, &sq, &cq, no, queueMemory.get(), 0, this->depth);
     if (!nvm_ok(status))
     {
         throw error("Failed to create submission queue: " + string(nvm_strerror(status)));
@@ -122,7 +129,13 @@ QueuePair::~QueuePair()
 
 
 LocalQueue::LocalQueue(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t pages)
-    : QueuePair(ctrl, no, depth, pages, allocateBuffer(*ctrl, (2 + depth) * ctrl->pageSize))
+    : QueuePair(
+            ctrl, 
+            no, 
+            depth, 
+            pages, 
+            allocateBuffer(*ctrl, (NVM_CQ_PAGES(ctrl->handle, depth) + NVM_SQ_PAGES(ctrl->handle, depth) + depth) * ctrl->pageSize)
+            )
 {
 }
 
@@ -130,7 +143,13 @@ LocalQueue::LocalQueue(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t pa
 
 #ifndef __DIS_CLUSTER__
 LocalQueue::LocalQueue(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t pages, uint32_t, uint32_t)
-    : QueuePair(ctrl, no, depth, pages, allocateBuffer(*ctrl, (2 + depth) * ctrl->pageSize))
+    : QueuePair(
+            ctrl, 
+            no, 
+            depth, 
+            pages, 
+            allocateBuffer(*ctrl, (NVM_CQ_PAGES(ctrl->handle, depth) + NVM_SQ_PAGES(ctrl->handle, depth) + depth) * ctrl->pageSize)
+            )
 {
 }
 #endif

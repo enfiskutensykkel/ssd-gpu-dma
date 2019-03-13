@@ -251,6 +251,11 @@ int nvm_admin_cq_create(nvm_aq_ref ref, nvm_queue_t* cq, uint16_t id, const nvm_
     }
 
     // Check if a valid queue size was supplied
+    if (qs == 0)
+    {
+        qs = _MIN(dma->page_size / sizeof(nvm_cpl_t), ctrl->max_qs);
+    }
+
     if (qs < 2 || qs > 0x10000 || qs > ctrl->max_qs)
     {
         return NVM_ERR_PACK(NULL, EINVAL);
@@ -345,12 +350,6 @@ int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, 
         return NVM_ERR_PACK(NULL, EINVAL);
     }
 
-    // Check if a valid queue size was supplied
-    if (qs < 2 || qs > 0x10000)
-    {
-        return NVM_ERR_PACK(NULL, EINVAL);
-    }
-
     // Get controller reference
     const nvm_ctrl_t* ctrl = nvm_ctrl_from_aq_ref(ref);
     if (ctrl == NULL)
@@ -359,6 +358,11 @@ int nvm_admin_sq_create(nvm_aq_ref ref, nvm_queue_t* sq, const nvm_queue_t* cq, 
     }
 
     // Check if a valid queue size was supplied
+    if (qs == 0)
+    {
+        qs = _MIN(dma->page_size / sizeof(nvm_cmd_t), ctrl->max_qs);
+    }
+
     if (qs < 2 || qs > 0x10000 || qs > ctrl->max_qs)
     {
         return NVM_ERR_PACK(NULL, EINVAL);

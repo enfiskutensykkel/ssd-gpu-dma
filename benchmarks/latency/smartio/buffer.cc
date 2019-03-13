@@ -16,11 +16,11 @@ using std::string;
 
 
 
-DmaPtr allocateBuffer(const nvm_ctrl_t* ctrl, size_t size, uint32_t adapter, uint32_t segmentId)
+DmaPtr allocateBuffer(const nvm_ctrl_t* ctrl, size_t size, uint32_t, uint32_t)
 {
     nvm_dma_t* dma = nullptr;
 
-    auto err = nvm_dis_dma_create(&dma, ctrl, adapter, segmentId, size);
+    auto err = nvm_dis_dma_create(&dma, ctrl, size, 0);
     if (!nvm_ok(err))
     {
         throw runtime_error(string("Failed to create local segment mapped for controller: ") + nvm_strerror(err));
@@ -50,11 +50,11 @@ DmaPtr allocateBuffer(const Ctrl& ctrl, size_t size, uint32_t segmentId)
 
 
 
-DmaPtr connectBuffer(const nvm_ctrl_t* ctrl, size_t size, uint32_t adapter, uint32_t number)
+DmaPtr connectBuffer(const nvm_ctrl_t* ctrl, size_t size, uint32_t, uint32_t)
 {
     nvm_dma_t* dma = nullptr;
 
-    auto err = nvm_dis_dma_connect(&dma, ctrl, adapter, number, size, true);
+    auto err = nvm_dis_dma_create(&dma, ctrl, size, SCI_MEMACCESS_HOST_WRITE | SCI_MEMACCESS_DEVICE_READ);
     if (!nvm_ok(err))
     {
         throw runtime_error(string("Failed to connect to remote segment: ") + nvm_strerror(err));

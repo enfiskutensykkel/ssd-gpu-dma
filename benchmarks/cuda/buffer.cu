@@ -201,3 +201,23 @@ DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice, uint32_t, 
 }
 #endif
 
+
+
+#ifdef __DIS_CLUSTER__
+DmaPtr createRemoteDma(const nvm_ctrl_t* ctrl, size_t size)
+{
+    nvm_dma_t* dma = nullptr;
+
+    int status = nvm_dis_dma_create(&dma, ctrl, size, SCI_MEMACCESS_HOST_WRITE | SCI_MEMACCESS_DEVICE_READ);
+    if (!nvm_ok(status))
+    {
+        throw error(string("Failed to create device segment: ") + nvm_strerror(status));
+    }
+
+    // TODO: implement this
+    //cudaError_t err = cudaHostRegister(
+
+    return DmaPtr(dma, nvm_dma_unmap);
+}
+#define
+

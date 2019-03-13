@@ -146,11 +146,6 @@ QueueParam::QueueParam(const string& arg)
             {
                 throw error("`" + param[1] + "' is an invalid number of commands (queue depth)");
             }
-
-            if (depth > 64)
-            {
-                throw error("Number of commands (queue depth) must be between 0 and 64");
-            }
         }
         else if (param[0] == "p" || param[0] == "pages" || param[0] == "prps" || param[0] == "chunk")
         {

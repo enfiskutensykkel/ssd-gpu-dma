@@ -20,7 +20,7 @@ using std::string;
 
 
 
-CtrlManager::CtrlManager(uint64_t fdid, uint32_t adapter, uint32_t segmentId, bool admin, uint32_t ns)
+CtrlManager::CtrlManager(uint64_t fdid, uint32_t adapter, uint32_t, bool admin, uint32_t ns)
     : controller(nullptr)
     , fileDescriptor(-1)
 {
@@ -31,14 +31,14 @@ CtrlManager::CtrlManager(uint64_t fdid, uint32_t adapter, uint32_t segmentId, bo
     try
     {
         // Get controller reference
-        int status = nvm_dis_ctrl_init(&ctrl, fdid, adapter);
+        int status = nvm_dis_ctrl_init(&ctrl, fdid);
         if (!nvm_ok(status))
         {
             throw error("Failed to get controller reference: " + string(nvm_strerror(status)));
         }
 
         // Create and map queue memory for controller
-        status = nvm_dis_dma_create(&dma, ctrl, adapter, segmentId, 3 * ctrl->page_size);
+        status = nvm_dis_dma_create(&dma, ctrl, 3 * ctrl->page_size, 0);
         if (!nvm_ok(status))
         {
             throw error("Failed to create admin queue memory: " + string(nvm_strerror(status)));

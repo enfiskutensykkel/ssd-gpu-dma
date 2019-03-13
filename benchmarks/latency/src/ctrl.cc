@@ -68,7 +68,7 @@ Ctrl::Ctrl(uint64_t fdid, uint32_t adapter, nvm_ctrl_t* controller, DmaPtr memor
     blockSize = nsInfo.lba_data_size;
     chunkSize = ctrlInfo.max_data_size;
     numQueues = std::min(numSQs, numCQs);
-    maxEntries = std::min((size_t) ctrlInfo.max_entries, ctrlInfo.page_size / ctrlInfo.sq_entry_size);
+    maxEntries = ctrlInfo.max_entries;
 }
 
 

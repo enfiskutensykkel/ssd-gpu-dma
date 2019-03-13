@@ -27,12 +27,12 @@ using std::logic_error;
  */
 struct Device
 {
-    int             cudaDevice;
-    uint64_t        fdid;
-    uint32_t        adapter;
-    sci_desc_t      descriptor;
-    sci_device_t    device;
-    sci_dev_info_t  info;
+    int                         cudaDevice;
+    uint64_t                    fdid;
+    uint32_t                    adapter;
+    sci_desc_t                  descriptor;
+    sci_smartio_device_t        device;
+    sci_smartio_device_info_t   info;
 };
 
 
@@ -83,8 +83,8 @@ static void borrowDevice(Device* device, uint64_t fdid, uint32_t adapter, int cu
         throw error("Failed to borrow device: " + string(errstr));
     }
 
-    sci_query_dev_t query;
-    query.global_devid = fdid;
+    sci_smartio_query_device_t query;
+    query.fdid = fdid;
     query.subcommand = SCI_Q_DEVICE_INFO;
     query.data = (void*) &device->info;
 
@@ -122,8 +122,8 @@ static DevPtr lookupDevice(uint64_t fdid, uint32_t adapter)
     try
     {
         int domain = 0; // FIXME: Implement this
-        int bus = (device->info.bdf >> 8) & 0xff;
-        int devfn = (device->info.bdf >> 3) & 0x1f;
+        int bus = (device->info.local_bdf >> 8) & 0xff;
+        int devfn = (device->info.local_bdf >> 3) & 0x1f;
 
         device->cudaDevice = Gpu::findDevice(domain, bus, devfn);
     }
@@ -154,7 +154,7 @@ Gpu::Gpu(uint64_t fdid, uint32_t adapter)
 
 
 
-DmaPtr Gpu::allocateBuffer(const Ctrl& ctrl, size_t size, uint32_t segmentId) const
+DmaPtr Gpu::allocateBuffer(const Ctrl& ctrl, size_t size, uint32_t) const
 {
     if (ctrl.fdid == 0)
     {
@@ -165,7 +165,7 @@ DmaPtr Gpu::allocateBuffer(const Ctrl& ctrl, size_t size, uint32_t segmentId) co
     void* pointer = getDevicePointer(memory);
 
     nvm_dma_t* dma = nullptr;
-    int status = nvm_dis_dma_map_device(&dma, ctrl.handle, adapter, segmentId, pointer, size);
+    int status = nvm_dis_dma_map_device(&dma, ctrl.handle, pointer, size);
     if (!nvm_ok(status))
     {
         throw error("Failed to map device memory for controller: " + string(nvm_strerror(status)));
@@ -296,7 +296,7 @@ DmaPtr Gpu::allocateBufferAndMap(const Ctrl& ctrl, size_t size, uint32_t segment
         goto removeSegment;
     }
 
-    SCIConnectDeviceMemory(segment->device.descriptor, &segment->bar, adapter, segment->device.device, 1, 0, SCI_FLAG_BAR, &err);
+    SCIConnectDeviceSegment(segment->device.device, &segment->bar, 1, SCI_MEMTYPE_BAR, nullptr, nullptr, 0, &err);
     if (err != SCI_ERR_OK)
     {
         errStr = "Failed to connect to remote device memory: " + string(SCIGetErrorString(err));

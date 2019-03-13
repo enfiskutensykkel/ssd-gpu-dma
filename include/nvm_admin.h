@@ -56,6 +56,8 @@ int nvm_admin_request_num_queues(nvm_aq_ref ref, uint16_t* n_cqs, uint16_t* n_sq
  *
  * If number of queue entries (qs) exceeds a page,
  * DMA memory must be contiguous.
+ *
+ * If qs is 0, the API will use one page for queue memory.
  */
 int nvm_admin_cq_create(nvm_aq_ref ref,                 // AQ pair reference
                         nvm_queue_t* cq,                // CQ descriptor
@@ -79,6 +81,8 @@ int nvm_admin_cq_delete(nvm_aq_ref ref, nvm_queue_t* cq);
  *
  * If number of queue entries (qs) exceeds a page,
  * DMA memory must be contiguous.
+ *
+ * If qs is 0, the API will use one page for queue memory.
  */
 int nvm_admin_sq_create(nvm_aq_ref ref,                 // AQ pair reference
                         nvm_queue_t* sq,                // SQ descriptor

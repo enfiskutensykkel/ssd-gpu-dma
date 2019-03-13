@@ -100,10 +100,12 @@ static Event sendWindow(const TransferPtr& transfer, ChunkPtr& from, const Chunk
     const nvm_dma_t* queueMemory = queue->getQueueMemory().get();
     const nvm_dma_t* buffer = transfer->buffer->buffer.get();
 
+    const size_t prp_offset = NVM_SQ_PAGES(queue->getController().handle, queue->depth);
+
     memset(&local, 0, sizeof(local));
 
     // Fill up queue with commands
-    for (numCmds = 0; numCmds < queue->depth && from != to; ++numCmds, ++from)
+    for (numCmds = 0; numCmds < queue->depth - 1 && from != to; ++numCmds, ++from)
     {
         nvm_cmd_t* cmd = nvm_sq_enqueue(&queue->sq);
         if (cmd == nullptr)
@@ -112,13 +114,13 @@ static Event sendWindow(const TransferPtr& transfer, ChunkPtr& from, const Chunk
         }
 
         const Chunk& chunk = *from;
-        void* prpListPtr = NVM_DMA_OFFSET(queueMemory, 1 + numCmds);
-        uint64_t prpListAddr = queueMemory->ioaddrs[1 + numCmds];
+        nvm_prp_list_t prpList = NVM_PRP_LIST(queueMemory, prp_offset + numCmds);
 
         // Build command locally
         nvm_cmd_header(&local, NVM_DEFAULT_CID(&queue->sq) * queue->no, write ? NVM_IO_WRITE : NVM_IO_READ, ns);
         nvm_cmd_rw_blks(&local, chunk.startBlock, chunk.numBlocks);
-        nvm_cmd_data(&local, buffer->page_size, chunk.numPages, prpListPtr, prpListAddr, &buffer->ioaddrs[chunk.startPage]);
+        
+        nvm_cmd_data(&local, 1, &prpList, chunk.numPages, &buffer->ioaddrs[chunk.startPage]);
 
         // Write command to remote memory in one go (write-combining)
         *cmd = local;
@@ -180,6 +182,8 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
     const auto op = write ? NVM_IO_WRITE : NVM_IO_READ;
     const auto ns = settings.nvmNamespace;
 
+    const size_t prpOffset = NVM_SQ_PAGES(queue->getController().handle, queue->depth);
+
     // Synch with other threads
     //barrier->wait();
 
@@ -202,12 +206,12 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
             nvm_cmd_t* cmd = nullptr;
 
             // Queue is full, submit what we have and wait 
-            if (numCmds == queue->depth || (cmd = nvm_sq_enqueue(sq)) == nullptr)
+            if (numCmds == queue->depth - 1 || (cmd = nvm_sq_enqueue(sq)) == nullptr)
             {
                 nvm_sq_submit(sq);
                 std::this_thread::yield();
 
-                while (numCmds == queue->depth || (cmd = nvm_sq_enqueue(sq)) == nullptr)
+                while (numCmds == queue->depth - 1 || (cmd = nvm_sq_enqueue(sq)) == nullptr)
                 {
                     numCpls = consumeCompletions(queue);
                     numCmds -= numCpls;
@@ -215,13 +219,12 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
                 }
             }
 
-            void* prpListPtr = NVM_DMA_OFFSET(sqMemory, 1 + prpListIdx);
-            uint64_t prpListAddr = sqMemory->ioaddrs[1 + prpListIdx];
+            nvm_prp_list_t prpList = NVM_PRP_LIST(sqMemory, prpOffset + prpListIdx);
 
             // Construct command locally
             nvm_cmd_header(&local, NVM_DEFAULT_CID(sq), op, ns);
             nvm_cmd_rw_blks(&local, chunk.startBlock, chunk.numBlocks);
-            nvm_cmd_data(&local, buffer->page_size, chunk.numPages, prpListPtr, prpListAddr, &buffer->ioaddrs[chunk.startPage]);
+            nvm_cmd_data(&local, 1, &prpList, chunk.numPages, &buffer->ioaddrs[chunk.startPage]);
 
             // Write local command to remote memory pointer in one go (write combining)
             *cmd = local;

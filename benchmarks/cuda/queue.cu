@@ -35,7 +35,7 @@ __host__ DmaPtr prepareQueuePair(QueuePair& qp, const Controller& ctrl, const Se
     qp.prpListIoAddr = qmem->ioaddrs[2];
     
     // Create completion queue
-    int status = nvm_admin_cq_create(ctrl.aq_ref, &qp.cq, 1, qmem.get(), 0, 1);
+    int status = nvm_admin_cq_create(ctrl.aq_ref, &qp.cq, 1, qmem.get(), 0, 0);
     if (!nvm_ok(status))
     {
         throw error(string("Failed to create completion queue: ") + nvm_strerror(status));
@@ -51,7 +51,7 @@ __host__ DmaPtr prepareQueuePair(QueuePair& qp, const Controller& ctrl, const Se
     qp.cq.db = (volatile uint32_t*) devicePtr;
 
     // Create submission queue
-    status = nvm_admin_sq_create(ctrl.aq_ref, &qp.sq, &qp.cq, 1, qmem.get(), 1, 1);
+    status = nvm_admin_sq_create(ctrl.aq_ref, &qp.sq, &qp.cq, 1, qmem.get(), 1, 0);
     if (!nvm_ok(status))
     {
         throw error(string("Failed to create submission queue: ") + nvm_strerror(status));
