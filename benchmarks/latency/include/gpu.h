@@ -25,6 +25,7 @@ struct Gpu final
         const int       cudaDevice; /* CUDA device ID */
         const uint64_t  fdid;       /* Fabric device ID (used by SmartIO) */
         const uint32_t  adapter;    /* NTB adapter number where GPU can be reached */
+        const uint32_t  nodeId;     /* DIS node identifier */
 
 
         /* Get a string representation of the BDF */

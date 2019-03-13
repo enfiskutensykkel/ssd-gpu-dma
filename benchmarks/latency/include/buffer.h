@@ -118,8 +118,8 @@ DmaPtr allocateBuffer(const Ctrl& controller, size_t size, uint32_t segmentId);
 
 
 #ifdef __DIS_CLUSTER__
-DmaPtr connectBuffer(const nvm_ctrl_t* controller, size_t size, uint32_t adapter, uint32_t remoteSegmentId);
-DmaPtr connectBuffer(const Ctrl& controller, size_t size, uint32_t adapter, uint32_t remoteSegmentId);
+DmaPtr deviceBuffer(const nvm_ctrl_t* controller, size_t size);
+DmaPtr deviceBuffer(const Ctrl& controller, size_t size);
 #endif
 
 

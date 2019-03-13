@@ -88,7 +88,8 @@ static void prepareQueues(QueueMap& queues, const CtrlPtr& ctrl, Settings& setti
 
         if (settings.transferInfo)
         {
-            fprintf(stderr, "- QUEUE no=%02u location=%s cmds=%zu prps=%zu", queue->no, queue->type().c_str(), queue->depth, queue->pages);
+            fprintf(stderr, "- QUEUE no=%02u location=%s node=%u cmds=%zu prps=%zu", 
+                    queue->no, queue->type().c_str(), queue->getNodeId(), queue->depth, queue->pages);
 
             const GpuQueue* gpuQueue = dynamic_cast<const GpuQueue*>(queue.get());
             if (gpuQueue != nullptr)
@@ -218,7 +219,7 @@ static void prepareTransfers(TransferMap& transfers, const QueueMap& queues, con
     if (settings.transferInfo)
     {
         fprintf(stderr, "\n");
-        fprintf(stderr, "- CTRL fdid=%lx namespace=%u total-blocks=%zu total-prps=%zu\n", ctrl.fdid, ctrl.namespaceId, numBlocks, totalPages);
+        fprintf(stderr, "- CTRL fdid=%lx node=%u namespace=%u total-blocks=%zu total-prps=%zu\n", ctrl.fdid, ctrl.nodeId, ctrl.namespaceId, numBlocks, totalPages);
     }
 
     // Take GPU reference 
@@ -234,7 +235,7 @@ static void prepareTransfers(TransferMap& transfers, const QueueMap& queues, con
 
     if (gpu != nullptr && settings.transferInfo)
     {
-        fprintf(stderr, "- GPU device=%d fdid=%lx bdf=%s name=%s\n", gpu->cudaDevice, gpu->fdid, gpu->deviceBdf().c_str(), gpu->deviceName().c_str());
+        fprintf(stderr, "- GPU device=%d fdid=%lx node=%u bdf=%s name=%s\n", gpu->cudaDevice, gpu->fdid, gpu->nodeId, gpu->deviceBdf().c_str(), gpu->deviceName().c_str());
     }
 
     // If sequential access, create a single buffer

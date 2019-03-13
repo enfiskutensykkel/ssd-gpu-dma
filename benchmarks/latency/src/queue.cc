@@ -34,6 +34,7 @@ QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t page
     , controller(ctrl)
     , cqMemory(cqPtr)
     , sqMemory(sqPtr)
+    , nodeId(0)
 {
     if (depth > ctrl->maxEntries)
     {
@@ -81,6 +82,7 @@ QueuePair::QueuePair(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t page
     , controller(ctrl)
     , cqMemory(nullptr)
     , sqMemory(queueMemory)
+    , nodeId(0)
 {
     if (depth > ctrl->maxEntries)
     {
@@ -153,6 +155,7 @@ LocalQueue::LocalQueue(const CtrlPtr& ctrl, uint16_t no, size_t depth, size_t pa
 {
 }
 #endif
+
 
 
 string LocalQueue::type() const 

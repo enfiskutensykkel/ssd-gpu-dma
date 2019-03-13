@@ -25,6 +25,7 @@ struct Ctrl final
         const nvm_ctrl_t*   handle;         /* Read only-handle */
         const uint64_t      fdid;           /* SmartIO fabric device identifier */
         const uint32_t      adapter;        /* SmartIO NTB adapter */
+        const uint32_t      nodeId;         /* DIS node identifier */
         uint32_t            namespaceId;    /* NVM namespace identifier */
         uint64_t            namespaceSize;  /* Size of namespace in blocks */
         size_t              pageSize;       /* Controller page size */
@@ -46,7 +47,7 @@ struct Ctrl final
         Ctrl(Ctrl&&) noexcept = delete;
         Ctrl& operator=(const Ctrl&) = delete;
         Ctrl& operator=(const Ctrl&&) noexcept = delete;
-        Ctrl(uint64_t fdid, uint32_t adapter, nvm_ctrl_t* controller, DmaPtr memory, nvm_dma_t* dma, nvm_aq_ref ref, uint32_t ns);
+        Ctrl(uint64_t fdid, uint32_t node, uint32_t adapter, nvm_ctrl_t* controller, DmaPtr memory, nvm_dma_t* dma, nvm_aq_ref ref, uint32_t ns);
 };
 
 

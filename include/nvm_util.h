@@ -246,4 +246,27 @@ const nvm_ctrl_t* nvm_ctrl_from_dma(const nvm_dma_t* dma);
 }
 #endif
 
+
+
+#if defined( __DIS_CLUSTER__ )
+#ifdef __cplusplus
+extern "C" {
+#endif
+/*
+ * Get cluster node identifier from map.
+ */
+uint32_t nvm_dis_node_from_dma(const nvm_dma_t* dma);
+
+
+/*
+ * Get cluster node identifier from controller.
+ */
+uint32_t nvm_dis_node_from_ctrl(const nvm_ctrl_t* ctrl);
+
+#ifdef __cplusplus
+}
+#endif
+#endif
+
+
 #endif /* __NVM_UTIL_H__ */

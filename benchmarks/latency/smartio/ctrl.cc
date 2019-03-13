@@ -60,7 +60,7 @@ CtrlManager::CtrlManager(uint64_t fdid, uint32_t adapter, uint32_t, bool admin, 
         }
 
         // Create controller reference wrapper
-        auto* ptr = new (std::nothrow) Ctrl(fdid, adapter, ctrl, nullptr, dma, ref, ns);
+        auto* ptr = new (std::nothrow) Ctrl(fdid, nvm_dis_node_from_ctrl(ctrl), adapter, ctrl, nullptr, dma, ref, ns);
         if (ptr == nullptr)
         {
             throw error("Failed to allocate shared controller reference");

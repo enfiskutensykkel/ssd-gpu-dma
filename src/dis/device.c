@@ -590,3 +590,38 @@ int nvm_dis_ctrl_map_p2p_device(const nvm_ctrl_t* ctrl, sci_smartio_device_t dev
     return 0;
 }
 
+
+
+uint32_t nvm_dis_node_from_ctrl(const nvm_ctrl_t* ctrl)
+{
+    int err;
+    struct controller* c;
+    sci_smartio_device_info_t info;
+
+    if (ctrl == NULL)
+    {
+        return 0;
+    }
+
+    if (_nvm_ctrl_type(ctrl) != DEVICE_TYPE_SMARTIO)
+    {
+        return 0;
+    }
+
+    c = _nvm_ctrl_get(ctrl);
+    if (c == NULL)
+    {
+        return 0;
+    }
+
+    err = query_device(c->device, &info);
+    _nvm_ctrl_put(c);
+
+    if (err == 0)
+    {
+        return info.nodeid;
+    }
+
+    return 0;
+}
+

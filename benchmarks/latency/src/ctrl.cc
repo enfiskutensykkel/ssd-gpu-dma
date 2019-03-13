@@ -27,7 +27,7 @@ using std::string;
 
 
 
-Ctrl::Ctrl(uint64_t fdid, uint32_t adapter, nvm_ctrl_t* controller, DmaPtr memory, nvm_dma_t* dma, nvm_aq_ref ref, uint32_t ns)
+Ctrl::Ctrl(uint64_t fdid, uint32_t node, uint32_t adapter, nvm_ctrl_t* controller, DmaPtr memory, nvm_dma_t* dma, nvm_aq_ref ref, uint32_t ns)
     : writeHandle(controller)
     , adminQueueMemory(memory)
     , adminQueues(dma)
@@ -35,6 +35,7 @@ Ctrl::Ctrl(uint64_t fdid, uint32_t adapter, nvm_ctrl_t* controller, DmaPtr memor
     , handle(controller)
     , fdid(fdid)
     , adapter(adapter)
+    , nodeId(node)
     , namespaceId(ns)
 {
     // Identify cntroller
@@ -121,7 +122,7 @@ CtrlManager::CtrlManager(const string& path, uint32_t ns)
         }
 
         // Create controller reference wrapper
-        auto* ptr = new (std::nothrow) Ctrl(0, 0, ctrl, queueMemory, queueMemory.get(), ref, ns);
+        auto* ptr = new (std::nothrow) Ctrl(0, 0, 0, ctrl, queueMemory, queueMemory.get(), ref, ns);
         if (ptr == nullptr)
         {
             throw error("Failed to allocate shared controller reference");

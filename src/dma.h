@@ -47,4 +47,11 @@ int _nvm_dma_init(nvm_dma_t** handle,
                   va_range_free_t release);
 
 
+
+/*
+ * Get the internal virtual address range from a handle.
+ */
+const struct va_range* _nvm_dma_va(const nvm_dma_t* handle);
+
+
 #endif /* __NVM_INTERNAL_DMA_H__ */

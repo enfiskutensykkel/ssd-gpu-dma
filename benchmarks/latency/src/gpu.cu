@@ -25,6 +25,7 @@ Gpu::Gpu(int device)
     , cudaDevice(device)
     , fdid(0)
     , adapter(0)
+    , nodeId(0)
 {
     // Some sanity checking
     setDevice();
@@ -208,6 +209,7 @@ Gpu::Gpu(uint64_t, uint32_t)
     : cudaDevice(-1)
     , fdid(0)
     , adapter(0)
+    , nodeId(0)
 {
     throw std::logic_error("SmartIO not supported");
 }

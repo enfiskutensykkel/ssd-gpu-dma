@@ -53,13 +53,20 @@ struct QueuePair
             return sqMemory;
         }
 
-    protected:
-        QueuePair();
+        uint32_t getNodeId() const
+        {
+            return nodeId;
+        }
 
     private:
         CtrlPtr controller;
         DmaPtr cqMemory;
+
+    protected:
         DmaPtr sqMemory;
+        uint32_t nodeId;
+
+        QueuePair();
 };
 
 

@@ -147,6 +147,7 @@ Gpu::Gpu(uint64_t fdid, uint32_t adapter)
     , cudaDevice(device->cudaDevice)
     , fdid(fdid)
     , adapter(adapter)
+    , nodeId(device->info.nodeid)
 {
     // Some sanity checking
     setDevice();

@@ -458,3 +458,20 @@ const nvm_ctrl_t* nvm_ctrl_from_dma(const nvm_dma_t* handle)
     return NULL;
 }
 
+
+
+const struct va_range* _nvm_dma_va(const nvm_dma_t* handle)
+{
+    if (handle != NULL)
+    {
+        const struct container* dma = _nvm_container_of(handle, struct container, handle);
+
+        if (dma->map != NULL)
+        {
+            return dma->map->va;
+        }
+    }
+
+    return NULL;
+}
+

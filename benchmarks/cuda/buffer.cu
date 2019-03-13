@@ -219,5 +219,5 @@ DmaPtr createRemoteDma(const nvm_ctrl_t* ctrl, size_t size)
 
     return DmaPtr(dma, nvm_dma_unmap);
 }
-#define
+#endif
 

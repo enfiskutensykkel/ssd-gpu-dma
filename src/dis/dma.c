@@ -622,3 +622,47 @@ int nvm_dis_dma_map_device(nvm_dma_t** map, const nvm_ctrl_t* ctrl, void* devptr
 }
 #endif
 
+
+
+uint32_t nvm_dis_node_from_dma(const nvm_dma_t* handle)
+{
+    if (handle != NULL)
+    {
+        const struct va_range* va;
+        const nvm_ctrl_t* ctrl;
+
+        ctrl = nvm_ctrl_from_dma(handle);
+        if (ctrl == NULL || _nvm_ctrl_type(ctrl) != DEVICE_TYPE_SMARTIO)
+        {
+            return 0;
+        }
+       
+        va = _nvm_dma_va(handle);
+        if (va == NULL || va->n_pages != 1)
+        {
+            return 0;
+        }
+
+        if (va->remote)
+        {
+            const struct remote_segment* rseg = _nvm_container_of(va, struct remote_segment, range);
+
+            return SCIGetRemoteSegmentNodeId(rseg->segment);
+        }
+        else
+        {
+            sci_error_t err;
+            uint32_t node_id = 0;
+            const struct local_segment* lseg = _nvm_container_of(va, struct local_segment, range);
+
+            SCIGetLocalNodeId(lseg->adapter, &node_id, 0, &err);
+            if (err == SCI_ERR_OK)
+            {
+                return node_id;
+            }
+        }
+    }
+
+    return 0;
+}
+

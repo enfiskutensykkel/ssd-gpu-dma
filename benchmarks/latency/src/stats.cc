@@ -182,10 +182,11 @@ static string memlocString(const QueuePtr& queue)
 
 static void printGpuMetadata(FILE* fp, const Gpu& gpu)
 {
-    fprintf(fp, "### gpu[%d]: device=%d; fdid=%lx; bdf=%s; name='%s';\n",
+    fprintf(fp, "### gpu[%d]: device=%d; fdid=%lx; node=%u; bdf=%s; name='%s';\n",
         gpu.cudaDevice,
         gpu.cudaDevice,
         gpu.fdid,
+        gpu.nodeId,
         gpu.deviceBdf().c_str(),
         gpu.deviceName().c_str());
 }
@@ -200,14 +201,15 @@ static void showTransferMetadata(FILE* fp, const TransferMap& transfers, const S
         const auto queueNo = tp.first;
         const auto& queue = tp.second->queue;
 
-        fprintf(fp, "### queue[%x]: no=%x; cmds=%zu; prps=%zu; transfer-size=%zu; remote=%s; memory=%s;\n",
+        fprintf(fp, "### queue[%x]: no=%x; cmds=%zu; prps=%zu; transfer-size=%zu; remote=%s; memory=%s; node=%u;\n",
                 queueNo,
                 queue->no,
                 queue->depth,
                 queue->pages,
                 queue->pages * ctrl.pageSize,
                 queue->location() != QueueLocation::LOCAL ? "true" : "false",
-                memlocString(queue).c_str());
+                memlocString(queue).c_str(),
+                queue->getNodeId());
     }
 
     // Print GPU metadata
@@ -261,8 +263,9 @@ static void showTransferMetadata(FILE* fp, const TransferMap& transfers, const S
         ctrlString = s.str();
     }
 
-    fprintf(fp, "### benchmark: ctrl=%s; block-size=%zu; prp-size=%zu; type=%s; write=%s; verified=%s; parallel=%s; shared=%s; random=%s; repeat=%zu; iterations=%zu\n",
+    fprintf(fp, "### benchmark: ctrl=%s; ctrl-node=%u; block-size=%zu; prp-size=%zu; type=%s; write=%s; verified=%s; parallel=%s; shared=%s; random=%s; repeat=%zu; iterations=%zu\n",
             ctrlString.c_str(),
+            ctrl.nodeId,
             ctrl.blockSize,
             ctrl.pageSize,
             settings.latency ? "latency" : "bandwidth",
