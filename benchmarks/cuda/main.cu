@@ -608,15 +608,6 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    SCIRegisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, SCI_FLAG_PCIE_REQUESTER_GLOBAL, &err);
-    if (err != SCI_ERR_OK)
-    {
-        fprintf(stderr, "Failed to register PCI requester: %s\n", SCIGetErrorString(err));
-        SCIClose(sd, 0, &err);
-        return 1;
-    }
-    sleep(1); // FIXME: Hack due to race condition in SmartIO
-
     sci_smartio_device_t cudaDev;
     if (settings.cudaDeviceId != 0)
     {
@@ -626,6 +617,17 @@ int main(int argc, char** argv)
             fprintf(stderr, "Failed to get SmartIO device reference for CUDA device: %s\n", SCIGetErrorString(err));
             return 1;
         }
+    }
+    else
+    {
+        SCIRegisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, SCI_FLAG_PCIE_REQUESTER_GLOBAL, &err);
+        if (err != SCI_ERR_OK)
+        {
+            fprintf(stderr, "Failed to register PCI requester: %s\n", SCIGetErrorString(err));
+            SCIClose(sd, 0, &err);
+            return 1;
+        }
+        sleep(1); // FIXME: Hack due to race condition in SmartIO
     }
 #endif
 
@@ -738,7 +740,10 @@ int main(int argc, char** argv)
     {
         SCIReturnDevice(cudaDev, 0, &err);
     }
-    SCIUnregisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, 0, &err);
+    else
+    {
+        SCIUnregisterPCIeRequester(sd, settings.adapter, settings.bus, settings.devfn, 0, &err);
+    }
     SCIClose(sd, 0, &err);
     SCITerminate();
 #endif
