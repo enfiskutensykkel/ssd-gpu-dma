@@ -82,10 +82,10 @@ void moveBytes(const void* src, size_t srcOffset, void* dst, size_t dstOffset, s
     const ulong4* source = (ulong4*) (((const unsigned char*) src) + srcOffset);
     ulong4* destination = (ulong4*) (((unsigned char*) dst) + dstOffset);
 
-    for (size_t i = 0, n = size / sizeof(ulong4); i < n; i += numThreads)
-    {
-        destination[i + threadNum] = source[i + threadNum];
-    }
+//    for (size_t i = 0, n = size / sizeof(ulong4); i < n; i += numThreads)
+//    {
+//        destination[i + threadNum] = source[i + threadNum];
+//    }
 }
 
 
@@ -105,7 +105,6 @@ void waitForIoCompletion(nvm_queue_t* cq, nvm_queue_t* sq, int* errCode)
         {
             //*errCount = *errCount + 1;
             *errCode = NVM_ERR_PACK(cpl, 0);
-            return;
         }
     }
 
@@ -259,11 +258,6 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
         __syncthreads();
         auto afterSync = clock();
 
-        if (*errCode != 0)
-        {
-            return;
-        }
-
         // Move received chunk
         moveBytes(src, bufferOffset * numThreads * chunkSize, dst, currChunk * chunkSize, chunkSize * numThreads);
         auto afterMove = clock();
@@ -292,11 +286,6 @@ void readDoubleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
     }
     __syncthreads();
     auto afterSync = clock();
-
-    if (*errCode != 0)
-    {
-        return;
-    }
 
     moveBytes(src, bufferOffset * numThreads * chunkSize, dst, currChunk * chunkSize, chunkSize * numThreads);
     auto afterMove = clock();
@@ -350,10 +339,6 @@ void readSingleBuffered(QueuePair* qp, const uint64_t ioaddr, void* src, void* d
         }
         __syncthreads();
         auto afterSync = clock();
-
-        if (*errCode != 0) {
-            return;
-        }
 
         // Move received chunk
         moveBytes(src, 0, dst, currChunk * chunkSize, chunkSize * numThreads);
