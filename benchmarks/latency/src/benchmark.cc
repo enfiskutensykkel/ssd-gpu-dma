@@ -37,10 +37,10 @@ static inline size_t consumeCompletions(const QueuePair* queue)
     nvm_cpl_t* cpl = nullptr;
     size_t numCpls = 0;
 
-    if (nvm_cq_poll(cq) == nullptr)
-    {
-        std::this_thread::yield();
-    }
+    //if (nvm_cq_poll(cq) == nullptr)
+    //{
+    //    std::this_thread::yield();
+    //}
 
     while ((cpl = nvm_cq_dequeue(cq)) != nullptr)
     {
@@ -104,6 +104,8 @@ static Event sendWindow(const TransferPtr& transfer, ChunkPtr& from, const Chunk
 
     memset(&local, 0, sizeof(local));
 
+    auto before = std::chrono::high_resolution_clock::now();
+
     // Fill up queue with commands
     for (numCmds = 0; numCmds < queue->depth - 1 && from != to; ++numCmds, ++from)
     {
@@ -128,9 +130,8 @@ static Event sendWindow(const TransferPtr& transfer, ChunkPtr& from, const Chunk
         numBlocks += chunk.numBlocks;
     }
 
-    auto before = std::chrono::high_resolution_clock::now();
     nvm_sq_submit(&queue->sq);
-    std::this_thread::yield();
+    //std::this_thread::yield();
 
     // Wait for all completions
     for (size_t i = 0; i < numCmds; i += consumeCompletions(queue));
