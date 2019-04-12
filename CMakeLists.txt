@@ -286,9 +286,12 @@ add_subdirectory ("${samples_root}/integrity")
 add_custom_target (samples DEPENDS ${sample_targets})
 add_custom_target (examples DEPENDS samples)
 
+if (NOT no_fio AND sisci_include AND sisci_lib)
+    add_custom_target (fio DEPENDS libnvmfio)
+endif ()
 
 # Add individual benchmarks
-if (CUDA_FOUND)
+if (CUDA_FOUND AND NOT no_cuda)
     add_subdirectory ("${benchmarks_root}/latency")
     add_subdirectory ("${benchmarks_root}/cuda")
     add_custom_target (benchmarks DEPENDS ${benchmark_targets})
