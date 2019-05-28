@@ -518,7 +518,7 @@ int nvm_dis_ctrl_init(nvm_ctrl_t** ctrl, uint32_t fdid)
     struct device* dev;
 
     *ctrl = NULL;
-
+    
     err = borrow_device(&dev, fdid);
     if (err != 0)
     {

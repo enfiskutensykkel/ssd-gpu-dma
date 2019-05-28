@@ -12,6 +12,7 @@ find_package (CUDA 8.0)
 set (DIS "/opt/DIS" CACHE PATH "SISCI install location")
 set (NVIDIA "" CACHE PATH "Path to Nvidia driver source")
 set (KERNEL "/lib/modules/${CMAKE_SYSTEM_VERSION}/build" CACHE PATH "Path to kernel source, or module directory")
+set (FIO "" CACHE PATH "Path to FIO installation")
 
 set (nvidia_archs "30;50;52;60;61;70" CACHE STRING "NVIDIA compute architectures")
 set (no_smartio_samples false CACHE BOOL "Do not use SISCI for examples")
@@ -20,6 +21,7 @@ set (no_smartio false CACHE BOOL "Do not use SISCI for library or examples")
 set (no_module false CACHE BOOL "Do not build kernel module")
 set (no_cuda false CACHE BOOL "Do not build library with CUDA support")
 set (no_cc false CACHE BOOL "Do not assume cache-coherent architecture")
+set (no_fio false CACHE BOOL "Do not build FIO plugin")
 set (BUILD_SHARED_LIBS true CACHE BOOL "Build shared library, set to false for static")
 
 if (no_smartio)
@@ -87,6 +89,13 @@ if (sisci_lib)
     message (STATUS "Using SISCI library ${sisci_lib}")
 endif ()
 
+if (no_fio OR "${FIO}" STREQUAL "" OR NOT EXISTS "${FIO}/fio.h")
+    message(STATUS "Not building FIO")
+    set (no_fio true)
+else ()
+    message(STATUS "Using FIO found in ${FIO}")
+endif ()
+
 # Library source files
 set (libnvm_root "${PROJECT_SOURCE_DIR}/src")
 file (GLOB libnvm_source "${libnvm_root}/*.c")
@@ -97,6 +106,10 @@ file (GLOB libnvm_include "${PROJECT_BINARY_DIR}/include/*.h" "${PROJECT_SOURCE_
 # Module source files
 set (module_root "${PROJECT_SOURCE_DIR}/module")
 file (GLOB module_source "${module_root}/*.c")
+
+# FIO source files
+set (fio_root "${PROJECT_SOURCE_DIR}/fio")
+file (GLOB fio_source "${fio_root}/*.c")
 
 # Benchmarks
 set (benchmarks_root "${PROJECT_SOURCE_DIR}/benchmarks")
@@ -110,6 +123,7 @@ set (samples_root "${CMAKE_SOURCE_DIR}/examples")
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set (module_output "${CMAKE_BINARY_DIR}/module")
+set (fio_output "${CMAKE_BINARY_DIR}/fio")
 
 
 
@@ -165,6 +179,14 @@ if (NOT no_module)
     configure_file ("${module_root}/Makefile.in" "${module_output}/Makefile" @ONLY)
 
     add_custom_target (module "${CMAKE_MAKE_PROGRAM}" WORKING_DIRECTORY "${module_output}")
+endif ()
+
+
+# Create FIO plugin makefile
+if (NOT no_fio AND NOT no_smartio AND sisci_include AND sisci_lib)
+    add_library (libnvmfio MODULE ${fio_source})
+    target_link_libraries (libnvmfio libnvm ${sisci_lib} Threads::Threads)
+    target_include_directories (libnvmfio PRIVATE "${FIO}" "${libnvm_root}" "${sisci_include}")
 endif ()
 
 

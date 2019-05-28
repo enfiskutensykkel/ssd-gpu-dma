@@ -13,5 +13,8 @@ set_sisci (rpc-identify)
 make_sample (rpc-dd rpc-dd "rpc_dd.c;util.c;segment.c")
 set_sisci (rpc-dd)
 
-add_custom_target(rpc DEPENDS rpc-server rpc-identify rpc-dd)
-add_custom_target(rpc-clients DEPENDS rpc-identify rpc-dd)
+make_sample (rpc-flush rpc-flush "rpc_flush.c;util.c;segment.c")
+set_sisci (rpc-flush)
+
+add_custom_target(rpc DEPENDS rpc-server rpc-identify rpc-dd rpc-flush)
+add_custom_target(rpc-clients DEPENDS rpc-identify rpc-dd rpc-flush)

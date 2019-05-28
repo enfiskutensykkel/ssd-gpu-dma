@@ -385,12 +385,14 @@ static int thread_init(struct thread_data* td)
         goto error;
     }
 
-    flags = opts->remote_queue ? SCI_MEMACCESS_DEVICE_READ | SCI_MEMACCESS_HOST_WRITE : 0;
+    flags = opts->remote_queue ? (SCI_MEMACCESS_DEVICE_READ | SCI_MEMACCESS_HOST_WRITE) : 0;
     err = create_queues(data, opts->queue_id, td->o.iodepth, flags);
     if (err != 0)
     {
         goto error;
     }
+
+    fprintf(stderr, "SQ on node: %u\n", nvm_dis_node_from_dma(data->sq_mem));
 
     strncpy(diskname, data->ctrl_info.model_no, 40);
     diskname[40] = '\0';

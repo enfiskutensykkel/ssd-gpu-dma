@@ -63,12 +63,14 @@ static inline size_t consumeCompletions(const QueuePair* queue)
 }
 
 
+
 static void flush(const QueuePair* queue, uint32_t ns)
 {
     nvm_cmd_t local;
+    nvm_cpl_t* cpl;
     memset(&local, 0, sizeof(local));
+
     nvm_cmd_header(&local, NVM_DEFAULT_CID(&queue->sq), NVM_IO_FLUSH, ns);
-    
     nvm_cmd_t* cmd = nvm_sq_enqueue(&queue->sq);
     if (cmd == nullptr)
     {
@@ -79,12 +81,18 @@ static void flush(const QueuePair* queue, uint32_t ns)
 
     nvm_sq_submit(&queue->sq);
 
-    while (nvm_cq_dequeue(&queue->cq) == nullptr)
+    while ((cpl = nvm_cq_dequeue(&queue->cq)) == nullptr)
     {
         std::this_thread::yield();
     }
 
     nvm_sq_update(&queue->sq);
+
+    if (!NVM_ERR_OK(cpl))
+    {
+        throw error("Queue " + to_string(queue->no) + " got error while flushing: " + string(nvm_strerror(NVM_ERR_STATUS(cpl))));
+    }
+
     nvm_cq_update(&queue->cq);
 }
 
@@ -210,7 +218,7 @@ static void measureBandwidth(const TransferPtr& transfer, const Settings& settin
             if (numCmds == queue->depth - 1 || (cmd = nvm_sq_enqueue(sq)) == nullptr)
             {
                 nvm_sq_submit(sq);
-                std::this_thread::yield();
+                //std::this_thread::yield();
 
                 while (numCmds == queue->depth - 1 || (cmd = nvm_sq_enqueue(sq)) == nullptr)
                 {
