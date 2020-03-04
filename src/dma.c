@@ -20,6 +20,7 @@
 #include "dprintf.h"
 
 
+typedef void (*va_unmap_t)(const struct device*, const struct va_range*);
 
 /*
  * Reference counted mapping descriptor
@@ -30,7 +31,9 @@ struct map
     uint32_t            count;  // Reference count
     struct controller*  ctrl;   // Device reference
     struct va_range*    va;     // Virtual address range
+
     va_range_free_t     release;// Callback for releasing address range
+    va_unmap_t          unmap;// Callback for unmapping address range
 };
 
 
@@ -96,6 +99,7 @@ static int create_map(struct map** md, const nvm_ctrl_t* ctrl, struct va_range* 
     m->ctrl = ref;
     m->va = va;
     m->release = release;
+    m->unmap = NULL;
 
     *md = m;
     return 0;
@@ -172,6 +176,7 @@ static int dma_map(struct container* container)
         free(ioaddrs);
         return err;
     }
+    md->unmap = md->ctrl->ops.unmap_range;
 
     populate_handle(&container->handle, md->va, &md->ctrl->handle, ioaddrs);
     free(ioaddrs);
@@ -194,9 +199,9 @@ static void put_map(struct map* md)
     _nvm_mutex_lock(&md->lock);
     if (--md->count == 0)
     {
-        if (md->ctrl->ops.unmap_range != NULL)
+        if (md->unmap != NULL)
         {
-            md->ctrl->ops.unmap_range(md->ctrl->device, md->va);
+            md->unmap(md->ctrl->device, md->va);
         }
         md->release(md->va);
         md->va = NULL;
