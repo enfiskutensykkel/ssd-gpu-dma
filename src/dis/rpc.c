@@ -106,7 +106,7 @@ static void handle_remote_command(struct binding_handle* handle, struct rpc_cmd*
     uint32_t adapter = handle->intr.adapter;
     uint32_t node_id = request->node_id;
     uint32_t intr_no = request->intr_no;
-    
+
     // Sanity checking
     if (len != sizeof(struct rpc_cmd))
     {
@@ -320,7 +320,7 @@ static int create_binding_handle(struct binding_handle** handle, nvm_aq_ref ref,
     bh->segment = rseg;
     bh->rpc_ref = ref;
     bh->rpc_cb = cb;
-
+    
     status = _nvm_local_intr_get(&bh->intr, adapter, bh, (intr_callback_t) handle_remote_command);
     if (status != 0)
     {
@@ -425,8 +425,7 @@ static int create_binding(struct binding** handle, const struct device* dev, uin
     if (status != 0)
     {
         free(binding);
-        dprintf("Failed to connect to binding handle information: %s\n", strerror(status));
-        return status;
+        return status; // Assume that device memory segment isn't allocated
     }
 
     status = _nvm_local_intr_get(&binding->lintr, adapter, NULL, NULL);

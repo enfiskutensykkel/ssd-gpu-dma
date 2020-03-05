@@ -72,6 +72,7 @@ int _nvm_local_intr_get(struct local_intr* intr, uint32_t adapter, void* cb_data
     }
 #endif
 
+    intr->adapter = adapter;
     intr->data = cb_data;
     intr->callback = cb;
     

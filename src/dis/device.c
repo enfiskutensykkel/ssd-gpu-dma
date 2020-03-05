@@ -72,13 +72,19 @@ int _nvm_device_memory_get(sci_remote_segment_t* segment, const struct device* d
         case SCI_ERR_NOSPC:
             return ENOSPC;
 
-        case SCI_ERR_NO_SUCH_SEGMENT:
-            return ENOTTY;
-
         case SCI_ERR_CONNECTION_REFUSED:
-            return EPERM;
+            return ECONNREFUSED;
+
+        case SCI_ERR_NO_SUCH_SEGMENT:
+        case SCI_ERR_NO_SUCH_NODEID:
+        case SCI_ERR_NO_REMOTE_LINK_ACCESS:
+        case SCI_ERR_NODE_NOT_RESPONDING:
+        case SCI_ERR_SEGMENT_NOT_CONNECTED:
+        case SCI_ERR_NO_LINK_ACCESS:
+            return EHOSTUNREACH;
 
         default:
+            dprintf("Failed to connect segment%s\n", SCIGetErrorString(err));
             return ENOMEM;
     }
 }
