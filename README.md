@@ -38,6 +38,42 @@ multiple machines in the cluster.
 
 
 
+Note for researchers
+-------------------------------------------------------------------------------
+This library and [SmartIO] are a part of my PhD dissertation, and a description
+of it can be found in:
+Markussen et al.
+"SmartIO: Zero-overhead Device Sharing through PCIe Networking"
+ACM Transactions on Computer Systems
+DOI: https://dl.acm.org/doi/abs/10.1145/3462545
+
+
+If you use this  project in your research, I would appreciate a citation for 
+this publication:
+
+```
+@article{Markussen2021,
+author = {Markussen, Jonas and Kristiansen, Lars Bj\o{}rlykke and Halvorsen, P\r{a}l and Kielland-Gyrud, Halvor and Stensland, H\r{a}kon Kvale and Griwodz, Carsten},
+title = {SmartIO: Zero-Overhead Device Sharing through PCIe Networking},
+year = {2021},
+issue_date = {May 2020},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+volume = {38},
+number = {1–2},
+issn = {0734-2071},
+url = {https://doi.org/10.1145/3462545},
+doi = {10.1145/3462545},
+abstract = {The large variety of compute-heavy and data-driven applications accelerate the need for a distributed I/O solution that enables cost-effective scaling of resources between networked hosts. For example, in a cluster system, different machines may have various devices available at different times, but moving workloads to remote units over the network is often costly and introduces large overheads compared to accessing local resources. To facilitate I/O disaggregation and device sharing among hosts connected using Peripheral Component Interconnect Express (PCIe) non-transparent bridges, we present SmartIO. NVMes, GPUs, network adapters, or any other standard PCIe device may be borrowed and accessed directly, as if they were local to the remote machines. We provide capabilities beyond existing disaggregation solutions by combining traditional I/O with distributed shared-memory functionality, allowing devices to become part of the same global address space as cluster applications. Software is entirely removed from the data path, and simultaneous sharing of a device among application processes running on remote hosts is enabled. Our experimental results show that I/O devices can be shared with remote hosts, achieving native PCIe performance. Thus, compared to existing device distribution mechanisms, SmartIO provides more efficient, low-cost resource sharing, increasing the overall system performance.},
+journal = {ACM Transactions on Computer Systems},
+month = {jul},
+articleno = {2},
+numpages = {78},
+keywords = {Resource sharing, composable infrastructure, I/O disaggregation, NTB, cluster architecture, distributed I/O, NVMe, Device Lending, PCIe, GPU}
+}
+```
+
+
 
 
 Quick start
@@ -454,7 +490,7 @@ Please refer to section 7 of the NVM Express specification.
 
 
 [NVMe]: http://nvmexpress.org/wp-content/uploads/NVM-Express-1_3a-20171024_ratified.pdf
-[SmartIO]: http://dolphinics.com/products/pcie_smart_io_device_lending.html
+[SmartIO]: https://www.dolphinics.com/solutions/pcie_smart_io.html
 [SISCI]: http://ww.dolphinics.no/download/SISCI_DOC_V2/index.html
 [PCIe NTB]: http://www.dolphinics.com/products/pcie_Intel_NTB_networking.html
 [PCIe peer-to-peer]: https://www.dolphinics.com/download/WHITEPAPERS/Dolphin_Express_IX_Peer_to_Peer_whitepaper.pdf
