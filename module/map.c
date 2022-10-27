@@ -85,7 +85,7 @@ struct map* map_find(const struct list* list, u64 vaddr)
 
         if (map->owner == current)
         {
-            if (map->vaddr == (vaddr & PAGE_MASK) || map->vaddr == (vaddr & GPU_PAGE_MASK))
+            if (map->vaddr == (vaddr & (~(map->page_size - 1))))
             {
                 return map;
             }
