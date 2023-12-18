@@ -22,7 +22,7 @@ __host__ DmaPtr prepareQueuePair(QueuePair& qp, const Controller& ctrl, const Se
     size_t prpListSize = ctrl.info.page_size * settings.numThreads * (settings.doubleBuffered + 1);
 
     // qmem->vaddr will be already a device pointer after the following call
-    auto qmem = createDma(ctrl.ctrl, NVM_PAGE_ALIGN(queueMemSize + prpListSize, 1UL << 16), settings.cudaDevice, settings.adapter, settings.segmentId);
+    auto qmem = createDma(ctrl.ctrl, queueMemSize + prpListSize + (1UL << 16), settings.cudaDevice, settings.adapter, settings.segmentId);
 
     // Set members
     qp.pageSize = ctrl.info.page_size;

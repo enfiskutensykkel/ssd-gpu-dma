@@ -101,7 +101,7 @@ DmaPtr createDma(const nvm_ctrl_t* ctrl, size_t size, int cudaDevice)
 
     getDeviceMemory(cudaDevice, bufferPtr, devicePtr, size);
 
-    int status = nvm_dma_map_device(&dma, ctrl, devicePtr, size);
+    int status = nvm_dma_map_device(&dma, ctrl, (void *)NVM_PAGE_ALIGN((uintptr_t)devicePtr, 1UL << 16), NVM_ADDR_MASK(size, 1UL << 16));
     if (!nvm_ok(status))
     {
         cudaFree(bufferPtr);
