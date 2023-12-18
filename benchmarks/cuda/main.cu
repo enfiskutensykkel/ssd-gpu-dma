@@ -413,7 +413,7 @@ static double launchNvmKernel(const Controller& ctrl, BufferPtr destination, con
     const size_t totalChunks = settings.numChunks * settings.numThreads;
 
     // Create input buffer
-    const size_t sourceBufferSize = NVM_PAGE_ALIGN((settings.doubleBuffered + 1) * chunkSize * settings.numThreads, 1UL << 16);
+    const size_t sourceBufferSize = (settings.doubleBuffered + 1) * chunkSize * settings.numThreads + (1UL << 16);
     auto source = createDma(ctrl.ctrl, sourceBufferSize, settings.cudaDevice, settings.adapter, settings.segmentId + 1); // vaddr is a dev ptr
 
     std::shared_ptr<CmdTime> times;
